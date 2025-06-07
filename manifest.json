@@ -2,6 +2,7 @@
     "manifest_version": 3,
     "name": "楽天証券からCSVダウンロードする拡張機能",
     "version": "1.0.0",
+    "description": "楽天証券の配当・分配金ページからCSVファイルを簡単にダウンロードできます",
     "background": {
         "service_worker": "src/background/index.ts"
     },
@@ -15,12 +16,14 @@
             ],
             "matches": [
                 "https://*.rakuten-sec.co.jp/*"
-            ]
+            ],
+            "run_at": "document_end"
         }
     ],
     "permissions": [
         "activeTab",
-        "downloads"
+        "downloads",
+        "tabs"
     ],
     "host_permissions": [
         "https://*.rakuten-sec.co.jp/*"

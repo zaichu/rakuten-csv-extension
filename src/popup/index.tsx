@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import App from "./App";
 
 console.log("Popup script loaded");
 
@@ -13,6 +14,6 @@ document.body.appendChild(root);
 
 createRoot(root).render(
     <StrictMode>
-        <h1>Welcome to the Popup!</h1>
+        <App />
     </StrictMode>
 );
