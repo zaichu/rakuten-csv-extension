@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import './custom.css'
 
 interface DownloadResponse {
   success: boolean;
@@ -58,75 +59,103 @@ function App() {
   };
 
   return (
-    <div className='popup-container' style={{ width: '300px', padding: '20px', fontFamily: 'Arial, sans-serif', backgroundColor: '#f9f9f9', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)' }}>
-      <header style={{ textAlign: 'center', marginBottom: '20px', borderBottom: '2px solid #bf0000', paddingBottom: '15px' }}>
-        <h1 style={{ margin: '0', fontSize: '18px', color: '#bf0000', fontWeight: 'bold' }}>
+    <div className="popup-container">
+      {/* ヘッダー */}
+      <header className="popup-header">
+        <h1 className="popup-title">
+          <span className="icon">📈</span>
           楽天証券CSVダウンロード
         </h1>
+        <p className="popup-subtitle">取引データを簡単エクスポート</p>
       </header>
 
-      <main style={{ marginBottom: '20px' }}>
-        <button
-          onClick={openRakutenPage}
-          style={{ width: '100%', padding: '8px 16px', backgroundColor: 'white', color: '#bf0000', border: '1px solid #bf0000', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', transition: 'all 0.3s ease' }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#f5f5f5';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'white';
-          }}
-        >
-          🔗 楽天証券サイトを開く
-        </button>
+      {/* メインコンテンツ */}
+      <main className="p-3">
+        {/* 楽天証券サイトを開くカード */}
+        <div className="action-card">
+          <h6 className="card-title mb-2 text-rakuten">
+            <span className="icon">🔗</span>
+            楽天証券サイト
+          </h6>
+          <p className="card-text small text-muted mb-2">
+            楽天証券の取引画面にアクセスしてください
+          </p>
+          <button
+            onClick={openRakutenPage}
+            className="btn btn-outline-rakuten btn-sm w-100"
+            type="button"
+          >
+            楽天証券サイトを開く
+          </button>
+        </div>
 
-        <button
-          onClick={handleDownload}
-          disabled={isDownloading}
-          style={{ width: '100%', padding: '12px 16px', backgroundColor: isDownloading ? '#ccc' : '#bf0000', color: 'white', border: 'none', borderRadius: '6px', fontSize: '14px', fontWeight: 'bold', cursor: isDownloading ? 'not-allowed' : 'pointer', transition: 'background-color 0.3s ease', marginBottom: '10px' }}
-          onMouseEnter={(e) => {
-            if (!isDownloading) {
-              e.currentTarget.style.backgroundColor = '#960000';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isDownloading) {
-              e.currentTarget.style.backgroundColor = '#bf0000';
-            }
-          }}
-        >
-          {isDownloading ? (
-            <span>
-              <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite', marginRight: '8px' }}>⟳</span>
-              ダウンロード中...
-            </span>
-          ) : (
-            '📊 CSVダウンロード'
-          )}
-        </button>
+        {/* CSVダウンロードカード */}
+        <div className="action-card">
+          <h6 className="card-title mb-2 text-rakuten">
+            <span className="icon">📊</span>
+            データダウンロード
+          </h6>
+          <p className="card-text small text-muted mb-3">
+            現在のページの取引データをCSV形式でダウンロードします
+          </p>
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="btn btn-rakuten w-100 py-2"
+            type="button"
+          >
+            {isDownloading ? (
+              <>
+                <span className="loading-spinner">⟳</span>
+                ダウンロード中...
+              </>
+            ) : (
+              <>
+                <span className="icon">💾</span>
+                CSVダウンロード
+              </>
+            )}
+          </button>
+        </div>
 
-
-
+        {/* メッセージ表示 */}
         {message && (
-          <div style={{ marginTop: '15px', padding: '10px', borderRadius: '6px', fontSize: '12px', backgroundColor: messageType === 'success' ? '#d4edda' : '#f8d7da', color: messageType === 'success' ? '#155724' : '#721c24', border: `1px solid ${messageType === 'success' ? '#c3e6cb' : '#f5c6cb'}` }}>
+          <div 
+            className={`alert alert-custom ${
+              messageType === 'success' 
+                ? 'alert-success-custom' 
+                : 'alert-danger-custom'
+            }`}
+            role="alert"
+          >
+            <span className="icon">
+              {messageType === 'success' ? '✅' : '⚠️'}
+            </span>
             {message}
           </div>
         )}
+
+        {/* 使用方法カード */}
+        <div className="action-card mt-3">
+          <h6 className="card-title mb-2 text-rakuten">
+            <span className="icon">💡</span>
+            使用方法
+          </h6>
+          <ul className="small text-muted mb-0 ps-3">
+            <li>楽天証券にログインしてください</li>
+            <li>取引履歴やポートフォリオ画面を開いてください</li>
+            <li>「CSVダウンロード」ボタンをクリックしてください</li>
+          </ul>
+        </div>
       </main>
 
-      <footer style={{ textAlign: 'center', fontSize: '10px', color: '#999', borderTop: '1px solid #e0e0e0', paddingTop: '10px' }}>
-        <p style={{ margin: '0' }}>
-          楽天証券CSVダウンロード拡張機能 v1.0.0
-        </p>
+      {/* フッター */}
+      <footer className="popup-footer">
+        <div className="d-flex justify-content-between align-items-center">
+          <span>楽天証券CSV拡張機能</span>
+          <span className="badge bg-secondary">v1.0.0</span>
+        </div>
       </footer>
-
-      <style>
-        {`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}
-      </style>
     </div>
   );
 }
