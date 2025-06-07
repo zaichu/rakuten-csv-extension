@@ -58,7 +58,7 @@ function App() {
   };
 
   return (
-    <div style={{ width: '320px', padding: '20px', fontFamily: '"Hiragino Kaku Gothic ProN", Meiryo, sans-serif', backgroundColor: '#f8f9fa' }}>
+    <div className='popup-container' style={{ width: '300px', padding: '20px', fontFamily: 'Arial, sans-serif', backgroundColor: '#f9f9f9', borderRadius: '8px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)' }}>
       <header style={{ textAlign: 'center', marginBottom: '20px', borderBottom: '2px solid #bf0000', paddingBottom: '15px' }}>
         <h1 style={{ margin: '0', fontSize: '18px', color: '#bf0000', fontWeight: 'bold' }}>
           楽天証券CSVダウンロード
