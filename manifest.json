@@ -12,7 +12,7 @@
     "content_scripts": [
         {
             "js": [
-                "src/content/index.tsx"
+                "src/content/rakuten-content.ts"
             ],
             "matches": [
                 "https://*.rakuten-sec.co.jp/*"
