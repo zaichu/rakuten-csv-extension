@@ -8,7 +8,7 @@ export const useCsvDownload = () => {
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   const downloadCsv = useCallback(async (
-    downloadType: CsvDownloadType = 'all'
+    downloadType: CsvDownloadType
   ): Promise<DownloadResponse> => {
     setIsDownloading(true);
 

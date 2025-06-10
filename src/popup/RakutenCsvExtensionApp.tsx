@@ -25,7 +25,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
   // ダウンロードオプションの定義
   const downloadOptions: DownloadOption[] = [
     {
-      id: 'portfolio',
+      id: 'assetbalance',
       label: '保有銘柄',
       icon: '📊',
       description: 'ポートフォリオの保有銘柄データ'
@@ -34,13 +34,19 @@ const RakutenCsvExtensionApp: React.FC = () => {
       id: 'dividend',
       label: '配当金・分配金',
       icon: '💰',
-      description: '配当金・分配金の履歴データ'
+      description: '配当金・分配金の履歴'
     },
     {
-      id: 'transaction',
-      label: '取引履歴',
+      id: 'domesticstock',
+      label: '国内株式',
       icon: '📋',
-      description: '国内株式・投資信託の取引履歴'
+      description: '国内株式の取引履歴'
+    },
+    {
+      id: 'mutualfund',
+      label: '投資信託',
+      icon: '📋',
+      description: '投資信託の取引履歴'
     }
   ];
 
@@ -78,22 +84,16 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
     try {
       // 選択されたオプションに基づいてダウンロードタイプを決定
-      let downloadType: CsvDownloadType;
+      for (const downloadType in selectedOptions) {
+        const response = await downloadCsv(downloadType as CsvDownloadType);
 
-      if (selectedOptions.size === 1) {
-        downloadType = Array.from(selectedOptions)[0];
-      } else {
-        downloadType = 'all';
-      }
-
-      const response = await downloadCsv(downloadType);
-
-      if (response.success) {
-        const selectedCount = selectedOptions.size;
-        showSuccess(`${selectedCount}件のCSVダウンロードを開始しました`);
-      } else {
-        showError(response.error || 'CSVダウンロードに失敗しました');
-      }
+        if (response.success) {
+          const selectedCount = selectedOptions.size;
+          showSuccess(`${selectedCount}件のCSVダウンロードを開始しました`);
+        } else {
+          showError(response.error || 'CSVダウンロードに失敗しました');
+        }
+      };
     } catch (error) {
       console.error('ダウンロードエラー:', error);
       showError('予期しないエラーが発生しました');
