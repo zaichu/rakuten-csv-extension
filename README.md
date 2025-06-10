@@ -1,52 +1,54 @@
-# 楽天証券CSVダウンロード拡張機能
+# 楽天証券 CSV ダウンロード拡張機能
 
-楽天証券の取引データを簡単にCSV形式でダウンロードできるChrome拡張機能です。
+楽天証券の各種ページから CSV ファイルを簡単にダウンロードできる Chrome 拡張機能です。
 
-## 機能
+## 🌟 主な機能
 
-- 楽天証券の配当・分配金ページでCSVダウンロードボタンをワンクリック
-- モダンなBootstrapベースのUIデザイン
-- レスポンシブ対応とダークモード対応
-- アクセシビリティに配慮した設計
+- **ワンクリック CSV ダウンロード**: 楽天証券のページから簡単に CSV ファイルをダウンロード
+- **複数ページ対応**: 配当金、取引履歴、ポートフォリオページに対応
+- **視覚的強化**: CSV ダウンロードボタンを自動で強調表示
+- **右クリックメニュー**: コンテキストメニューからの quick access
+- **バッジ表示**: 現在のページタイプをアイコンに表示
 
-## UIデザイン
+## 📁 プロジェクト構造
 
-この拡張機能は**Bootstrap 5.3.6**を使用して、美しく使いやすいインターフェースを提供しています。
+```
+src/
+├── components/           # UI コンポーネント
+│   └── ui/
+│       ├── IconLabel.tsx    # アイコンラベルコンポーネント
+│       ├── Message.tsx      # メッセージ表示コンポーネント
+│       ├── Header.tsx       # ヘッダーコンポーネント
+│       ├── Footer.tsx       # フッターコンポーネント
+│       └── index.ts         # コンポーネントのエクスポート
+├── hooks/               # カスタムフック
+│   ├── useApplicationMessage.ts  # メッセージ管理フック
+│   ├── useCsvDownload.ts         # CSV ダウンロードフック
+│   └── index.ts
+├── types/               # TypeScript 型定義
+│   ├── extension.ts         # 拡張機能関連の型
+│   ├── ui.ts               # UI コンポーネントの型
+│   ├── rakuten.ts          # 楽天証券固有の型
+│   └── index.ts            # 型のエクスポート
+├── utils/               # ユーティリティ関数
+│   ├── rakutenUtils.ts     # 楽天証券関連のユーティリティ
+│   ├── domUtils.ts         # DOM 操作ユーティリティ
+│   └── index.ts
+├── content/             # コンテンツスクリプト
+│   └── rakutenContentScript.ts
+├── background/          # バックグラウンドスクリプト
+│   └── backgroundService.ts
+└── popup/               # ポップアップ UI
+    ├── RakutenCsvExtensionApp.tsx
+    └── index.tsx
+```
 
-### 主な特徴
-
-- **楽天ブランドカラー**を基調とした統一されたデザイン
-- **カード型レイアウト**で情報を整理
-- **アニメーション効果**でスムーズなユーザー体験
-- **レスポンシブデザイン**でモバイルにも対応
-- **ダークモード対応**で目に優しい表示
-- **アクセシビリティ**機能でスクリーンリーダーにも対応
-
-### カスタムCSSクラス
-
-- `.popup-container` - メインコンテナ
-- `.btn-rakuten` - 楽天カラーのプライマリボタン
-- `.btn-outline-rakuten` - 楽天カラーのアウトラインボタン
-- `.alert-success-custom` - カスタム成功アラート
-- `.alert-danger-custom` - カスタムエラーアラート
-- `.action-card` - アクションカード
-- `.loading-spinner` - ローディングアニメーション
-
-## 技術スタック
-
-- **React 19.1.0** - UIライブラリ
-- **TypeScript 5.8.3** - 型安全な開発
-- **Bootstrap 5.3.6** - UIフレームワーク
-- **Vite 6.3.5** - 高速なビルドツール
-- **Vitest 2.1.8** - テストフレームワーク
-- **Testing Library** - コンポーネントテスト
-
-## 開発環境のセットアップ
+## 🚀 開発環境のセットアップ
 
 ### 前提条件
 
-- Node.js 18以上
-- npm または yarn
+- Node.js (v18 以上)
+- npm または pnpm
 
 ### インストール
 
@@ -61,114 +63,179 @@ npm run dev
 npm run build
 
 # テスト実行
+npm run test
+
+# ESLint チェック
+npm run lint
+```
+
+### Chrome 拡張機能として読み込み
+
+1. `npm run build` でビルドを実行
+2. Chrome で `chrome://extensions/` を開く
+3. 「デベロッパーモード」を有効にする
+4. 「パッケージ化されていない拡張機能を読み込む」をクリック
+5. `dist` フォルダを選択
+
+## 🔧 技術スタック
+
+### フロントエンド
+- **React 19**: UI ライブラリ
+- **TypeScript**: 型安全性
+- **Bootstrap 5**: CSS フレームワーク
+- **Vite**: ビルドツール
+
+### 開発ツール
+- **ESLint**: コード品質
+- **Vitest**: テストフレームワーク
+- **@crxjs/vite-plugin**: Chrome 拡張機能サポート
+
+### アーキテクチャパターン
+- **カスタムフック**: ロジックの再利用
+- **コンポーネント分離**: UI の再利用性
+- **型駆動開発**: TypeScript による安全性
+- **ユーティリティファースト**: 関数の再利用
+
+## 📖 使用方法
+
+### 基本的な使い方
+
+1. 楽天証券にログインし、対応ページに移動
+2. 拡張機能アイコンをクリック
+3. 「CSV ダウンロード」ボタンをクリック
+
+### 対応ページ
+
+- **配当金・分配金ページ**: 配当金履歴の CSV ダウンロード
+- **取引履歴ページ**: 取引履歴の CSV ダウンロード  
+- **ポートフォリオページ**: 保有銘柄の CSV ダウンロード
+
+### 右クリックメニュー
+
+楽天証券のページで右クリックすると、「CSV をダウンロード」メニューが表示されます。
+
+## 🏗️ アーキテクチャ
+
+### コンポーネント設計
+
+```typescript
+// 例: IconLabel コンポーネント
+interface IconLabelProps {
+  icon: string;
+  label: string;
+  containerClassName?: string;
+  iconClassName?: string;
+}
+
+export const IconLabel = ({ icon, label, ...props }: IconLabelProps) => (
+  <div className={props.containerClassName}>
+    <span className={props.iconClassName}>{icon}</span>
+    {label}
+  </div>
+);
+```
+
+### カスタムフック
+
+```typescript
+// 例: CSV ダウンロードフック
+export const useCsvDownload = () => {
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  const downloadCsv = useCallback(async (type: CsvDownloadType) => {
+    // ダウンロード処理
+  }, []);
+
+  return { isDownloading, downloadCsv };
+};
+```
+
+### 型安全性
+
+すべての関数とコンポーネントは TypeScript で型定義されており、コンパイル時にエラーを検出できます。
+
+## 🧪 テスト
+
+```bash
+# 全テストの実行
 npm test
 
 # カバレッジ付きテスト
 npm run test:coverage
 
-# テストUIの起動
-npm run test:ui
-
-# Lint実行
-npm run lint
-```
-
-## ディレクトリ構造
-
-```
-src/
-├── popup/           # ポップアップUI
-│   ├── App.tsx      # メインコンポーネント
-│   ├── index.tsx    # エントリーポイント
-│   ├── index.html   # ポップアップHTML
-│   └── custom.css   # カスタムCSS
-├── content/         # コンテンツスクリプト
-│   ├── index.tsx    # エントリーポイント
-│   └── rakuten-content.ts # 楽天証券サイト操作
-└── tests/          # テストファイル
-    ├── setup.ts     # テスト設定
-    ├── App.test.tsx # Appコンポーネントテスト
-    ├── rakuten-content.test.ts # コンテンツスクリプトテスト
-    └── custom-css.test.ts # CSSテスト
-```
-
-## 使用方法
-
-1. 楽天証券にログインして配当・分配金ページにアクセス
-2. 拡張機能のポップアップを開く
-3. 「CSVダウンロード」ボタンをクリック
-4. 自動的にCSVファイルがダウンロードされます
-
-## テスト
-
-このプロジェクトには包括的なテストスイートが含まれています：
-
-- **ユニットテスト**: コンポーネントとロジックのテスト
-- **統合テスト**: ユーザーインタラクションのテスト
-- **CSSテスト**: スタイルクラスの存在確認
-- **アクセシビリティテスト**: ARIA属性とキーボード操作
-
-### テスト実行コマンド
-
-```bash
-# 全テスト実行
-npm test
-
-# ウォッチモードでテスト実行
-npm test -- --watch
-
-# カバレッジレポート生成
-npm run test:coverage
-
-# テストUIの起動（ブラウザでテスト結果を表示）
+# UI テスト
 npm run test:ui
 ```
 
-## 開発ガイドライン
+### テスト構造
 
-### コーディング規約
-
-- **TypeScript**: `any`型は使用禁止
-- **ESLint**: 設定に従った厳格なコード品質チェック
-- **テスト**: 新機能には必ずテストを追加
-- **CSS**: Bootstrapクラスを基本とし、必要に応じてカスタムCSSで拡張
-
-### Git コミット規約
-
-```bash
-# 新機能追加
-git commit -m "feat: add CSV download functionality"
-
-# バグ修正
-git commit -m "fix: resolve popup display issue"
-
-# スタイル変更
-git commit -m "style: update button colors"
-
-# テスト追加
-git commit -m "test: add unit tests for App component"
+```
+src/tests/
+├── App.test.tsx              # アプリケーションテスト
+├── custom-css.test.ts        # CSS テスト
+├── rakuten-content.test.ts   # コンテンツスクリプトテスト
+└── setup.ts                  # テストセットアップ
 ```
 
-## ライセンス
+## 🔍 トラブルシューティング
 
-このプロジェクトはMITライセンスの下で公開されています。
+### よくある問題
 
-## 貢献
+1. **CSV ダウンロードボタンが見つからない**
+   - ページが完全に読み込まれているか確認
+   - 楽天証券の仕様変更の可能性
 
-プルリクエストやイシューの投稿を歓迎します。開発に参加する際は、以下の手順をお守りください：
+2. **拡張機能が動作しない**
+   - Chrome の拡張機能が有効になっているか確認
+   - ページを再読み込みしてみる
 
-1. フォークを作成
-2. フィーチャーブランチを作成 (`git checkout -b feature/amazing-feature`)
-3. コミット (`git commit -m 'feat: add amazing feature'`)
-4. プッシュ (`git push origin feature/amazing-feature`)
+3. **ビルドエラー**
+   - `node_modules` を削除して `npm install` を再実行
+   - Node.js のバージョンを確認
+
+### デバッグ方法
+
+1. Chrome DevTools でコンソールログを確認
+2. 拡張機能の背景ページでログを確認
+3. コンテンツスクリプトのエラーを確認
+
+## 🤝 貢献
+
+### 開発ガイドライン
+
+1. **コード規約**: ESLint ルールに従う
+2. **命名規則**: 
+   - ファイル名: camelCase
+   - コンポーネント: PascalCase
+   - フック: use から始まる camelCase
+3. **型定義**: すべての関数に型を定義
+4. **テスト**: 新機能には必ずテストを追加
+
+### プルリクエスト
+
+1. フィーチャーブランチを作成
+2. 変更を実装
+3. テストを追加
+4. ESLint チェックを通す
 5. プルリクエストを作成
 
-## 更新履歴
+## 📝 ライセンス
 
-### v1.0.0 (2025-06-08)
+MIT License
 
-- Bootstrap 5.3.6を使用したUIの全面リニューアル
-- レスポンシブデザインとダークモード対応
-- 包括的なテストスイートの追加
-- アクセシビリティの向上
-- TypeScriptとESLintによる型安全性の向上
+## 📞 サポート
+
+問題や質問がある場合は、GitHub Issues でお気軽にお問い合わせください。
+
+## 🚀 今後の予定
+
+- [ ] 自動ダウンロード機能
+- [ ] ファイル名のカスタマイズ
+- [ ] ダウンロード履歴の表示
+- [ ] 複数ページの一括ダウンロード
+- [ ] 設定ページの追加
+- [ ] 楽天証券の他のページ対応
+
+---
+
+**注意**: この拡張機能は非公式です。楽天証券の利用規約に従ってご使用ください。

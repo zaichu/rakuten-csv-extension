@@ -1,31 +1,45 @@
 {
     "manifest_version": 3,
-    "name": "楽天証券からCSVダウンロードする拡張機能",
+    "name": "楽天証券 CSV ダウンロード拡張機能",
     "version": "1.0.0",
-    "description": "楽天証券の配当・分配金ページからCSVファイルを簡単にダウンロードできます",
+    "description": "楽天証券の各種ページから CSV ファイルを簡単にダウンロードできる拡張機能です",
     "background": {
-        "service_worker": "src/background/index.ts"
+        "service_worker": "src/background/backgroundService.ts"
     },
     "action": {
-        "default_popup": "src/popup/index.html"
+        "default_popup": "src/popup/index.html",
+        "default_title": "楽天証券 CSV ダウンロード",
+        "default_icon": {
+            "16": "public/vite.svg",
+            "48": "public/vite.svg",
+            "128": "public/vite.svg"
+        }
     },
     "content_scripts": [
         {
             "js": [
-                "src/content/rakuten-content.ts"
+                "src/content/rakutenContentScript.ts"
             ],
             "matches": [
                 "https://*.rakuten-sec.co.jp/*"
             ],
-            "run_at": "document_end"
+            "run_at": "document_end",
+            "all_frames": false
         }
     ],
     "permissions": [
         "activeTab",
         "downloads",
-        "tabs"
+        "tabs",
+        "contextMenus"
     ],
     "host_permissions": [
         "https://*.rakuten-sec.co.jp/*"
-    ]
+    ],
+    "icons": {
+        "16": "public/vite.svg",
+        "48": "public/vite.svg",
+        "128": "public/vite.svg"
+    },
+    "homepage_url": "https://github.com/zaichu6/rakuten-csv-extension"
 }
