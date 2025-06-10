@@ -10,7 +10,7 @@ export type RakutenPageType = 'dividend' | 'transaction' | 'portfolio' | 'unknow
 /**
  * CSVダウンロードタイプ
  */
-export type CsvDownloadType = 'dividend' | 'transaction' | 'all';
+export type CsvDownloadType = 'dividend' | 'transaction' | 'portfolio' | 'all';
 
 /**
  * 楽天証券のURL設定
