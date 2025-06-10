@@ -112,17 +112,12 @@ const RakutenCsvExtensionApp: React.FC = () => {
    */
   const getDownloadButtonContent = useCallback(() => {
     if (isDownloading) {
-      return (
-        <IconLabel icon="⟳" label="ダウンロード中..." iconClassName="loading-spinner" />
-      );
+      return <IconLabel icon="⟳" label="ダウンロード中..." iconClassName="loading-spinner" />
     }
 
     const selectedCount = selectedOptions.size;
     const label = selectedCount > 0 ? `CSV ダウンロード (${selectedCount}件)` : 'CSV ダウンロード';
-
-    return (
-      <IconLabel icon="💾" label={label} />
-    );
+    return <IconLabel icon="💾" label={label} />
   }, [isDownloading, selectedOptions.size]);
 
   /**
@@ -174,7 +169,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
         {/* 取得オプションセクション */}
         <div className="mb-3">
-          <div className="h6 mb-3">
+          <div className="h6">
             <IconLabel icon="📊" label="取得オプション" containerClassName="d-flex align-items-center" />
           </div>
 
