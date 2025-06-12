@@ -387,19 +387,20 @@ class RakutenCsvExtension {
 
     try {
       console.log(`ページ遷移実行中 (試行回数: ${retryCount + 1})`);
-      
-      // デバッグ: 現在のページでメニュー要素を探索
-      this.debugMenuElements();
-      
-      const element = await this.waitForElement(menuLink, 8000);
 
-      if (element && DomUtils.isElementVisible(element)) {
+      // デバッグ: 現在のページでメニュー要素を探索
+      if (retryCount === 0)
+        this.debugMenuElements();
+
+      const element = await this.waitForElement(menuLink);
+
+      if (element) {
         const clickSuccess = DomUtils.safeClick(element);
 
         if (clickSuccess) {
           console.log('ページ遷移を実行しました');
           // ページ遷移の完了を待つ
-          await this.waitForPageLoad(15000);
+          // await this.waitForPageLoad(15000);
           return {
             success: true,
             message: 'ページ遷移が完了しました'
@@ -441,7 +442,7 @@ class RakutenCsvExtension {
       console.log(`タブ選択実行中 (試行回数: ${retryCount + 1})`);
       const element = await this.waitForElement(tabSelector, 6000);
 
-      if (element && DomUtils.isElementVisible(element)) {
+      if (element) {
         const clickSuccess = DomUtils.safeClick(element);
 
         if (clickSuccess) {
@@ -674,7 +675,7 @@ class RakutenCsvExtension {
       // 最初に既存の要素をチェック
       for (const selector of selectors) {
         const element = document.querySelector(selector);
-        if (element && DomUtils.isElementVisible(element)) {
+        if (element) {
           console.log(`要素が見つかりました (即座): ${selector}`);
           resolve(element);
           return;
@@ -691,7 +692,7 @@ class RakutenCsvExtension {
         for (const selector of selectors) {
           try {
             const element = document.querySelector(selector);
-            if (element && DomUtils.isElementVisible(element)) {
+            if (element) {
               observer.disconnect();
               console.log(`要素が見つかりました (${attempts}回目の試行): ${selector}`);
               resolve(element);
@@ -738,7 +739,7 @@ class RakutenCsvExtension {
    */
   private debugMenuElements(): void {
     console.log('=== デバッグ: メニュー要素の探索開始 ===');
-    
+
     // 楽天証券のマイメニュー関連の要素を探索
     const menuSelectors = [
       '.pcm-gl-mega-menu',

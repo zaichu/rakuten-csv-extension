@@ -52,7 +52,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
   // チェックボックスの状態管理（デフォルトすべてON）
   const [selectedOptions, setSelectedOptions] = useState<Set<CsvDownloadType>>(
-    new Set(downloadOptions.map(option => option.id))
+    // new Set(downloadOptions.map(option => option.id))
+    new Set()
   );
 
   /**
@@ -102,7 +103,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
       if (successCount > 0) {
         showSuccess(`${successCount}件のCSVダウンロードを開始しました`);
       }
-      
+
       if (errorCount > 0) {
         showError(`${errorCount}件のCSVダウンロードに失敗しました`);
       }

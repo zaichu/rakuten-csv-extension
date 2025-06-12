@@ -108,7 +108,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'download-csv-request':
       handleCsvDownloadRequest(message, sendResponse);
       return true; // 非同期レスポンス
-      
+
     case 'get-extension-state':
       sendResponse({
         success: true,
@@ -200,7 +200,7 @@ function handleTabUpdate(tabId: number, url: string): void {
  */
 async function handleCsvDownloadRequest(message: any, sendResponse: (response: any) => void): Promise<void> {
   const { downloadType, tabId } = message.payload;
-  
+
   console.log('CSVダウンロードリクエストを受信:', { downloadType, tabId });
 
   try {
@@ -285,7 +285,7 @@ function getCsvDownloadConfig(downloadType: string): any {
     'domesticstock': {
       downloadType: 'domesticstock',
       description: '国内株式の実現損益',
-      steps: ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'],
+      steps: ['navigate-to-page', 'select-period', 'display-data', 'download-csv'],
       selectors: {
         // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
         menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
@@ -305,7 +305,7 @@ function getCsvDownloadConfig(downloadType: string): any {
       steps: ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'],
       selectors: {
         // マイメニューから投資信託取引履歴のページに遷移 - 正確なonclickパターンを使用
-        menuLink: "a[onclick*='ass_trad_fu_lst.do'], a[data-ratid='mem_pc_mymenu_trad-lst-fu']",
+        menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
         // 投資信託タブを選択
         tabSelector: "a[href*='fund'], a[href*='mutual'], a[contains(text(), '投資信託')], .tab-fund, #fund-tab, .mutual-fund-tab",
         // 表示期間のラジオボタンをすべてを選択
@@ -325,8 +325,8 @@ function getCsvDownloadConfig(downloadType: string): any {
  * CSVダウンロードのシーケンスを実行（改良版）
  */
 async function executeCsvDownloadSequence(
-  tabId: number, 
-  config: any, 
+  tabId: number,
+  config: any,
   sendResponse: (response: any) => void
 ): Promise<void> {
   let currentStepIndex = 0;
@@ -369,7 +369,7 @@ async function executeCsvDownloadSequence(
       }, (response) => {
         if (chrome.runtime.lastError) {
           console.error('コンテンツスクリプト通信エラー:', chrome.runtime.lastError.message);
-          
+
           if (retryCount < maxRetries) {
             console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
             setTimeout(() => executeNextStep(retryCount + 1), 2000);
@@ -385,13 +385,13 @@ async function executeCsvDownloadSequence(
         if (response?.success) {
           console.log(`ステップ ${currentStep} 完了`);
           currentStepIndex++;
-          
+
           // 次のステップまで適切な待機時間
           const waitTime = getWaitTimeForStep(currentStep);
           setTimeout(() => executeNextStep(0), waitTime);
         } else {
           console.error(`ステップ ${currentStep} 失敗:`, response?.error);
-          
+
           if (retryCount < maxRetries) {
             console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
             setTimeout(() => executeNextStep(retryCount + 1), 3000);
@@ -405,7 +405,7 @@ async function executeCsvDownloadSequence(
       });
     } catch (error) {
       console.error(`ステップ ${currentStep} 実行エラー:`, error);
-      
+
       if (retryCount < maxRetries) {
         console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
         setTimeout(() => executeNextStep(retryCount + 1), 3000);
