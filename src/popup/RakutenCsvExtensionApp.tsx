@@ -83,17 +83,29 @@ const RakutenCsvExtensionApp: React.FC = () => {
     }
 
     try {
+      let successCount = 0;
+      let errorCount = 0;
+
       // 選択されたオプションに基づいてダウンロードタイプを決定
-      for (const downloadType in selectedOptions) {
-        const response = await downloadCsv(downloadType as CsvDownloadType);
+      for (const downloadType of selectedOptions) {
+        const response = await downloadCsv(downloadType);
 
         if (response.success) {
-          const selectedCount = selectedOptions.size;
-          showSuccess(`${selectedCount}件のCSVダウンロードを開始しました`);
+          successCount++;
+          console.log(`${downloadType}のCSVダウンロードが成功しました`);
         } else {
-          showError(response.error || 'CSVダウンロードに失敗しました');
+          errorCount++;
+          console.error(`${downloadType}のCSVダウンロードが失敗しました:`, response.error);
         }
-      };
+      }
+
+      if (successCount > 0) {
+        showSuccess(`${successCount}件のCSVダウンロードを開始しました`);
+      }
+      
+      if (errorCount > 0) {
+        showError(`${errorCount}件のCSVダウンロードに失敗しました`);
+      }
     } catch (error) {
       console.error('ダウンロードエラー:', error);
       showError('予期しないエラーが発生しました');

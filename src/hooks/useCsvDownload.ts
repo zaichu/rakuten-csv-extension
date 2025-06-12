@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import type { DownloadResponse, CsvDownloadType } from '../types';
 
 /**
- * CSVダウンロード機能フック
+ * CSVダウンロード機能フック（Background経由）
  */
 export const useCsvDownload = () => {
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -11,10 +11,12 @@ export const useCsvDownload = () => {
     downloadType: CsvDownloadType
   ): Promise<DownloadResponse> => {
     setIsDownloading(true);
+    console.log(`CSVダウンロード開始: ${downloadType}`);
 
     try {
       // アクティブなタブを取得
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      console.log('アクティブなタブ:', tab);
 
       if (!tab?.id) {
         throw new Error('アクティブなタブが見つかりません');
@@ -22,27 +24,44 @@ export const useCsvDownload = () => {
 
       // 楽天証券のサイトかどうかチェック
       if (!tab.url?.includes('rakuten-sec.co.jp')) {
+        console.log('現在のURL:', tab.url);
         return {
           success: false,
           error: '楽天証券のサイトで使用してください'
         };
       }
 
-      // コンテンツスクリプトにメッセージを送信
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        action: 'download-csv',
+      console.log('バックグラウンドサービスにリクエストを送信中...');
+      
+      // バックグラウンドサービスにダウンロードリクエストを送信
+      const response = await chrome.runtime.sendMessage({
+        action: 'download-csv-request',
         payload: {
-          message: '楽天証券の取引データをCSV形式でダウンロードします',
-          downloadType
+          downloadType,
+          tabId: tab.id
         }
       }) as DownloadResponse;
 
+      console.log('バックグラウンドサービスからの応答:', response);
       return response;
     } catch (error) {
-      console.error('ダウンロードエラー:', error);
+      console.error(`CSVダウンロードエラー (${downloadType}):`, error);
+      
+      let errorMessage = 'エラーが発生しました。';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Could not establish connection')) {
+          errorMessage = 'バックグラウンドサービスとの接続に失敗しました。拡張機能を再読み込みしてください。';
+        } else if (error.message.includes('Extension context invalidated')) {
+          errorMessage = '拡張機能を再読み込みしてください。';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return {
         success: false,
-        error: 'エラーが発生しました。ページを再読み込みして再試行してください。'
+        error: errorMessage
       };
     } finally {
       setIsDownloading(false);

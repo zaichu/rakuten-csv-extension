@@ -3,11 +3,6 @@
  */
 
 /**
- * 楽天証券のページタイプ
- */
-export type RakutenPageType = 'dividend' | 'transaction' | 'portfolio' | 'unknown';
-
-/**
  * CSVダウンロードタイプ
  */
 export type CsvDownloadType = 'assetbalance' | 'dividend' | 'domesticstock' | 'mutualfund'

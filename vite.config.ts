@@ -11,11 +11,12 @@ export default defineConfig({
   ],
   build: {
     outDir: 'dist',
+    minify: false, // デバッグ用に一時的に無効化
     rollupOptions: {
       output: {
-        chunkFileNames: 'assets/[name].[hash].js',
-        entryFileNames: 'assets/[name].[hash].js',
-        assetFileNames: 'assets/[name].[hash].[ext]'
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]'
       }
     }
   },

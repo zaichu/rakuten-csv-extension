@@ -1,35 +1,269 @@
-import type { CsvDownloadMessage, DownloadResponse, RakutenPageType } from '../types';
+import type { CsvDownloadMessage, DownloadResponse } from '../types';
 import { RakutenUtils, DomUtils } from '../utils';
 
 /**
- * 楽天証券 CSV拡張機能のコンテンツスクリプト
+ * 楽天証券 CSV拡張機能のコンテンツスクリプト（MPA対応）
  */
 class RakutenCsvExtension {
-  private readonly pageType: RakutenPageType;
-  private readonly csvButtonSelectors: string[] = [
-    '[data-testid="csv-download-button"]',
-    'a[href*="csv"]',
-    'button[title*="CSV"]',
-    '.csv-download',
-    '#csvDownload',
-    'a[onclick*="csv"]',
-    'button[onclick*="csv"]'
-  ];
+  private static instance: RakutenCsvExtension | null = null;
+  private isInitialized: boolean = false;
+  private pageLoadStartTime: number = Date.now();
 
   constructor() {
-    this.pageType = RakutenUtils.detectPageType(window.location.href);
+    // MPAでは各ページで新しいインスタンスが必要だが
+    // 短時間での重複初期化は防ぐ
+    if (RakutenCsvExtension.instance) {
+      const timeDiff = Date.now() - this.pageLoadStartTime;
+      if (timeDiff < 1000) { // 1秒以内なら同じインスタンスを返す
+        return RakutenCsvExtension.instance;
+      }
+    }
+
+    RakutenCsvExtension.instance = this;
     this.initialize();
   }
 
   /**
-   * 拡張機能の初期化
+   * 既存のインスタンスを取得または新規作成（MPA対応）
+   */
+  static getInstance(): RakutenCsvExtension {
+    return new RakutenCsvExtension();
+  }
+
+  /**
+   * 拡張機能の初期化（MPA対応）
    */
   private initialize(): void {
-    console.log('楽天証券CSV拡張機能が初期化されました');
-    console.log('検出されたページタイプ:', this.pageType);
-    
+    if (this.isInitialized) {
+      console.log('楽天証券CSV拡張機能は既に初期化済みです');
+      return;
+    }
+
+    console.log('楽天証券CSV拡張機能が初期化されました（MPA対応）');
     this.setupMessageListener();
-    this.addCsvDownloadEnhancements();
+    this.setupMPANavigationListener();
+    this.registerWithBackground();
+    this.isInitialized = true;
+  }
+
+  /**
+   * バックグラウンドサービスに拡張機能の存在を登録
+   */
+  private registerWithBackground(): void {
+    chrome.runtime.sendMessage(
+      {
+        action: 'register-rakuten-tab',
+        url: window.location.href,
+        timestamp: Date.now()
+      },
+      (response) => {
+        if (response?.success) {
+          console.log('バックグラウンドサービスに登録されました');
+        } else {
+          console.warn('バックグラウンドサービスへの登録に失敗しました');
+        }
+      }
+    );
+  }
+
+  /**
+   * MPA対応のナビゲーション監視を設定
+   */
+  private setupMPANavigationListener(): void {
+    // MPA（Multi-Page Application）対応
+    // 各ページで独立して動作するため、状態の保存・復元を重視
+
+    // ページ読み込み時の状態復旧
+    this.restoreExtensionState();
+
+    // ページアンロード時の状態保存
+    this.setupPageUnloadHandlers();
+
+    // ページ完全読み込み後の機能確保
+    this.ensureExtensionReadiness();
+  }
+
+  /**
+   * ページアンロード時のハンドラを設定（MPA対応）
+   */
+  private setupPageUnloadHandlers(): void {
+    // beforeunload: ページを離れる直前に状態を保存
+    window.addEventListener('beforeunload', () => {
+      this.saveExtensionStateForMPA();
+      console.log('ページアンロード前に状態を保存しました');
+    });
+
+    // pagehide: ページが隠される時（戻る/進むボタンなど）
+    window.addEventListener('pagehide', () => {
+      this.saveExtensionStateForMPA();
+      console.log('ページ非表示時に状態を保存しました');
+    });
+
+    // visibilitychange: ページの可視状態が変わった時
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        this.saveExtensionStateForMPA();
+      } else if (document.visibilityState === 'visible') {
+        // ページが再表示された時に状態を復元
+        this.restoreExtensionState();
+        this.ensureExtensionFunctionality();
+      }
+    });
+  }
+
+  /**
+   * 拡張機能の準備完了を確保（MPA対応）
+   */
+  private ensureExtensionReadiness(): void {
+    // DOMが完全に読み込まれるまで待機
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        this.performMPAInitialization();
+      });
+    } else {
+      // 既に読み込み完了している場合は即座に実行
+      setTimeout(() => {
+        this.performMPAInitialization();
+      }, 100);
+    }
+
+    // ページが完全に読み込まれた後の追加初期化
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        this.performMPAInitialization();
+      }, 500);
+    });
+  }
+
+  /**
+   * MPA用の初期化処理
+   */
+  private performMPAInitialization(): void {
+    console.log('MPA用初期化処理を実行中...');
+
+    // 楽天証券サイトかどうかを再確認
+    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
+      console.log('楽天証券サイトではありません');
+      return;
+    }
+
+    // バックグラウンドサービスに現在のページを通知
+    this.notifyPageReady();
+
+    // 拡張機能の機能が正常に動作することを確保
+    this.ensureExtensionFunctionality();
+  }
+
+  /**
+   * バックグラウンドサービスにページ準備完了を通知
+   */
+  private notifyPageReady(): void {
+    chrome.runtime.sendMessage(
+      {
+        action: 'page-ready',
+        url: window.location.href,
+        timestamp: Date.now()
+      },
+      (response) => {
+        if (response?.success) {
+          console.log('ページ準備完了をバックグラウンドサービスに通知しました');
+        }
+      }
+    );
+  }
+
+  /**
+   * MPA用の拡張機能状態を保存
+   */
+  private saveExtensionStateForMPA(): void {
+    const state = {
+      isActive: true,
+      lastActiveTime: Date.now(),
+      domain: window.location.hostname,
+      url: window.location.href,
+      pageTitle: document.title,
+      userAgent: navigator.userAgent.substring(0, 100) // 一意性を保つため
+    };
+
+    // セッションストレージとローカルストレージの両方に保存
+    try {
+      sessionStorage.setItem('rakuten_csv_extension_state', JSON.stringify(state));
+      localStorage.setItem('rakuten_csv_extension_last_state', JSON.stringify(state));
+    } catch (error) {
+      console.warn('状態の保存に失敗しました:', error);
+    }
+  }
+
+  /**
+   * 拡張機能の状態を復旧（MPA対応）
+   */
+  private restoreExtensionState(): void {
+    try {
+      // まずセッションストレージから復旧を試行
+      let savedState = sessionStorage.getItem('rakuten_csv_extension_state');
+
+      // セッションストレージにない場合はローカルストレージから
+      if (!savedState) {
+        savedState = localStorage.getItem('rakuten_csv_extension_last_state');
+      }
+
+      if (savedState) {
+        const state = JSON.parse(savedState);
+        if (state.isActive && state.domain === window.location.hostname) {
+          console.log('拡張機能の状態を復旧しました:', state);
+
+          // 状態が5分以内のものなら有効と判断
+          const timeDiff = Date.now() - state.lastActiveTime;
+          if (timeDiff < 5 * 60 * 1000) {
+            console.log('有効な状態を検出しました');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('状態の復旧に失敗しました:', error);
+    }
+  }
+
+  /**
+   * 新しいページでの再初期化（MPA対応）
+   */
+  private reinitializeForNewPage(): void {
+    console.log('新しいページでの拡張機能を再初期化中...');
+
+    // 楽天証券サイトかどうかを再確認
+    if (RakutenUtils.isRakutenSecurities(window.location.href)) {
+      // バックグラウンドサービスに再登録
+      this.registerWithBackground();
+
+      // 拡張機能の機能が正常に動作するように必要な処理を実行
+      this.ensureExtensionFunctionality();
+    }
+  }
+
+  /**
+   * 拡張機能の機能が正常に動作することを確保
+   */
+  private ensureExtensionFunctionality(): void {
+    console.log('拡張機能の機能を確保しています...');
+
+    // MPAでは各ページで独立して動作するため、
+    // ページ固有の初期化処理をここで実行
+
+    // 例：必要なDOM要素の確認、イベントリスナーの設定など
+    this.verifyPageCompatibility();
+  }
+
+  /**
+   * ページの互換性を確認
+   */
+  private verifyPageCompatibility(): void {
+    const isRakutenSite = RakutenUtils.isRakutenSecurities(window.location.href);
+    console.log('ページ互換性確認:', {
+      url: window.location.href,
+      isRakutenSite,
+      readyState: document.readyState
+    });
   }
 
   /**
@@ -37,87 +271,457 @@ class RakutenCsvExtension {
    */
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
-      (message: CsvDownloadMessage, _, sendResponse) => {
-        if (message.action === 'download-csv') {
-          this.handleCsvDownload(message)
-            .then(response => sendResponse(response))
-            .catch(error => {
-              console.error('CSVダウンロードエラー:', error);
-              sendResponse({
-                success: false,
-                error: error.message || 'ダウンロードに失敗しました'
+      (message: CsvDownloadMessage | { action: string }, _, sendResponse) => {
+        console.log('コンテンツスクリプトでメッセージを受信:', message);
+
+        switch (message.action) {
+          case 'execute-csv-download':
+            console.log('CSVダウンロード実行指示を受信');
+            this.handleCsvDownloadExecution(message)
+              .then(response => sendResponse(response))
+              .catch(error => {
+                console.error('CSVダウンロード実行エラー:', error);
+                sendResponse({
+                  success: false,
+                  error: error.message || 'ダウンロード実行に失敗しました'
+                });
               });
-            });
-          return true; // 非同期レスポンス
+            return true;
+
+          case 'extension-updated':
+            console.log('拡張機能が更新されました - 再初期化を実行');
+            this.reinitializeForNewPage();
+            sendResponse({ success: true });
+            return true;
+
+          case 'tab-ready':
+            console.log('バックグラウンドサービスからタブ準備完了の通知を受信');
+            this.ensureExtensionFunctionality();
+            sendResponse({ success: true });
+            return true;
+
+          case 'page-refresh':
+            console.log('ページリフレッシュ要求を受信');
+            this.performMPAInitialization();
+            sendResponse({ success: true });
+            return true;
+
+          default:
+            return false;
         }
-        return false;
       }
     );
   }
 
   /**
-   * CSVダウンロードを処理
+   * CSVダウンロード実行処理（Background経由）
    */
-  private async handleCsvDownload(message: CsvDownloadMessage): Promise<DownloadResponse> {
+  private async handleCsvDownloadExecution(message: any): Promise<DownloadResponse> {
+    const { downloadType, downloadStep, selectors, retryCount = 0 } = message.payload;
+
+    console.log(`CSVダウンロードステップ実行: ${downloadStep}`, {
+      downloadType,
+      selectors,
+      retryCount,
+      url: window.location.href
+    });
+
     try {
-      console.log('CSVダウンロード開始:', message.payload?.message);
-
-      const csvButton = this.findCsvDownloadButton();
-      if (!csvButton) {
+      // 現在のページが楽天証券サイトか確認
+      if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
         return {
           success: false,
-          error: 'CSVダウンロードボタンが見つかりません。このページではCSVダウンロードがサポートされていない可能性があります。'
+          error: '楽天証券のサイトではありません'
         };
       }
 
-      if (!DomUtils.isElementVisible(csvButton)) {
-        return {
-          success: false,
-          error: 'CSVダウンロードボタンが表示されていません。'
-        };
+      // ページが完全に読み込まれているか確認
+      if (document.readyState !== 'complete') {
+        console.log('ページの読み込み完了を待機中...');
+        await this.waitForPageLoad(5000);
       }
 
-      const clickSuccess = DomUtils.safeClick(csvButton);
-      if (!clickSuccess) {
-        return {
-          success: false,
-          error: 'CSVダウンロードボタンのクリックに失敗しました。'
-        };
+      switch (downloadStep) {
+        case 'navigate-to-page':
+          return await this.executeNavigateToPage(selectors, retryCount);
+
+        case 'select-tab':
+          return await this.executeSelectTab(selectors, retryCount);
+
+        case 'select-period':
+          return await this.executeSelectPeriod(selectors, retryCount);
+
+        case 'display-data':
+          return await this.executeDisplayData(selectors, retryCount);
+
+        case 'download-csv':
+          return await this.executeDownloadCsv(selectors, retryCount);
+
+        default:
+          return {
+            success: false,
+            error: `未対応のダウンロードステップです: ${downloadStep}`
+          };
       }
-
-      // ダウンロード開始の確認（短時間待機）
-      await this.waitForDownload();
-
-      return {
-        success: true,
-        message: 'CSVダウンロードを開始しました'
-      };
-
     } catch (error) {
-      console.error('CSVダウンロード処理でエラーが発生:', error);
+      console.error(`ステップ ${downloadStep} 実行エラー:`, error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : '予期しないエラーが発生しました'
+        error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました`
       };
     }
   }
 
   /**
-   * CSVダウンロードボタンを検索
+   * ページ遷移を実行
    */
-  private findCsvDownloadButton(): Element | null {
-    // 複数のセレクターで検索
-    const button = DomUtils.findElement(this.csvButtonSelectors);
-    if (button) return button;
+  private async executeNavigateToPage(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
+    const { menuLink } = selectors;
 
-    // テキスト内容で検索
-    const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"]'));
-    const csvButton = buttons.find(btn => {
-      const text = DomUtils.getTextContent(btn).toLowerCase();
-      return text.includes('csv') || text.includes('ダウンロード') || text.includes('出力');
+    if (!menuLink) {
+      return {
+        success: false,
+        error: 'メニューリンクのセレクターが指定されていません'
+      };
+    }
+
+    try {
+      console.log(`ページ遷移実行中 (試行回数: ${retryCount + 1})`);
+      
+      // デバッグ: 現在のページでメニュー要素を探索
+      this.debugMenuElements();
+      
+      const element = await this.waitForElement(menuLink, 8000);
+
+      if (element && DomUtils.isElementVisible(element)) {
+        const clickSuccess = DomUtils.safeClick(element);
+
+        if (clickSuccess) {
+          console.log('ページ遷移を実行しました');
+          // ページ遷移の完了を待つ
+          await this.waitForPageLoad(15000);
+          return {
+            success: true,
+            message: 'ページ遷移が完了しました'
+          };
+        } else {
+          return {
+            success: false,
+            error: 'メニューリンクのクリックに失敗しました'
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: 'メニューリンクが見つからないか非表示です'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `ページ遷移に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * タブ選択を実行
+   */
+  private async executeSelectTab(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
+    const { tabSelector } = selectors;
+
+    if (!tabSelector) {
+      return {
+        success: false,
+        error: 'タブセレクターが指定されていません'
+      };
+    }
+
+    try {
+      console.log(`タブ選択実行中 (試行回数: ${retryCount + 1})`);
+      const element = await this.waitForElement(tabSelector, 6000);
+
+      if (element && DomUtils.isElementVisible(element)) {
+        const clickSuccess = DomUtils.safeClick(element);
+
+        if (clickSuccess) {
+          console.log('タブ選択を実行しました');
+          await this.waitForElementUpdate(2000);
+          return {
+            success: true,
+            message: 'タブ選択が完了しました'
+          };
+        } else {
+          return {
+            success: false,
+            error: 'タブのクリックに失敗しました'
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: 'タブが見つからないか非表示です'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `タブ選択に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * 期間選択を実行
+   */
+  private async executeSelectPeriod(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
+    const { periodRadio } = selectors;
+
+    if (!periodRadio) {
+      return {
+        success: false,
+        error: '期間選択セレクターが指定されていません'
+      };
+    }
+
+    try {
+      console.log(`期間選択実行中 (試行回数: ${retryCount + 1})`);
+      const element = await this.waitForElement(periodRadio, 6000);
+
+      if (element && DomUtils.isElementVisible(element)) {
+        const clickSuccess = DomUtils.safeClick(element);
+
+        if (clickSuccess) {
+          console.log('期間選択を実行しました');
+          await this.waitForElementUpdate(1500);
+          return {
+            success: true,
+            message: '期間選択が完了しました'
+          };
+        } else {
+          return {
+            success: false,
+            error: '期間選択ボタンのクリックに失敗しました'
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: '期間選択ボタンが見つからないか非表示です'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `期間選択に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * データ表示を実行
+   */
+  private async executeDisplayData(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
+    const { displayButton } = selectors;
+
+    if (!displayButton) {
+      return {
+        success: false,
+        error: '表示ボタンセレクターが指定されていません'
+      };
+    }
+
+    try {
+      console.log(`データ表示実行中 (試行回数: ${retryCount + 1})`);
+      const element = await this.waitForElement(displayButton, 6000);
+
+      if (element && DomUtils.isElementVisible(element)) {
+        const clickSuccess = DomUtils.safeClick(element);
+
+        if (clickSuccess) {
+          console.log('データ表示を実行しました');
+          // データの読み込み完了を待つ
+          await this.waitForDataLoad(8000);
+          return {
+            success: true,
+            message: 'データ表示が完了しました'
+          };
+        } else {
+          return {
+            success: false,
+            error: '表示ボタンのクリックに失敗しました'
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: '表示ボタンが見つからないか非表示です'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `データ表示に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * CSVダウンロードを実行
+   */
+  private async executeDownloadCsv(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
+    const { csvButton } = selectors;
+
+    if (!csvButton) {
+      return {
+        success: false,
+        error: 'CSVボタンセレクターが指定されていません'
+      };
+    }
+
+    try {
+      console.log(`CSVダウンロード実行中 (試行回数: ${retryCount + 1})`);
+      const element = await this.waitForElement(csvButton, 6000);
+
+      if (element && DomUtils.isElementVisible(element)) {
+        const clickSuccess = DomUtils.safeClick(element);
+
+        if (clickSuccess) {
+          console.log('CSVダウンロードを実行しました');
+          // ダウンロード開始の確認
+          await this.waitForDownload(3000);
+          return {
+            success: true,
+            message: 'CSVダウンロードが完了しました'
+          };
+        } else {
+          return {
+            success: false,
+            error: 'CSVボタンのクリックに失敗しました'
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: 'CSVボタンが見つからないか非表示です'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `CSVダウンロードに失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  /**
+   * ページロードの完了を待つ
+   */
+  private async waitForPageLoad(timeout: number = 10000): Promise<void> {
+    return new Promise((resolve) => {
+      let timeoutId: number;
+
+      const checkComplete = () => {
+        if (document.readyState === 'complete') {
+          clearTimeout(timeoutId);
+          resolve();
+        }
+      };
+
+      // 既に読み込み完了している場合
+      if (document.readyState === 'complete') {
+        resolve();
+        return;
+      }
+
+      // readystatechangeイベントを監視
+      document.addEventListener('readystatechange', checkComplete);
+
+      // タイムアウト設定
+      timeoutId = setTimeout(() => {
+        document.removeEventListener('readystatechange', checkComplete);
+        resolve(); // タイムアウトしても続行
+      }, timeout);
     });
+  }
 
-    return csvButton || null;
+  /**
+   * 要素の更新を待つ
+   */
+  private async waitForElementUpdate(timeout: number = 3000): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, timeout);
+    });
+  }
+
+  /**
+   * データロードの完了を待つ
+   */
+  private async waitForDataLoad(timeout: number = 5000): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, timeout);
+    });
+  }
+
+  /**
+   * 要素が表示されるまで待機（MPA対応で強化）
+   */
+  private waitForElement(selectorGroup: string, timeout: number = 5000): Promise<Element> {
+    return new Promise((resolve, reject) => {
+      // 複数のセレクターをカンマで分割して試行
+      const selectors = selectorGroup.split(',').map(s => s.trim());
+
+      // 最初に既存の要素をチェック
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element && DomUtils.isElementVisible(element)) {
+          console.log(`要素が見つかりました (即座): ${selector}`);
+          resolve(element);
+          return;
+        }
+      }
+
+      let attempts = 0;
+      const maxAttempts = timeout / 100;
+
+      const observer = new MutationObserver(() => {
+        attempts++;
+
+        // 各セレクターを順番に試行
+        for (const selector of selectors) {
+          try {
+            const element = document.querySelector(selector);
+            if (element && DomUtils.isElementVisible(element)) {
+              observer.disconnect();
+              console.log(`要素が見つかりました (${attempts}回目の試行): ${selector}`);
+              resolve(element);
+              return;
+            }
+          } catch (error) {
+            console.warn(`セレクター実行エラー: ${selector}`, error);
+            continue;
+          }
+        }
+
+        if (attempts >= maxAttempts) {
+          observer.disconnect();
+          console.error(`要素が見つかりませんでした (${attempts}回試行):`, selectors);
+          reject(new Error(`要素が見つかりませんでした (${attempts}回試行): ${selectorGroup}`));
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden']
+      });
+
+      setTimeout(() => {
+        observer.disconnect();
+        reject(new Error(`要素の待機がタイムアウトしました: ${selectorGroup}`));
+      }, timeout);
+    });
   }
 
   /**
@@ -130,96 +734,58 @@ class RakutenCsvExtension {
   }
 
   /**
-   * CSV ダウンロード機能の強化
+   * デバッグ用: 現在のページのメニュー要素を探索
    */
-  private addCsvDownloadEnhancements(): void {
-    // CSVボタンが見つかった場合、視覚的に強調
-    const csvButton = this.findCsvDownloadButton();
-    if (csvButton && csvButton instanceof HTMLElement) {
-      this.enhanceCsvButton(csvButton);
-    }
-
-    // ページタイプに応じた追加処理
-    switch (this.pageType) {
-      case 'dividend':
-        this.enhanceDividendPage();
-        break;
-      case 'transaction':
-        this.enhanceTransactionPage();
-        break;
-      case 'portfolio':
-        this.enhancePortfolioPage();
-        break;
-      default:
-        console.log('このページタイプはサポートされていません:', this.pageType);
-    }
-  }
-
-  /**
-   * CSVボタンの視覚的強化
-   */
-  private enhanceCsvButton(button: HTMLElement): void {
-    button.style.cssText += `
-      border: 2px solid #007bff !important;
-      box-shadow: 0 0 5px rgba(0, 123, 255, 0.5) !important;
-      position: relative !important;
-    `;
-
-    // ツールチップ追加
-    button.title = '楽天証券CSV拡張機能でダウンロード可能';
+  private debugMenuElements(): void {
+    console.log('=== デバッグ: メニュー要素の探索開始 ===');
     
-    // バッジ追加
-    const badge = document.createElement('span');
-    badge.innerHTML = '🔧';
-    badge.style.cssText = `
-      position: absolute !important;
-      top: -5px !important;
-      right: -5px !important;
-      background: #007bff !important;
-      color: white !important;
-      border-radius: 50% !important;
-      width: 20px !important;
-      height: 20px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      font-size: 12px !important;
-      z-index: 9999 !important;
-    `;
-    
-    if (button.style.position !== 'relative') {
-      button.style.position = 'relative';
-    }
-    button.appendChild(badge);
-  }
+    // 楽天証券のマイメニュー関連の要素を探索
+    const menuSelectors = [
+      '.pcm-gl-mega-menu',
+      '.pcm-gl-mega-list',
+      'a[onclick*="memberPageJump"]',
+      'a[onclick*="ass_"]',
+      'a[data-ratid*="mymenu"]',
+      '.pcm-gl-mega-list__link',
+      'a[href*="possess"]',
+      'a[href*="dividend"]',
+      'a[onclick*="保有"]',
+      'a[onclick*="配当"]'
+    ];
 
-  /**
-   * 配当金ページの強化
-   */
-  private enhanceDividendPage(): void {
-    console.log('配当金ページの強化を適用');
-    // 配当金ページ固有の処理
-  }
+    menuSelectors.forEach(selector => {
+      try {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+          console.log(`見つかった要素 [${selector}]: ${elements.length}個`);
+          elements.forEach((el, index) => {
+            if (index < 3) { // 最初の3つだけ詳細表示
+              const onclick = el.getAttribute('onclick');
+              const href = el.getAttribute('href');
+              const ratid = el.getAttribute('data-ratid');
+              const text = el.textContent?.trim().substring(0, 50);
+              console.log(`  ${index + 1}. テキスト: "${text}", onclick: "${onclick}", href: "${href}", data-ratid: "${ratid}"`);
+            }
+          });
+        }
+      } catch (error) {
+        console.warn(`セレクター [${selector}] でエラー:`, error);
+      }
+    });
 
-  /**
-   * 取引履歴ページの強化
-   */
-  private enhanceTransactionPage(): void {
-    console.log('取引履歴ページの強化を適用');
-    // 取引履歴ページ固有の処理
-  }
+    // 現在のページURLとタイトルも確認
+    console.log('現在のページ:', {
+      url: window.location.href,
+      title: document.title,
+      readyState: document.readyState
+    });
 
-  /**
-   * ポートフォリオページの強化
-   */
-  private enhancePortfolioPage(): void {
-    console.log('ポートフォリオページの強化を適用');
-    // ポートフォリオページ固有の処理
+    console.log('=== デバッグ: メニュー要素の探索終了 ===');
   }
 }
 
 /**
- * 楽天証券CSV拡張機能の初期化
+ * 楽天証券CSV拡張機能の初期化（MPA対応）
  */
 const initializeRakutenCsvExtension = (): void => {
   if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
@@ -227,29 +793,36 @@ const initializeRakutenCsvExtension = (): void => {
     return;
   }
 
-  new RakutenCsvExtension();
+  console.log('楽天証券CSV拡張機能を初期化中（MPA対応）...');
+  RakutenCsvExtension.getInstance();
 };
 
-// ページ読み込み完了時に初期化
+// MPAでは各ページで確実に初期化されるよう複数のタイミングで実行
+console.log('楽天証券CSV拡張機能コンテンツスクリプトが読み込まれました');
+
+// 即座に初期化を試行
+initializeRakutenCsvExtension();
+
+// DOMContentLoaded時に再度初期化
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeRakutenCsvExtension);
-} else {
-  initializeRakutenCsvExtension();
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOMContentLoaded - 拡張機能を初期化');
+    initializeRakutenCsvExtension();
+  });
 }
 
-// SPA対応: URLの変更を監視
-let currentUrl = window.location.href;
-const observer = new MutationObserver(() => {
-  if (window.location.href !== currentUrl) {
-    currentUrl = window.location.href;
-    console.log('URL変更を検出:', currentUrl);
-    
-    // 少し待ってから再初期化
-    setTimeout(initializeRakutenCsvExtension, 1000);
-  }
+// ページ完全読み込み後にも再度初期化
+window.addEventListener('load', () => {
+  console.log('Window load - 拡張機能を初期化');
+  setTimeout(() => {
+    initializeRakutenCsvExtension();
+  }, 500);
 });
 
-observer.observe(document.body, {
-  childList: true,
-  subtree: true
+// フォーカス時の初期化（タブ切り替え時など）
+window.addEventListener('focus', () => {
+  console.log('Window focus - 拡張機能を確認');
+  if (RakutenUtils.isRakutenSecurities(window.location.href)) {
+    initializeRakutenCsvExtension();
+  }
 });
