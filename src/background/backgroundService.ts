@@ -168,28 +168,6 @@ function handleTabUpdate(tabId: number, url: string): void {
   if (isRakutenSecurities(url)) {
     extensionState.rakutenTabs.add(tabId);
     console.log('楽天証券サイトが読み込まれました:', tabId, url);
-
-    // MPAでは各ページ読み込み時にコンテンツスクリプトが新しく読み込まれるため
-    // 少し長めの待機時間を設定してから通知
-    setTimeout(() => {
-      chrome.tabs.sendMessage(tabId, { action: 'tab-ready' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.log('コンテンツスクリプトへの通知に失敗（通常動作）:', chrome.runtime.lastError.message);
-          // MPAでは読み込み中のケースが多いため、さらに待機してリトライ
-          setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, { action: 'page-refresh' }, (retryResponse) => {
-              if (chrome.runtime.lastError) {
-                console.log('コンテンツスクリプトへのリトライも失敗:', chrome.runtime.lastError.message);
-              } else if (retryResponse?.success) {
-                console.log('コンテンツスクリプトとの通信が確立されました（リトライ成功）');
-              }
-            });
-          }, 2000);
-        } else if (response?.success) {
-          console.log('コンテンツスクリプトとの通信が確立されました');
-        }
-      });
-    }, 1500); // MPAのため長めの待機時間
   } else {
     extensionState.rakutenTabs.delete(tabId);
   }
@@ -205,13 +183,10 @@ async function handleCsvDownloadRequest(message: any, sendResponse: (response: a
 
   try {
     // ダウンロード設定を取得
-    for (const downloadType in selectedOptions) {
+    for (const downloadType of selectedOptions) {
       const downloadConfig = getCsvDownloadConfig(downloadType);
       if (!downloadConfig) {
-        sendResponse({
-          success: false,
-          error: `未対応のダウンロードタイプです: ${downloadType}`
-        });
+        sendResponse({ success: false, error: `未対応のダウンロードタイプです: ${downloadType}` });
         continue;
       }
 
@@ -234,9 +209,18 @@ async function handleCsvDownloadRequest(message: any, sendResponse: (response: a
         return;
       }
 
-      // ダウンロード処理を開始
-      executeCsvDownloadSequence(targetTabId, downloadConfig, sendResponse);
+      // ダウンロード処理を順次実行（前の処理が完了してから次を開始）
+      const result = await executeCsvDownloadSequence(targetTabId, downloadConfig);
+
+      // 個別の処理が失敗した場合は全体を停止
+      if (!result.success) {
+        sendResponse(result);
+        return;
+      }
     }
+
+    // すべての処理が完了した場合の成功レスポンス
+    sendResponse({ success: true, message: 'すべてのCSVダウンロードが完了しました' });
   } catch (error) {
     console.error('CSVダウンロードリクエスト処理エラー:', error);
     sendResponse({ success: false, error: error instanceof Error ? error.message : '予期しないエラーが発生しました' });
@@ -253,8 +237,8 @@ function getCsvDownloadConfig(downloadType: string): any {
       description: '保有銘柄',
       steps: ['navigate-to-page', 'download-csv'],
       selectors: {
-        // マイメニューから保有銘柄のページに遷移 - より広範囲のセレクターを使用
-        menuLink: "a[onclick*='ass_all_possess_lst.do'], a[data-ratid='mem_pc_mymenu_all-possess-lst'], a[href*='possess'], a[href*='保有'], a[onclick*='保有'], .pcm-gl-mega-list__link[onclick*='possess']",
+        // マイメニューから保有銘柄のページに遷移 - 国内株式のリンクに対応
+        menuLink: "a[onclick*='ass_jp_stk_possess_lst.do'][data-ratid='mem_pc_mymenu_jp-possess-lst'], .pcm-gl-mega-list__link[onclick*='possess']",
         // csvで保存ボタンを押下
         csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
       }
@@ -283,13 +267,13 @@ function getCsvDownloadConfig(downloadType: string): any {
         // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
         menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
         // 国内株式タブを選択
-        tabSelector: "a[href*='domestic'], a[contains(text(), '国内株式')], .tab-domestic, #domestic-tab, .domestic-stock-tab",
+        tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
         // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "input[type='radio'][value*='all'], input[type='radio'][value*='すべて'], input[type='radio'][value*='全'], .period-all, #period-all",
+        periodRadio: "#termCdALL",
         // この条件で表示するボタン押下
-        displayButton: "input[value*='表示'], button[contains(text(), '表示')], input[type='submit'][value*='表示'], .display-button, .search-button",
+        displayButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
         // csv保存ボタンを押下
-        csvButton: "input[value*='CSV'], button[contains(text(), 'CSV')], input[type='submit'][value*='CSV'], button[type='submit'][value*='CSV'], .csv-button, .download-csv"
+        csvButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(7) > div > button:nth-child(3)"
       }
     },
     'mutualfund': {
@@ -300,13 +284,13 @@ function getCsvDownloadConfig(downloadType: string): any {
         // マイメニューから投資信託取引履歴のページに遷移 - 正確なonclickパターンを使用
         menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
         // 投資信託タブを選択
-        tabSelector: "a[href*='fund'], a[href*='mutual'], a[contains(text(), '投資信託')], .tab-fund, #fund-tab, .mutual-fund-tab",
+        tabSelector: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > ul > li:nth-child(2) > a",
         // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "input[type='radio'][value*='all'], input[type='radio'][value*='すべて'], input[type='radio'][value*='全'], .period-all, #period-all",
+        periodRadio: "#termCdALL",
         // この条件で表示するボタン押下
-        displayButton: "input[value*='表示'], button[contains(text(), '表示')], input[type='submit'][value*='表示'], .display-button, .search-button",
+        displayButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(18) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
         // csv保存ボタンを押下
-        csvButton: "input[value*='CSV'], button[contains(text(), 'CSV')], input[type='submit'][value*='CSV'], button[type='submit'][value*='CSV'], .csv-button, .download-csv"
+        csvButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(19) > div > button:nth-child(3)"
       }
     }
   };
@@ -319,100 +303,101 @@ function getCsvDownloadConfig(downloadType: string): any {
  */
 async function executeCsvDownloadSequence(
   tabId: number,
-  config: any,
-  sendResponse: (response: any) => void
-): Promise<void> {
-  let currentStepIndex = 0;
-  const steps = config.steps;
-  const maxRetries = 2; // 各ステップの最大リトライ回数
+  config: any
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  return new Promise((resolve) => {
+    let currentStepIndex = 0;
+    const steps = config.steps;
+    const maxRetries = 2; // 各ステップの最大リトライ回数
 
-  const executeNextStep = async (retryCount: number = 0) => {
-    if (currentStepIndex >= steps.length) {
-      // 全ステップ完了
-      sendResponse({
-        success: true,
-        message: `${config.description}のCSVダウンロードが完了しました`
-      });
-      return;
-    }
-
-    const currentStep = steps[currentStepIndex];
-    console.log(`ステップ ${currentStepIndex + 1}/${steps.length}: ${currentStep} を実行中... (試行回数: ${retryCount + 1})`);
-
-    try {
-      // タブが存在するか確認
-      const tab = await chrome.tabs.get(tabId);
-      if (!tab) {
-        sendResponse({
-          success: false,
-          error: 'タブが見つかりません。ページが閉じられた可能性があります。'
+    const executeNextStep = async (retryCount: number = 0) => {
+      if (currentStepIndex >= steps.length) {
+        // 全ステップ完了
+        resolve({
+          success: true,
+          message: `${config.description}のCSVダウンロードが完了しました`
         });
         return;
       }
 
-      // コンテンツスクリプトにステップ実行を指示
-      chrome.tabs.sendMessage(tabId, {
-        action: 'execute-csv-download',
-        payload: {
-          downloadType: config.downloadType,
-          downloadStep: currentStep,
-          selectors: config.selectors,
-          retryCount: retryCount
-        }
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('コンテンツスクリプト通信エラー:', chrome.runtime.lastError.message);
+      const currentStep = steps[currentStepIndex];
+      console.log(`ステップ ${currentStepIndex + 1}/${steps.length}: ${currentStep} を実行中... (試行回数: ${retryCount + 1})`);
 
-          if (retryCount < maxRetries) {
-            console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-            setTimeout(() => executeNextStep(retryCount + 1), 1000);
-          } else {
-            sendResponse({
-              success: false,
-              error: `コンテンツスクリプトとの通信に失敗しました (ステップ: ${currentStep})`
-            });
-          }
+      try {
+        // タブが存在するか確認
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          resolve({
+            success: false,
+            error: 'タブが見つかりません。ページが閉じられた可能性があります。'
+          });
           return;
         }
 
-        if (response?.success) {
-          console.log(`ステップ ${currentStep} 完了`);
-          currentStepIndex++;
-
-          // 次のステップまで適切な待機時間
-          const waitTime = getWaitTimeForStep(currentStep);
-          setTimeout(() => executeNextStep(0), waitTime);
-        } else {
-          console.error(`ステップ ${currentStep} 失敗:`, response?.error);
-
-          if (retryCount < maxRetries) {
-            console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-            setTimeout(() => executeNextStep(retryCount + 1), 3000);
-          } else {
-            sendResponse({
-              success: false,
-              error: response?.error || `ステップ ${currentStep} の実行に失敗しました（${maxRetries + 1}回試行）`
-            });
+        // コンテンツスクリプトにステップ実行を指示
+        chrome.tabs.sendMessage(tabId, {
+          action: 'execute-csv-download',
+          payload: {
+            downloadType: config.downloadType,
+            downloadStep: currentStep,
+            selectors: config.selectors,
+            retryCount: retryCount
           }
-        }
-      });
-    } catch (error) {
-      console.error(`ステップ ${currentStep} 実行エラー:`, error);
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('コンテンツスクリプト通信エラー:', chrome.runtime.lastError.message);
 
-      if (retryCount < maxRetries) {
-        console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-        setTimeout(() => executeNextStep(retryCount + 1), 500);
-      } else {
-        sendResponse({
-          success: false,
-          error: `ステップ ${currentStep} の実行中にエラーが発生しました`
+            if (retryCount < maxRetries) {
+              console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
+              setTimeout(() => executeNextStep(retryCount + 1), 1000);
+            } else {
+              resolve({
+                success: false,
+                error: `コンテンツスクリプトとの通信に失敗しました (ステップ: ${currentStep})`
+              });
+            }
+            return;
+          }
+
+          if (response?.success) {
+            console.log(`ステップ ${currentStep} 完了`);
+            currentStepIndex++;
+
+            // 次のステップまで適切な待機時間
+            const waitTime = getWaitTimeForStep(currentStep);
+            setTimeout(() => executeNextStep(0), waitTime);
+          } else {
+            console.error(`ステップ ${currentStep} 失敗:`, response?.error);
+
+            if (retryCount < maxRetries) {
+              console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
+              setTimeout(() => executeNextStep(retryCount + 1), 3000);
+            } else {
+              resolve({
+                success: false,
+                error: response?.error || `ステップ ${currentStep} の実行に失敗しました（${maxRetries + 1}回試行）`
+              });
+            }
+          }
         });
-      }
-    }
-  };
+      } catch (error) {
+        console.error(`ステップ ${currentStep} 実行エラー:`, error);
 
-  // 最初のステップを実行
-  executeNextStep();
+        if (retryCount < maxRetries) {
+          console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
+          setTimeout(() => executeNextStep(retryCount + 1), 500);
+        } else {
+          resolve({
+            success: false,
+            error: `ステップ ${currentStep} の実行中にエラーが発生しました`
+          });
+        }
+      }
+    };
+
+    // 最初のステップを実行
+    executeNextStep();
+  });
 }
 
 /**
@@ -420,11 +405,11 @@ async function executeCsvDownloadSequence(
  */
 function getWaitTimeForStep(step: string): number {
   const waitTimes: Record<string, number> = {
-    'navigate-to-page': 100,    // ページ遷移は短めに待機
-    'select-tab': 100,          // タブ切り替え
-    'select-period': 100,       // 期間選択
-    'display-data': 100,        // データ表示（データ読み込み待機）
-    'download-csv': 100         // CSV保存
+    'navigate-to-page': 300,    // ページ遷移は短めに待機
+    'select-tab': 300,       // タブ切り替え
+    'select-period': 300,       // 期間選択
+    'display-data': 300,        // データ表示（データ読み込み待機）
+    'download-csv': 300         // CSV保存
   };
 
   return waitTimes[step] || 1500; // デフォルト1.5秒

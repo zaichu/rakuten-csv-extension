@@ -30,23 +30,35 @@ class RakutenCsvExtension {
   }
 
   private registerWithBackground(): void {
-    chrome.runtime.sendMessage({
-      action: 'register-rakuten-tab',
-      url: window.location.href,
-      timestamp: Date.now()
-    });
+    try {
+      chrome.runtime.sendMessage({
+        action: 'register-rakuten-tab',
+        url: window.location.href,
+        timestamp: Date.now()
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('バックグラウンドサービスへの登録に失敗:', chrome.runtime.lastError.message);
+        } else {
+          console.log('バックグラウンドサービスに正常に登録されました:', response);
+        }
+      });
+    } catch (error) {
+      console.error('バックグラウンドサービスへの登録でエラー:', error);
+    }
   }
 
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
       (message: CsvDownloadInstruction | { action: string }, _, sendResponse) => {
+        console.log('コンテンツスクリプトでメッセージを受信:', message);
+
         switch (message.action) {
           case 'execute-csv-download':
             this.handleCsvDownloadExecution(message as CsvDownloadInstruction)
               .then(response => sendResponse(response))
-              .catch(error => sendResponse({ 
-                success: false, 
-                error: error.message || 'ダウンロード実行に失敗しました' 
+              .catch(error => sendResponse({
+                success: false,
+                error: error.message || 'ダウンロード実行に失敗しました'
               }));
             return true;
 
@@ -88,9 +100,9 @@ class RakutenCsvExtension {
       }
     } catch (error) {
       console.error(`ステップ ${downloadStep} 実行エラー:`, error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました` 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました`
       };
     }
   }
@@ -101,7 +113,7 @@ class RakutenCsvExtension {
     }
 
     const element = await this.waitForElement(selector);
-    
+    console.log(element);
     if (DomUtils.safeClick(element)) {
       return { success: true, message: `${actionName}が完了しました` };
     } else {
@@ -157,4 +169,12 @@ class RakutenCsvExtension {
 if (RakutenUtils.isRakutenSecurities(window.location.href)) {
   console.log('楽天証券CSV拡張機能を開始');
   RakutenCsvExtension.getInstance();
+}
+
+// CRXjsビルド用のエクスポート
+export function onExecute(): void {
+  if (RakutenUtils.isRakutenSecurities(window.location.href)) {
+    console.log('楽天証券CSV拡張機能をonExecuteで開始');
+    RakutenCsvExtension.getInstance();
+  }
 }
