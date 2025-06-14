@@ -346,7 +346,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allSelected = selectedCount === allOptionsCount;
 
     return (
-      <div className="mb-2">
+      <div className="mb-3">
         <div className="d-flex align-items-center justify-content-between">
           <div className="alert alert-info py-1 flex-grow-1 me-2 mb-0" style={{ fontSize: '0.85em' }}>
             <small>
@@ -372,7 +372,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
   }, [downloadOptions.length, selectedOptions.size, handleSelectAll, isDownloading]);
 
   return (
-    <div className="popup-container" style={{ width: '350px', height: '500px', overflow: 'hidden' }}>
+    <div className="popup-container" style={{ width: '350px', height: '480px', overflow: 'hidden' }}>
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
       <main className="p-2" style={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
@@ -400,14 +400,6 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
         {/* 取得オプションセクション */}
         <div className="mb-2">
-          <div className="h6 mb-2">
-            <IconLabel
-              icon="📊"
-              label="取得オプション"
-              containerClassName="d-flex align-items-center"
-            />
-          </div>
-
           {/* カテゴリ別オプション表示 */}
           {Object.entries(categorizedOptions).map(([category, options]) =>
             renderCategoryOptions(category, options)
