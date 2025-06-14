@@ -302,25 +302,26 @@ const RakutenCsvExtensionApp: React.FC = () => {
     if (!isDownloading) return null;
 
     return (
-      <div className="mb-3">
-        <div className="alert alert-info py-2">
+      <div className="mb-2">
+        <div className="alert alert-info py-1" style={{ fontSize: '0.85em' }}>
           <div className="d-flex align-items-center justify-content-between">
             <div className="d-flex align-items-center">
-              <div className="spinner-border spinner-border-sm me-2" role="status">
+              <div className="spinner-border spinner-border-sm me-1" role="status" style={{ width: '0.8rem', height: '0.8rem' }}>
                 <span className="visually-hidden">読み込み中...</span>
               </div>
-              <span>{currentOperation || 'ダウンロード中...'}</span>
+              <span style={{ fontSize: '0.85em' }}>{currentOperation || 'ダウンロード中...'}</span>
             </div>
             <button
               type="button"
-              className="btn btn-sm btn-outline-danger"
+              className="btn btn-xs btn-outline-danger"
+              style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
               onClick={handleCancelDownload}
             >
               キャンセル
             </button>
           </div>
           {progress !== undefined && (
-            <div className="progress mt-2" style={{ height: '6px' }}>
+            <div className="progress mt-1" style={{ height: '4px' }}>
               <div
                 className="progress-bar"
                 role="progressbar"
