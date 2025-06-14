@@ -10,9 +10,9 @@
         "default_popup": "src/popup/index.html",
         "default_title": "楽天証券 CSV ダウンロード",
         "default_icon": {
-            "16": "public/vite.svg",
-            "48": "public/vite.svg",
-            "128": "public/vite.svg"
+            "16": "icons/icon-16.png",
+            "48": "icons/icon-48.png",
+            "128": "icons/icon-128.png"
         }
     },
     "content_scripts": [
@@ -37,9 +37,9 @@
         "https://*.rakuten-sec.co.jp/*"
     ],
     "icons": {
-        "16": "public/vite.svg",
-        "48": "public/vite.svg",
-        "128": "public/vite.svg"
+        "16": "icons/icon-16.png",
+        "48": "icons/icon-48.png",
+        "128": "icons/icon-128.png"
     },
     "homepage_url": "https://github.com/zaichu6/rakuten-csv-extension"
 }
