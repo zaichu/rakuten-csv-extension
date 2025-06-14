@@ -243,22 +243,23 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allInCategorySelected = selectedInCategory === options.length;
 
     return (
-      <div key={category} className="mb-4">
+      <div key={category} className="mb-2">
         {/* カテゴリヘッダー */}
-        <div className="d-flex align-items-center justify-content-between mb-2">
+        <div className="d-flex align-items-center justify-content-between mb-1">
           <div className="d-flex align-items-center">
             <IconLabel
               icon={getCategoryIcon(category)}
               label={getCategoryLabel(category)}
               containerClassName="h6 mb-0 d-flex align-items-center"
             />
-            <span className="badge bg-secondary ms-2">
+            <span className="badge bg-secondary ms-1" style={{ fontSize: '0.7em' }}>
               {selectedInCategory}/{options.length}
             </span>
           </div>
           <button
             type="button"
-            className={`btn btn-sm ${allInCategorySelected ? 'btn-outline-danger' : 'btn-outline-primary'}`}
+            className={`btn btn-xs ${allInCategorySelected ? 'btn-outline-danger' : 'btn-outline-primary'}`}
+            style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
             onClick={() => handleCategoryToggle(category)}
             disabled={isDownloading}
           >
@@ -267,9 +268,9 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
 
         {/* カテゴリ内のオプション */}
-        <div className="border rounded p-3 bg-light">
+        <div className="border rounded p-2 bg-light">
           {options.map((option) => (
-            <div key={option.id} className="form-check mb-2">
+            <div key={option.id} className="form-check mb-1">
               <input
                 className="form-check-input"
                 type="checkbox"
@@ -344,9 +345,9 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allSelected = selectedCount === allOptionsCount;
 
     return (
-      <div className="mb-3">
+      <div className="mb-2">
         <div className="d-flex align-items-center justify-content-between">
-          <div className="alert alert-info py-2 flex-grow-1 me-2 mb-0">
+          <div className="alert alert-info py-1 flex-grow-1 me-2 mb-0" style={{ fontSize: '0.85em' }}>
             <small>
               <IconLabel
                 icon="📝"
@@ -357,7 +358,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
           </div>
           <button
             type="button"
-            className={`btn btn-sm ${allSelected ? 'btn-outline-danger' : 'btn-outline-success'}`}
+            className={`btn btn-xs ${allSelected ? 'btn-outline-danger' : 'btn-outline-success'}`}
+            style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
             onClick={handleSelectAll}
             disabled={isDownloading}
           >
@@ -369,13 +371,13 @@ const RakutenCsvExtensionApp: React.FC = () => {
   }, [downloadOptions.length, selectedOptions.size, handleSelectAll, isDownloading]);
 
   return (
-    <div className="popup-container" style={{ width: '400px', minHeight: '500px' }}>
+    <div className="popup-container" style={{ width: '350px', height: '500px', overflow: 'hidden' }}>
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
-      <main className="p-3">
+      <main className="p-2" style={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
         {/* 楽天証券を開くリンク */}
         <div
-          className="mb-3 p-2 bg-light rounded cursor-pointer border"
+          className="mb-2 p-1 bg-light rounded cursor-pointer border"
           onClick={handleOpenRakutenPage}
           style={{ cursor: 'pointer' }}
           role="button"
@@ -396,8 +398,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {renderSelectionSummary()}
 
         {/* 取得オプションセクション */}
-        <div className="mb-3">
-          <div className="h6 mb-3">
+        <div className="mb-2">
+          <div className="h6 mb-2">
             <IconLabel
               icon="📊"
               label="取得オプション"
@@ -412,9 +414,9 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
 
         {/* ダウンロードボタン */}
-        <div className="d-grid mb-3">
+        <div className="d-grid mb-2">
           <button
-            className={`btn btn-lg ${selectedOptions.size > 0 && !isDownloading
+            className={`btn ${selectedOptions.size > 0 && !isDownloading
               ? 'btn-primary'
               : 'btn-secondary'
               }`}
@@ -428,7 +430,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
         {/* メッセージ表示 */}
         {message && (
-          <div className="mb-3">
+          <div className="mb-2">
             <Message
               type={message.type}
               content={message.content}

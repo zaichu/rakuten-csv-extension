@@ -6,9 +6,9 @@ import type { HeaderProps } from '../../types';
 export const Header = ({
   title,
   icon = '📈',
-  className = 'h3 bg-danger bg-gradient text-white text-center p-2'
+  className = 'h4 bg-danger bg-gradient text-white text-center p-1'
 }: HeaderProps) => (
-  <header className={className}>
+  <header className={className} style={{ fontSize: '0.9rem' }}>
     {icon && <span className="icon me-2">{icon}</span>}
     {title}
   </header>
