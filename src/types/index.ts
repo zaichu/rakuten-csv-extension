@@ -25,7 +25,14 @@ export type {
   BaseStatus,
   AppState,
   DownloadRecord,
-  ApplicationMessage
+  ApplicationMessage,
+  RakutenTabInfo,
+  ExtensionState,
+  ChromeApiResponse,
+  ElementSearchConfig,
+  TabRegistrationMessage,
+  PageReadyMessage,
+  GetExtensionStateMessage
 } from './extension';
 
 // 楽天証券関連の型

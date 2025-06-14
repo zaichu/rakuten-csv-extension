@@ -1,425 +1,588 @@
 /**
- * 楽天証券CSV拡張機能のバックグラウンドサービス（MPA対応）
+ * 楽天証券CSV拡張機能のバックグラウンドサービス（リファクタ版）
  * 
- * MPA（Multi-Page Application）対応の特徴：
- * - 各ページ遷移で完全にページがリロードされる
- * - コンテンツスクリプトも各ページで新しく読み込まれる
- * - 状態の永続化は sessionStorage/localStorage で行う
- * - タブ間の通信は Chrome Extension API を経由する
+ * 改善点：
+ * - より良いエラーハンドリング
+ * - 型安全性の向上
+ * - モジュラーな設計
+ * - 設定の分離
+ * - 状態管理の改善
  */
 
-// 拡張機能の状態管理
-interface ExtensionState {
-  activeTabId?: number;
-  rakutenTabs: Set<number>;
-  lastActiveTime: number;
-}
-
-const extensionState: ExtensionState = {
-  rakutenTabs: new Set(),
-  lastActiveTime: Date.now()
-};
-
-// 拡張機能インストール時の処理
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log('楽天証券CSV拡張機能がインストールされました', details);
-
-  if (details.reason === 'install') {
-    console.log('初回インストール');
-    initializeExtension();
-  } else if (details.reason === 'update') {
-    console.log('拡張機能が更新されました');
-    updateExtension();
-  }
-});
-
-// 拡張機能起動時の処理
-chrome.runtime.onStartup.addListener(() => {
-  console.log('楽天証券CSV拡張機能が起動しました');
-  initializeExtension();
-});
-
-// タブ更新時の処理
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    handleTabUpdate(tabId, tab.url);
-  }
-});
-
-// タブ削除時の処理
-chrome.tabs.onRemoved.addListener((tabId) => {
-  extensionState.rakutenTabs.delete(tabId);
-  if (extensionState.activeTabId === tabId) {
-    extensionState.activeTabId = undefined;
-  }
-  console.log('楽天証券タブが削除されました:', tabId);
-});
-
-// タブアクティブ化時の処理
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (tab.url && isRakutenSecurities(tab.url)) {
-      extensionState.activeTabId = activeInfo.tabId;
-      extensionState.lastActiveTime = Date.now();
-      console.log('楽天証券タブがアクティブになりました:', activeInfo.tabId);
-    }
-  });
-});
-
-// アイコンクリック時の処理
-chrome.action.onClicked.addListener((tab) => {
-  console.log('拡張機能アイコンがクリックされました', tab);
-
-  if (tab.url && isRakutenSecurities(tab.url)) {
-    extensionState.activeTabId = tab.id;
-    extensionState.lastActiveTime = Date.now();
-  }
-});
-
-// メッセージ処理
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('バックグラウンドでメッセージを受信:', message);
-
-  switch (message.action) {
-    case 'background-action':
-      sendResponse({ success: true });
-      break;
-
-    case 'register-rakuten-tab':
-      if (sender.tab?.id) {
-        extensionState.rakutenTabs.add(sender.tab.id);
-        extensionState.activeTabId = sender.tab.id;
-        extensionState.lastActiveTime = Date.now();
-        console.log('楽天証券タブが登録されました:', sender.tab.id, message.url || '');
-        sendResponse({ success: true });
-      }
-      break;
-
-    case 'page-ready':
-      if (sender.tab?.id) {
-        console.log('ページ準備完了通知を受信:', sender.tab.id, message.url || '');
-        extensionState.rakutenTabs.add(sender.tab.id);
-        extensionState.activeTabId = sender.tab.id;
-        extensionState.lastActiveTime = Date.now();
-        sendResponse({ success: true });
-      }
-      break;
-
-    case 'download-csv-request':
-      handleCsvDownloadRequest(message, sendResponse);
-      return true; // 非同期レスポンス
-
-    case 'get-extension-state':
-      sendResponse({
-        success: true,
-        state: {
-          activeTabId: extensionState.activeTabId,
-          rakutenTabsCount: extensionState.rakutenTabs.size,
-          lastActiveTime: extensionState.lastActiveTime
-        }
-      });
-      break;
-
-    default:
-      sendResponse({ success: false, error: '不明なアクション' });
-  }
-
-  return true; // 非同期レスポンスを有効にする
-});
+import type { 
+  ExtensionState, 
+  CsvDownloadMessage, 
+  DownloadResponse, 
+  ChromeMessage,
+  CsvDownloadConfig,
+  CsvDownloadType,
+  CsvDownloadStep
+} from '../types';
+import { RakutenUtils } from '../utils';
 
 /**
- * 拡張機能の初期化
+ * 拡張機能の設定
  */
-function initializeExtension(): void {
-  console.log('拡張機能を初期化中...');
-
-  // 既存の楽天証券タブを検索
-  chrome.tabs.query({ url: '*://*.rakuten-sec.co.jp/*' }, (tabs) => {
-    tabs.forEach(tab => {
-      if (tab.id) {
-        extensionState.rakutenTabs.add(tab.id);
-        console.log('既存の楽天証券タブを発見:', tab.id);
-      }
-    });
-  });
+interface ExtensionConfig {
+  readonly maxRetries: number;
+  readonly stepTimeout: number;
+  readonly retryInterval: number;
+  readonly debugMode: boolean;
 }
 
 /**
- * 拡張機能の更新処理
+ * 待機時間の設定
  */
-function updateExtension(): void {
-  console.log('拡張機能を更新中...');
-
-  // 更新時に既存タブに拡張機能の再読み込みを通知
-  extensionState.rakutenTabs.forEach(tabId => {
-    chrome.tabs.sendMessage(tabId, { action: 'extension-updated' }, (_response) => {
-      if (chrome.runtime.lastError) {
-        console.log('タブへの通知に失敗:', chrome.runtime.lastError.message);
-        extensionState.rakutenTabs.delete(tabId);
-      }
-    });
-  });
+interface WaitTimeConfig {
+  readonly 'navigate-to-page': number;
+  readonly 'select-tab': number;
+  readonly 'select-period': number;
+  readonly 'display-data': number;
+  readonly 'download-csv': number;
 }
 
 /**
- * タブ更新時の処理（MPA対応強化）
+ * 拡張機能の主要クラス
  */
-function handleTabUpdate(tabId: number, url: string): void {
-  if (isRakutenSecurities(url)) {
-    extensionState.rakutenTabs.add(tabId);
-    console.log('楽天証券サイトが読み込まれました:', tabId, url);
-  } else {
-    extensionState.rakutenTabs.delete(tabId);
-  }
-}
+class RakutenCsvBackgroundService {
+  private static instance: RakutenCsvBackgroundService | null = null;
 
-/**
- * CSVダウンロードリクエストを処理
- */
-async function handleCsvDownloadRequest(message: any, sendResponse: (response: any) => void): Promise<void> {
-  const { selectedOptions, tabId } = message.payload;
-
-  console.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
-
-  try {
-    // ダウンロード設定を取得
-    for (const downloadType of selectedOptions) {
-      const downloadConfig = getCsvDownloadConfig(downloadType);
-      if (!downloadConfig) {
-        sendResponse({ success: false, error: `未対応のダウンロードタイプです: ${downloadType}` });
-        continue;
-      }
-
-      console.log('ダウンロード設定:', downloadConfig);
-
-      // タブIDが指定されていない場合はアクティブタブを取得
-      let targetTabId = tabId;
-      if (!targetTabId) {
-        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!activeTab?.id) {
-          sendResponse({ success: false, error: 'ターゲットタブが見つかりません' });
-          return;
-        }
-        targetTabId = activeTab.id;
-      }
-
-      // 楽天証券タブかどうか確認
-      if (!extensionState.rakutenTabs.has(targetTabId)) {
-        sendResponse({ success: false, error: '楽天証券のタブではありません' });
-        return;
-      }
-
-      // ダウンロード処理を順次実行（前の処理が完了してから次を開始）
-      const result = await executeCsvDownloadSequence(targetTabId, downloadConfig);
-
-      // 個別の処理が失敗した場合は全体を停止
-      if (!result.success) {
-        sendResponse(result);
-        return;
-      }
-    }
-
-    // すべての処理が完了した場合の成功レスポンス
-    sendResponse({ success: true, message: 'すべてのCSVダウンロードが完了しました' });
-  } catch (error) {
-    console.error('CSVダウンロードリクエスト処理エラー:', error);
-    sendResponse({ success: false, error: error instanceof Error ? error.message : '予期しないエラーが発生しました' });
-  }
-}
-
-/**
- * CSVダウンロードの設定を取得
- */
-function getCsvDownloadConfig(downloadType: string): any {
-  const configs: Record<string, any> = {
-    'assetbalance': {
-      downloadType: 'assetbalance',
-      description: '保有銘柄',
-      steps: ['navigate-to-page', 'download-csv'],
-      selectors: {
-        // マイメニューから保有銘柄のページに遷移 - 国内株式のリンクに対応
-        menuLink: "a[onclick*='ass_jp_stk_possess_lst.do'][data-ratid='mem_pc_mymenu_jp-possess-lst'], .pcm-gl-mega-list__link[onclick*='possess']",
-        // csvで保存ボタンを押下
-        csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
-      }
-    },
-    'dividend': {
-      downloadType: 'dividend',
-      description: '配当金・分配金',
-      steps: ['navigate-to-page', 'select-period', 'display-data', 'download-csv'],
-      selectors: {
-        // マイメニューから配当金・分配金のページに遷移 - より広範囲のセレクターを使用
-        menuLink: "a[onclick*='ass_dividend_history.do'], a[data-ratid='mem_pc_mymenu_dividend-history'], a[href*='dividend'], a[href*='配当'], a[onclick*='配当'], .pcm-gl-mega-list__link[onclick*='dividend']",
-        // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "img[alt*='すべて'][onclick*='dispTermClick']",
-        // 表示するボタンを押下
-        displayButton: "input[type='image'][onclick*='clickSearch'], input[src*='btn-disp-noicon'], input.roll",
-        // csvで保存ボタンを押下
-        csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
-
-      }
-    },
-    'domesticstock': {
-      downloadType: 'domesticstock',
-      description: '国内株式の実現損益',
-      steps: ['navigate-to-page', 'select-period', 'display-data', 'download-csv'],
-      selectors: {
-        // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
-        menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
-        // 国内株式タブを選択
-        tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
-        // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "#termCdALL",
-        // この条件で表示するボタン押下
-        displayButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
-        // csv保存ボタンを押下
-        csvButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(7) > div > button:nth-child(3)"
-      }
-    },
-    'mutualfund': {
-      downloadType: 'mutualfund',
-      description: '投資信託の実現損益',
-      steps: ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'],
-      selectors: {
-        // マイメニューから投資信託取引履歴のページに遷移 - 正確なonclickパターンを使用
-        menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
-        // 投資信託タブを選択
-        tabSelector: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > ul > li:nth-child(2) > a",
-        // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "#termCdALL",
-        // この条件で表示するボタン押下
-        displayButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(18) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
-        // csv保存ボタンを押下
-        csvButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(19) > div > button:nth-child(3)"
-      }
-    }
+  private readonly config: ExtensionConfig = {
+    maxRetries: 2,
+    stepTimeout: 30000,
+    retryInterval: 1000,
+    debugMode: false
   };
 
-  return configs[downloadType] || null;
-}
+  private readonly waitTimes: WaitTimeConfig = {
+    'navigate-to-page': 300,
+    'select-tab': 300,
+    'select-period': 300,
+    'display-data': 300,
+    'download-csv': 300
+  };
 
-/**
- * CSVダウンロードのシーケンスを実行（改良版）
- */
-async function executeCsvDownloadSequence(
-  tabId: number,
-  config: any
-): Promise<{ success: boolean; message?: string; error?: string }> {
-  return new Promise((resolve) => {
-    let currentStepIndex = 0;
-    const steps = config.steps;
-    const maxRetries = 2; // 各ステップの最大リトライ回数
+  private state: ExtensionState = {
+    rakutenTabs: new Set<number>(),
+    lastActiveTime: Date.now()
+  };
 
-    const executeNextStep = async (retryCount: number = 0) => {
-      if (currentStepIndex >= steps.length) {
-        // 全ステップ完了
-        resolve({
-          success: true,
-          message: `${config.description}のCSVダウンロードが完了しました`
-        });
-        return;
+  private constructor() {
+    this.initialize();
+  }
+
+  /**
+   * シングルトンインスタンスを取得
+   */
+  static getInstance(): RakutenCsvBackgroundService {
+    if (!RakutenCsvBackgroundService.instance) {
+      RakutenCsvBackgroundService.instance = new RakutenCsvBackgroundService();
+    }
+    return RakutenCsvBackgroundService.instance;
+  }
+
+  /**
+   * サービスの初期化
+   */
+  private initialize(): void {
+    this.setupEventListeners();
+    this.findExistingRakutenTabs();
+    this.log('楽天証券CSV拡張機能のバックグラウンドサービスが初期化されました');
+  }
+
+  /**
+   * イベントリスナーを設定
+   */
+  private setupEventListeners(): void {
+    // 拡張機能インストール時
+    chrome.runtime.onInstalled.addListener((details) => {
+      this.handleInstallation(details);
+    });
+
+    // 拡張機能起動時
+    chrome.runtime.onStartup.addListener(() => {
+      this.handleStartup();
+    });
+
+    // タブ更新時
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      this.handleTabUpdate(tabId, changeInfo, tab);
+    });
+
+    // タブ削除時
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      this.handleTabRemoval(tabId);
+    });
+
+    // タブアクティブ化時
+    chrome.tabs.onActivated.addListener((activeInfo) => {
+      this.handleTabActivation(activeInfo);
+    });
+
+    // アイコンクリック時
+    chrome.action.onClicked.addListener((tab) => {
+      this.handleActionClick(tab);
+    });
+
+    // メッセージ処理
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      this.handleMessage(message, sender, sendResponse);
+      return true; // 非同期レスポンス
+    });
+  }
+
+  /**
+   * インストール処理
+   */
+  private handleInstallation(details: chrome.runtime.InstalledDetails): void {
+    this.log('拡張機能がインストールされました:', details);
+
+    if (details.reason === 'install') {
+      this.log('初回インストール');
+    } else if (details.reason === 'update') {
+      this.log('拡張機能が更新されました');
+      this.notifyUpdate();
+    }
+  }
+
+  /**
+   * 起動処理
+   */
+  private handleStartup(): void {
+    this.log('拡張機能が起動しました');
+    this.findExistingRakutenTabs();
+  }
+
+  /**
+   * タブ更新処理
+   */
+  private handleTabUpdate(
+    tabId: number, 
+    changeInfo: chrome.tabs.TabChangeInfo, 
+    tab: chrome.tabs.Tab
+  ): void {
+    if (changeInfo.status === 'complete' && tab.url) {
+      if (this.isRakutenSecurities(tab.url)) {
+        this.addRakutenTab(tabId);
+        this.log(`楽天証券サイトが読み込まれました: ${tabId}`);
+      } else {
+        this.removeRakutenTab(tabId);
+      }
+    }
+  }
+
+  /**
+   * タブ削除処理
+   */
+  private handleTabRemoval(tabId: number): void {
+    this.removeRakutenTab(tabId);
+    this.log(`タブが削除されました: ${tabId}`);
+  }
+
+  /**
+   * タブアクティブ化処理
+   */
+  private handleTabActivation(activeInfo: chrome.tabs.TabActiveInfo): void {
+    chrome.tabs.get(activeInfo.tabId, (tab) => {
+      if (!chrome.runtime.lastError && tab.url && this.isRakutenSecurities(tab.url)) {
+        this.setActiveTab(activeInfo.tabId);
+        this.log(`楽天証券タブがアクティブになりました: ${activeInfo.tabId}`);
+      }
+    });
+  }
+
+  /**
+   * アクションクリック処理
+   */
+  private handleActionClick(tab: chrome.tabs.Tab): void {
+    this.log('拡張機能アイコンがクリックされました:', tab);
+
+    if (tab.url && this.isRakutenSecurities(tab.url) && tab.id) {
+      this.setActiveTab(tab.id);
+    }
+  }
+
+  /**
+   * メッセージ処理
+   */
+  private async handleMessage(
+    message: ChromeMessage, 
+    sender: chrome.runtime.MessageSender, 
+    sendResponse: (response: unknown) => void
+  ): Promise<void> {
+    this.log('メッセージを受信:', message);
+
+    try {
+      let response: unknown;
+
+      switch (message.action) {
+        case 'register-rakuten-tab':
+          response = this.handleTabRegistration(sender);
+          break;
+
+        case 'page-ready':
+          response = this.handlePageReady(sender);
+          break;
+
+        case 'download-csv-request':
+          response = await this.handleCsvDownloadRequest(message as CsvDownloadMessage);
+          break;
+
+        case 'get-extension-state':
+          response = this.handleGetExtensionState();
+          break;
+
+        default:
+          response = { success: false, error: '未対応のアクション' };
       }
 
-      const currentStep = steps[currentStepIndex];
-      console.log(`ステップ ${currentStepIndex + 1}/${steps.length}: ${currentStep} を実行中... (試行回数: ${retryCount + 1})`);
+      sendResponse(response);
+    } catch (error) {
+      this.logError('メッセージ処理エラー:', error);
+      sendResponse({ 
+        success: false, 
+        error: error instanceof Error ? error.message : '予期しないエラーが発生しました' 
+      });
+    }
+  }
 
-      try {
-        // タブが存在するか確認
-        const tab = await chrome.tabs.get(tabId);
-        if (!tab) {
-          resolve({
-            success: false,
-            error: 'タブが見つかりません。ページが閉じられた可能性があります。'
-          });
-          return;
+  /**
+   * タブ登録処理
+   */
+  private handleTabRegistration(sender: chrome.runtime.MessageSender): { success: boolean } {
+    if (sender.tab?.id) {
+      this.addRakutenTab(sender.tab.id);
+      this.setActiveTab(sender.tab.id);
+      this.log(`楽天証券タブが登録されました: ${sender.tab.id}`);
+    }
+    return { success: true };
+  }
+
+  /**
+   * ページ準備完了処理
+   */
+  private handlePageReady(sender: chrome.runtime.MessageSender): { success: boolean } {
+    if (sender.tab?.id) {
+      this.addRakutenTab(sender.tab.id);
+      this.setActiveTab(sender.tab.id);
+      this.log(`ページ準備完了通知を受信: ${sender.tab.id}`);
+    }
+    return { success: true };
+  }
+
+  /**
+   * CSVダウンロードリクエスト処理
+   */
+  private async handleCsvDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse> {
+    const { selectedOptions, tabId } = message.payload;
+
+    this.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
+
+    try {
+      // タブIDの決定
+      const targetTabId = await this.determineTargetTab(tabId);
+      
+      // 楽天証券タブの確認
+      if (!this.state.rakutenTabs.has(targetTabId)) {
+        throw new Error('楽天証券のタブではありません');
+      }
+
+      // ダウンロード処理を順次実行
+      for (const downloadType of selectedOptions) {
+        const result = await this.processCsvDownload(targetTabId, downloadType);
+        
+        if (!result.success) {
+          return result;
         }
+      }
 
-        // コンテンツスクリプトにステップ実行を指示
-        chrome.tabs.sendMessage(tabId, {
-          action: 'execute-csv-download',
-          payload: {
-            downloadType: config.downloadType,
-            downloadStep: currentStep,
-            selectors: config.selectors,
-            retryCount: retryCount
-          }
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('コンテンツスクリプト通信エラー:', chrome.runtime.lastError.message);
+      return { 
+        success: true, 
+        message: 'すべてのCSVダウンロードが完了しました' 
+      };
 
-            if (retryCount < maxRetries) {
-              console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-              setTimeout(() => executeNextStep(retryCount + 1), 1000);
-            } else {
-              resolve({
-                success: false,
-                error: `コンテンツスクリプトとの通信に失敗しました (ステップ: ${currentStep})`
-              });
-            }
-            return;
-          }
+    } catch (error) {
+      this.logError('CSVダウンロードリクエスト処理エラー:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '予期しないエラーが発生しました' 
+      };
+    }
+  }
 
-          if (response?.success) {
-            console.log(`ステップ ${currentStep} 完了`);
-            currentStepIndex++;
-
-            // 次のステップまで適切な待機時間
-            const waitTime = getWaitTimeForStep(currentStep);
-            setTimeout(() => executeNextStep(0), waitTime);
-          } else {
-            console.error(`ステップ ${currentStep} 失敗:`, response?.error);
-
-            if (retryCount < maxRetries) {
-              console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-              setTimeout(() => executeNextStep(retryCount + 1), 3000);
-            } else {
-              resolve({
-                success: false,
-                error: response?.error || `ステップ ${currentStep} の実行に失敗しました（${maxRetries + 1}回試行）`
-              });
-            }
-          }
-        });
-      } catch (error) {
-        console.error(`ステップ ${currentStep} 実行エラー:`, error);
-
-        if (retryCount < maxRetries) {
-          console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-          setTimeout(() => executeNextStep(retryCount + 1), 500);
-        } else {
-          resolve({
-            success: false,
-            error: `ステップ ${currentStep} の実行中にエラーが発生しました`
-          });
-        }
+  /**
+   * 拡張機能状態取得処理
+   */
+  private handleGetExtensionState(): { success: boolean; state: ExtensionState } {
+    return {
+      success: true,
+      state: {
+        activeTabId: this.state.activeTabId,
+        rakutenTabs: this.state.rakutenTabs,
+        lastActiveTime: this.state.lastActiveTime
       }
     };
+  }
 
-    // 最初のステップを実行
-    executeNextStep();
-  });
+  /**
+   * CSVダウンロード処理
+   */
+  private async processCsvDownload(
+    tabId: number, 
+    downloadType: CsvDownloadType
+  ): Promise<DownloadResponse> {
+    const config = RakutenUtils.getCsvDownloadConfig(downloadType);
+    
+    if (!config) {
+      return { 
+        success: false, 
+        error: `未対応のダウンロードタイプです: ${downloadType}` 
+      };
+    }
+
+    this.log('ダウンロード設定:', config);
+
+    return this.executeDownloadSequence(tabId, config);
+  }
+
+  /**
+   * ダウンロードシーケンスの実行
+   */
+  private async executeDownloadSequence(
+    tabId: number,
+    config: CsvDownloadConfig
+  ): Promise<DownloadResponse> {
+    const { steps, selectors, description } = config;
+
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex];
+      
+      this.log(`ステップ ${stepIndex + 1}/${steps.length}: ${step} を実行中...`);
+
+      const result = await this.executeStepWithRetry(tabId, step, selectors);
+
+      if (!result.success) {
+        return {
+          success: false,
+          error: `${description}の${step}ステップで失敗: ${result.error}`
+        };
+      }
+
+      // 次のステップまで待機
+      const waitTime = this.waitTimes[step] || 1000;
+      await this.sleep(waitTime);
+    }
+
+    return {
+      success: true,
+      message: `${description}のCSVダウンロードが完了しました`
+    };
+  }
+
+  /**
+   * ステップをリトライ付きで実行
+   */
+  private async executeStepWithRetry(
+    tabId: number,
+    step: CsvDownloadStep,
+    selectors: CsvDownloadConfig['selectors']
+  ): Promise<DownloadResponse> {
+    let lastError: string = '';
+
+    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        const result = await this.executeStep(tabId, step, selectors);
+        
+        if (result.success) {
+          return result;
+        }
+
+        lastError = result.error || 'ステップの実行に失敗しました';
+        
+        if (attempt < this.config.maxRetries) {
+          this.log(`ステップ ${step} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
+          await this.sleep(this.config.retryInterval);
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
+        
+        if (attempt < this.config.maxRetries) {
+          await this.sleep(this.config.retryInterval);
+        }
+      }
+    }
+
+    return {
+      success: false,
+      error: `ステップ ${step} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`
+    };
+  }
+
+  /**
+   * 単一ステップの実行
+   */
+  private executeStep(
+    tabId: number,
+    step: CsvDownloadStep,
+    selectors: CsvDownloadConfig['selectors']
+  ): Promise<DownloadResponse> {
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, {
+        action: 'execute-csv-download',
+        payload: {
+          downloadStep: step,
+          selectors: selectors
+        }
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            success: false,
+            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`
+          });
+        } else {
+          resolve(response || { success: false, error: 'レスポンスがありません' });
+        }
+      });
+    });
+  }
+
+  /**
+   * ターゲットタブIDを決定
+   */
+  private async determineTargetTab(tabId?: number): Promise<number> {
+    if (tabId) {
+      return tabId;
+    }
+
+    if (this.state.activeTabId) {
+      return this.state.activeTabId;
+    }
+
+    // アクティブタブを取得
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!activeTab?.id) {
+      throw new Error('ターゲットタブが見つかりません');
+    }
+
+    return activeTab.id;
+  }
+
+  /**
+   * 既存の楽天証券タブを検索
+   */
+  private findExistingRakutenTabs(): void {
+    chrome.tabs.query({ url: '*://*.rakuten-sec.co.jp/*' }, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.id) {
+          this.addRakutenTab(tab.id);
+          this.log(`既存の楽天証券タブを発見: ${tab.id}`);
+        }
+      });
+    });
+  }
+
+  /**
+   * 更新通知
+   */
+  private notifyUpdate(): void {
+    this.state.rakutenTabs.forEach(tabId => {
+      chrome.tabs.sendMessage(tabId, { action: 'extension-updated' }, (_response) => {
+        if (chrome.runtime.lastError) {
+          this.log('タブへの更新通知に失敗:', chrome.runtime.lastError.message);
+          this.removeRakutenTab(tabId);
+        }
+      });
+    });
+  }
+
+  /**
+   * 楽天証券サイトかどうか判定
+   */
+  private isRakutenSecurities(url: string): boolean {
+    return RakutenUtils.isRakutenSecurities(url);
+  }
+
+  /**
+   * 楽天証券タブを追加
+   */
+  private addRakutenTab(tabId: number): void {
+    this.state = {
+      ...this.state,
+      rakutenTabs: new Set([...this.state.rakutenTabs, tabId]),
+      lastActiveTime: Date.now()
+    };
+  }
+
+  /**
+   * 楽天証券タブを削除
+   */
+  private removeRakutenTab(tabId: number): void {
+    const newRakutenTabs = new Set(this.state.rakutenTabs);
+    newRakutenTabs.delete(tabId);
+
+    this.state = {
+      ...this.state,
+      rakutenTabs: newRakutenTabs,
+      activeTabId: this.state.activeTabId === tabId ? undefined : this.state.activeTabId,
+      lastActiveTime: Date.now()
+    };
+  }
+
+  /**
+   * アクティブタブを設定
+   */
+  private setActiveTab(tabId: number): void {
+    this.state = {
+      ...this.state,
+      activeTabId: tabId,
+      lastActiveTime: Date.now()
+    };
+  }
+
+  /**
+   * 待機
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * ログ出力
+   */
+  private log(message: string, ...args: unknown[]): void {
+    if (this.config.debugMode) {
+      console.log(`[RakutenCSV] ${message}`, ...args);
+    }
+  }
+
+  /**
+   * エラーログ出力
+   */
+  private logError(message: string, error: unknown): void {
+    console.error(`[RakutenCSV Error] ${message}`, error);
+  }
+
+  /**
+   * 拡張機能の状態を取得（デバッグ用）
+   */
+  getState(): ExtensionState {
+    return { ...this.state };
+  }
+
+  /**
+   * 設定を取得（デバッグ用）
+   */
+  getConfig(): ExtensionConfig {
+    return { ...this.config };
+  }
 }
 
-/**
- * ステップに応じた適切な待機時間を取得
- */
-function getWaitTimeForStep(step: string): number {
-  const waitTimes: Record<string, number> = {
-    'navigate-to-page': 300,    // ページ遷移は短めに待機
-    'select-tab': 300,       // タブ切り替え
-    'select-period': 300,       // 期間選択
-    'display-data': 300,        // データ表示（データ読み込み待機）
-    'download-csv': 300         // CSV保存
-  };
+// サービスのインスタンス化
+const backgroundService = RakutenCsvBackgroundService.getInstance();
 
-  return waitTimes[step] || 1500; // デフォルト1.5秒
-}
-
-/**
- * 楽天証券のサイトかどうかを判定
- */
-function isRakutenSecurities(url: string): boolean {
-  return url.includes('rakuten-sec.co.jp');
-}
-
+// グローバルなログ出力
 console.log('楽天証券CSV拡張機能のバックグラウンドサービスが読み込まれました');
+
+// デバッグ用のグローバル関数
+(globalThis as { rakutenCsvService?: RakutenCsvBackgroundService }).rakutenCsvService = backgroundService;
