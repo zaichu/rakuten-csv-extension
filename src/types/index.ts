@@ -16,7 +16,13 @@ export type {
 export type {
   ChromeMessage,
   CsvDownloadMessage,
+  CsvDownloadInstruction,
+  CsvDownloadStep,
+  CsvDownloadConfig,
+  CsvSelectors,
   DownloadResponse,
+  MessageType,
+  BaseStatus,
   AppState,
   DownloadRecord,
   ApplicationMessage

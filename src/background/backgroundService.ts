@@ -199,55 +199,47 @@ function handleTabUpdate(tabId: number, url: string): void {
  * CSVダウンロードリクエストを処理
  */
 async function handleCsvDownloadRequest(message: any, sendResponse: (response: any) => void): Promise<void> {
-  const { downloadType, tabId } = message.payload;
+  const { selectedOptions, tabId } = message.payload;
 
-  console.log('CSVダウンロードリクエストを受信:', { downloadType, tabId });
+  console.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
 
   try {
     // ダウンロード設定を取得
-    const downloadConfig = getCsvDownloadConfig(downloadType);
-    if (!downloadConfig) {
-      sendResponse({
-        success: false,
-        error: `未対応のダウンロードタイプです: ${downloadType}`
-      });
-      return;
-    }
-
-    console.log('ダウンロード設定:', downloadConfig);
-
-    // タブIDが指定されていない場合はアクティブタブを取得
-    let targetTabId = tabId;
-    if (!targetTabId) {
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!activeTab?.id) {
+    for (const downloadType in selectedOptions) {
+      const downloadConfig = getCsvDownloadConfig(downloadType);
+      if (!downloadConfig) {
         sendResponse({
           success: false,
-          error: 'ターゲットタブが見つかりません'
+          error: `未対応のダウンロードタイプです: ${downloadType}`
         });
+        continue;
+      }
+
+      console.log('ダウンロード設定:', downloadConfig);
+
+      // タブIDが指定されていない場合はアクティブタブを取得
+      let targetTabId = tabId;
+      if (!targetTabId) {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!activeTab?.id) {
+          sendResponse({ success: false, error: 'ターゲットタブが見つかりません' });
+          return;
+        }
+        targetTabId = activeTab.id;
+      }
+
+      // 楽天証券タブかどうか確認
+      if (!extensionState.rakutenTabs.has(targetTabId)) {
+        sendResponse({ success: false, error: '楽天証券のタブではありません' });
         return;
       }
-      targetTabId = activeTab.id;
+
+      // ダウンロード処理を開始
+      executeCsvDownloadSequence(targetTabId, downloadConfig, sendResponse);
     }
-
-    // 楽天証券タブかどうか確認
-    if (!extensionState.rakutenTabs.has(targetTabId)) {
-      sendResponse({
-        success: false,
-        error: '楽天証券のタブではありません'
-      });
-      return;
-    }
-
-    // ダウンロード処理を開始
-    executeCsvDownloadSequence(targetTabId, downloadConfig, sendResponse);
-
   } catch (error) {
     console.error('CSVダウンロードリクエスト処理エラー:', error);
-    sendResponse({
-      success: false,
-      error: error instanceof Error ? error.message : '予期しないエラーが発生しました'
-    });
+    sendResponse({ success: false, error: error instanceof Error ? error.message : '予期しないエラーが発生しました' });
   }
 }
 
@@ -264,7 +256,7 @@ function getCsvDownloadConfig(downloadType: string): any {
         // マイメニューから保有銘柄のページに遷移 - より広範囲のセレクターを使用
         menuLink: "a[onclick*='ass_all_possess_lst.do'], a[data-ratid='mem_pc_mymenu_all-possess-lst'], a[href*='possess'], a[href*='保有'], a[onclick*='保有'], .pcm-gl-mega-list__link[onclick*='possess']",
         // csvで保存ボタンを押下
-        csvButton: "input[value*='CSV'], button[contains(text(), 'CSV')], input[type='submit'][value*='CSV'], button[type='submit'][value*='CSV'], .csv-button, .download-csv"
+        csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
       }
     },
     'dividend': {

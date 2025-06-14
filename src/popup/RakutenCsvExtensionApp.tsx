@@ -19,7 +19,7 @@ interface DownloadOption {
  * 楽天証券CSV拡張機能のメインアプリケーション
  */
 const RakutenCsvExtensionApp: React.FC = () => {
-  const { message, showSuccess, showError, clearMessage } = useApplicationMessage();
+  const { message, showError, clearMessage } = useApplicationMessage();
   const { isDownloading, downloadCsv } = useCsvDownload();
 
   // ダウンロードオプションの定義
@@ -83,35 +83,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
       return;
     }
 
-    try {
-      let successCount = 0;
-      let errorCount = 0;
-
-      // 選択されたオプションに基づいてダウンロードタイプを決定
-      for (const downloadType of selectedOptions) {
-        const response = await downloadCsv(downloadType);
-
-        if (response.success) {
-          successCount++;
-          console.log(`${downloadType}のCSVダウンロードが成功しました`);
-        } else {
-          errorCount++;
-          console.error(`${downloadType}のCSVダウンロードが失敗しました:`, response.error);
-        }
-      }
-
-      if (successCount > 0) {
-        showSuccess(`${successCount}件のCSVダウンロードを開始しました`);
-      }
-
-      if (errorCount > 0) {
-        showError(`${errorCount}件のCSVダウンロードに失敗しました`);
-      }
-    } catch (error) {
-      console.error('ダウンロードエラー:', error);
-      showError('予期しないエラーが発生しました');
-    }
-  }, [selectedOptions, downloadCsv, showSuccess, showError, clearMessage]);
+    downloadCsv(selectedOptions);
+  }, [selectedOptions, downloadCsv]);
 
   /**
    * 楽天証券ページを開く

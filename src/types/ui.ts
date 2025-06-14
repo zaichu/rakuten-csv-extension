@@ -2,6 +2,8 @@
  * UI コンポーネントの共通型定義
  */
 
+import type { MessageType } from './extension';
+
 /**
  * アイコンラベルコンポーネントのプロパティ
  */
@@ -29,7 +31,7 @@ export interface ButtonProps {
  * メッセージコンポーネントのプロパティ
  */
 export interface MessageProps {
-  type: 'success' | 'error' | 'warning' | 'info';
+  type: MessageType;
   content: string;
   onClose?: () => void;
   autoClose?: boolean;

@@ -1,7 +1,28 @@
 import { CsvDownloadType } from "./rakuten";
 
 /**
- * Chrome拡張機能のメッセージ関連の型定義
+ * セレクター定義（共通）
+ */
+export interface CsvSelectors {
+  menuLink?: string;
+  tabSelector?: string;
+  periodRadio?: string;
+  displayButton?: string;
+  csvButton?: string;
+}
+
+/**
+ * CSVダウンロードのステップ定義
+ */
+export type CsvDownloadStep = 
+  | 'navigate-to-page'       // ページに遷移
+  | 'select-tab'            // タブ選択（実現損益用）
+  | 'select-period'         // 期間選択
+  | 'display-data'          // データ表示
+  | 'download-csv';         // CSV保存
+
+/**
+ * Chrome拡張機能のメッセージ基底型
  */
 export interface ChromeMessage {
   action: string;
@@ -27,18 +48,9 @@ export interface CsvDownloadInstruction extends ChromeMessage {
   payload: {
     downloadType: CsvDownloadType;
     downloadStep: CsvDownloadStep;
+    selectors: CsvSelectors;
   };
 }
-
-/**
- * CSVダウンロードのステップ定義
- */
-export type CsvDownloadStep = 
-  | 'navigate-to-page'       // ページに遷移
-  | 'select-tab'            // タブ選択（実現損益用）
-  | 'select-period'         // 期間選択
-  | 'display-data'          // データ表示
-  | 'download-csv';         // CSV保存
 
 /**
  * ダウンロードレスポンス
@@ -57,23 +69,27 @@ export interface DownloadResponse {
 export interface CsvDownloadConfig {
   downloadType: CsvDownloadType;
   steps: CsvDownloadStep[];
-  selectors: {
-    menuLink?: string;
-    tabSelector?: string;
-    periodRadio?: string;
-    displayButton?: string;
-    csvButton?: string;
-  };
+  selectors: CsvSelectors;
   description: string;
 }
 
 /**
- * アプリケーションの状態管理用の型
+ * メッセージタイプ（共通）
  */
-export interface AppState {
-  isDownloading: boolean;
-  message: ApplicationMessage | null;
-  downloadHistory: DownloadRecord[];
+export type MessageType = 'success' | 'error' | 'warning' | 'info';
+
+/**
+ * 基本ステータス（共通）
+ */
+export type BaseStatus = 'success' | 'error';
+
+/**
+ * アプリケーションメッセージ
+ */
+export interface ApplicationMessage {
+  type: MessageType;
+  content: string;
+  timestamp?: Date;
 }
 
 /**
@@ -83,15 +99,15 @@ export interface DownloadRecord {
   id: string;
   timestamp: Date;
   downloadType: string;
-  status: 'success' | 'error';
+  status: BaseStatus;
   fileName?: string;
 }
 
 /**
- * アプリケーションメッセージ
+ * アプリケーションの状態管理用の型
  */
-export interface ApplicationMessage {
-  type: 'success' | 'error' | 'warning' | 'info';
-  content: string;
-  timestamp?: Date;
+export interface AppState {
+  isDownloading: boolean;
+  message: ApplicationMessage | null;
+  downloadHistory: DownloadRecord[];
 }

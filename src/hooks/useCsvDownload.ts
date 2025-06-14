@@ -8,10 +8,10 @@ export const useCsvDownload = () => {
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
 
   const downloadCsv = useCallback(async (
-    downloadType: CsvDownloadType
+    selectedOptions: Set<CsvDownloadType>
   ): Promise<DownloadResponse> => {
     setIsDownloading(true);
-    console.log(`CSVダウンロード開始: ${downloadType}`);
+    console.log(`CSVダウンロード開始: ${Array.from(selectedOptions).join(', ')})`);
 
     try {
       // アクティブなタブを取得
@@ -25,30 +25,24 @@ export const useCsvDownload = () => {
       // 楽天証券のサイトかどうかチェック
       if (!tab.url?.includes('rakuten-sec.co.jp')) {
         console.log('現在のURL:', tab.url);
-        return {
-          success: false,
-          error: '楽天証券のサイトで使用してください'
-        };
+        return { success: false, error: '楽天証券のサイトで使用してください' };
       }
 
       console.log('バックグラウンドサービスにリクエストを送信中...');
-      
+
       // バックグラウンドサービスにダウンロードリクエストを送信
       const response = await chrome.runtime.sendMessage({
         action: 'download-csv-request',
-        payload: {
-          downloadType,
-          tabId: tab.id
-        }
+        payload: { selectedOptions: Array.from(selectedOptions), tabId: tab.id }
       }) as DownloadResponse;
 
       console.log('バックグラウンドサービスからの応答:', response);
       return response;
     } catch (error) {
-      console.error(`CSVダウンロードエラー (${downloadType}):`, error);
-      
+      console.error(`CSVダウンロードエラー (${Array.from(selectedOptions).join(', ')}) :`, error);
+
       let errorMessage = 'エラーが発生しました。';
-      
+
       if (error instanceof Error) {
         if (error.message.includes('Could not establish connection')) {
           errorMessage = 'バックグラウンドサービスとの接続に失敗しました。拡張機能を再読み込みしてください。';
@@ -58,7 +52,7 @@ export const useCsvDownload = () => {
           errorMessage = error.message;
         }
       }
-      
+
       return {
         success: false,
         error: errorMessage
