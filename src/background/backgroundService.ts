@@ -9,10 +9,10 @@
  * - 状態管理の改善
  */
 
-import type { 
-  ExtensionState, 
-  CsvDownloadMessage, 
-  DownloadResponse, 
+import type {
+  ExtensionState,
+  CsvDownloadMessage,
+  DownloadResponse,
   ChromeMessage,
   CsvDownloadConfig,
   CsvDownloadType,
@@ -55,11 +55,11 @@ class RakutenCsvBackgroundService {
   };
 
   private readonly waitTimes: WaitTimeConfig = {
-    'navigate-to-page': 300,
-    'select-tab': 300,
-    'select-period': 300,
-    'display-data': 300,
-    'download-csv': 300
+    'navigate-to-page': 500,
+    'select-tab': 500,
+    'select-period': 500,
+    'display-data': 500,
+    'download-csv': 500
   };
 
   private state: ExtensionState = {
@@ -157,8 +157,8 @@ class RakutenCsvBackgroundService {
    * タブ更新処理
    */
   private handleTabUpdate(
-    tabId: number, 
-    changeInfo: chrome.tabs.TabChangeInfo, 
+    tabId: number,
+    changeInfo: chrome.tabs.TabChangeInfo,
     tab: chrome.tabs.Tab
   ): void {
     if (changeInfo.status === 'complete' && tab.url) {
@@ -206,8 +206,8 @@ class RakutenCsvBackgroundService {
    * メッセージ処理
    */
   private async handleMessage(
-    message: ChromeMessage, 
-    sender: chrome.runtime.MessageSender, 
+    message: ChromeMessage,
+    sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): Promise<void> {
     this.log('メッセージを受信:', message);
@@ -239,9 +239,9 @@ class RakutenCsvBackgroundService {
       sendResponse(response);
     } catch (error) {
       this.logError('メッセージ処理エラー:', error);
-      sendResponse({ 
-        success: false, 
-        error: error instanceof Error ? error.message : '予期しないエラーが発生しました' 
+      sendResponse({
+        success: false,
+        error: error instanceof Error ? error.message : '予期しないエラーが発生しました'
       });
     }
   }
@@ -281,7 +281,7 @@ class RakutenCsvBackgroundService {
     try {
       // タブIDの決定
       const targetTabId = await this.determineTargetTab(tabId);
-      
+
       // 楽天証券タブの確認
       if (!this.state.rakutenTabs.has(targetTabId)) {
         throw new Error('楽天証券のタブではありません');
@@ -290,22 +290,22 @@ class RakutenCsvBackgroundService {
       // ダウンロード処理を順次実行
       for (const downloadType of selectedOptions) {
         const result = await this.processCsvDownload(targetTabId, downloadType);
-        
+
         if (!result.success) {
           return result;
         }
       }
 
-      return { 
-        success: true, 
-        message: 'すべてのCSVダウンロードが完了しました' 
+      return {
+        success: true,
+        message: 'すべてのCSVダウンロードが完了しました'
       };
 
     } catch (error) {
       this.logError('CSVダウンロードリクエスト処理エラー:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : '予期しないエラーが発生しました' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '予期しないエラーが発生しました'
       };
     }
   }
@@ -328,15 +328,15 @@ class RakutenCsvBackgroundService {
    * CSVダウンロード処理
    */
   private async processCsvDownload(
-    tabId: number, 
+    tabId: number,
     downloadType: CsvDownloadType
   ): Promise<DownloadResponse> {
     const config = RakutenUtils.getCsvDownloadConfig(downloadType);
-    
+
     if (!config) {
-      return { 
-        success: false, 
-        error: `未対応のダウンロードタイプです: ${downloadType}` 
+      return {
+        success: false,
+        error: `未対応のダウンロードタイプです: ${downloadType}`
       };
     }
 
@@ -356,7 +356,7 @@ class RakutenCsvBackgroundService {
 
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
       const step = steps[stepIndex];
-      
+
       this.log(`ステップ ${stepIndex + 1}/${steps.length}: ${step} を実行中...`);
 
       const result = await this.executeStepWithRetry(tabId, step, selectors);
@@ -392,20 +392,20 @@ class RakutenCsvBackgroundService {
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
         const result = await this.executeStep(tabId, step, selectors);
-        
+
         if (result.success) {
           return result;
         }
 
         lastError = result.error || 'ステップの実行に失敗しました';
-        
+
         if (attempt < this.config.maxRetries) {
           this.log(`ステップ ${step} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
           await this.sleep(this.config.retryInterval);
         }
       } catch (error) {
         lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
-        
+
         if (attempt < this.config.maxRetries) {
           await this.sleep(this.config.retryInterval);
         }
@@ -460,7 +460,7 @@ class RakutenCsvBackgroundService {
 
     // アクティブタブを取得
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
+
     if (!activeTab?.id) {
       throw new Error('ターゲットタブが見つかりません');
     }
