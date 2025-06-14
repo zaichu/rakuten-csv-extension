@@ -275,11 +275,12 @@ function getCsvDownloadConfig(downloadType: string): any {
         // マイメニューから配当金・分配金のページに遷移 - より広範囲のセレクターを使用
         menuLink: "a[onclick*='ass_dividend_history.do'], a[data-ratid='mem_pc_mymenu_dividend-history'], a[href*='dividend'], a[href*='配当'], a[onclick*='配当'], .pcm-gl-mega-list__link[onclick*='dividend']",
         // 表示期間のラジオボタンをすべてを選択
-        periodRadio: "input[type='radio'][value*='all'], input[type='radio'][value*='すべて'], input[type='radio'][value*='全'], .period-all, #period-all",
+        periodRadio: "img[alt*='すべて'][onclick*='dispTermClick']",
         // 表示するボタンを押下
-        displayButton: "input[value*='表示'], button[contains(text(), '表示')], input[type='submit'][value*='表示'], .display-button",
+        displayButton: "input[type='image'][onclick*='clickSearch'], input[src*='btn-disp-noicon'], input.roll",
         // csvで保存ボタンを押下
-        csvButton: "input[value*='CSV'], button[contains(text(), 'CSV')], input[type='submit'][value*='CSV'], button[type='submit'][value*='CSV'], .csv-button, .download-csv"
+        csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
+
       }
     },
     'domesticstock': {
@@ -372,7 +373,7 @@ async function executeCsvDownloadSequence(
 
           if (retryCount < maxRetries) {
             console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-            setTimeout(() => executeNextStep(retryCount + 1), 2000);
+            setTimeout(() => executeNextStep(retryCount + 1), 1000);
           } else {
             sendResponse({
               success: false,
@@ -408,7 +409,7 @@ async function executeCsvDownloadSequence(
 
       if (retryCount < maxRetries) {
         console.log(`ステップ ${currentStep} をリトライします (${retryCount + 1}/${maxRetries})`);
-        setTimeout(() => executeNextStep(retryCount + 1), 3000);
+        setTimeout(() => executeNextStep(retryCount + 1), 500);
       } else {
         sendResponse({
           success: false,
@@ -427,11 +428,11 @@ async function executeCsvDownloadSequence(
  */
 function getWaitTimeForStep(step: string): number {
   const waitTimes: Record<string, number> = {
-    'navigate-to-page': 3000,    // ページ遷移は長めに待機
-    'select-tab': 1500,          // タブ切り替え
-    'select-period': 1000,       // 期間選択
-    'display-data': 2500,        // データ表示（データ読み込み待機）
-    'download-csv': 1000         // CSV保存
+    'navigate-to-page': 100,    // ページ遷移は短めに待機
+    'select-tab': 100,          // タブ切り替え
+    'select-period': 100,       // 期間選択
+    'display-data': 100,        // データ表示（データ読み込み待機）
+    'download-csv': 100         // CSV保存
   };
 
   return waitTimes[step] || 1500; // デフォルト1.5秒

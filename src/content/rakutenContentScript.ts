@@ -122,16 +122,12 @@ class RakutenCsvExtension {
       });
     } else {
       // 既に読み込み完了している場合は即座に実行
-      setTimeout(() => {
-        this.performMPAInitialization();
-      }, 100);
+      setTimeout(() => { this.performMPAInitialization(); }, 100);
     }
 
     // ページが完全に読み込まれた後の追加初期化
     window.addEventListener('load', () => {
-      setTimeout(() => {
-        this.performMPAInitialization();
-      }, 500);
+      setTimeout(() => { this.performMPAInitialization(); }, 100);
     });
   }
 
@@ -279,13 +275,7 @@ class RakutenCsvExtension {
             console.log('CSVダウンロード実行指示を受信');
             this.handleCsvDownloadExecution(message)
               .then(response => sendResponse(response))
-              .catch(error => {
-                console.error('CSVダウンロード実行エラー:', error);
-                sendResponse({
-                  success: false,
-                  error: error.message || 'ダウンロード実行に失敗しました'
-                });
-              });
+              .catch(error => { sendResponse({ success: false, error: error.message || 'ダウンロード実行に失敗しました' }); });
             return true;
 
           case 'extension-updated':
@@ -328,17 +318,13 @@ class RakutenCsvExtension {
 
     try {
       // 現在のページが楽天証券サイトか確認
-      if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-        return {
-          success: false,
-          error: '楽天証券のサイトではありません'
-        };
-      }
+      if (!RakutenUtils.isRakutenSecurities(window.location.href))
+        return { success: false, error: '楽天証券のサイトではありません' };
 
       // ページが完全に読み込まれているか確認
       if (document.readyState !== 'complete') {
         console.log('ページの読み込み完了を待機中...');
-        await this.waitForPageLoad(5000);
+        await this.waitForPageLoad(1000);
       }
 
       switch (downloadStep) {
@@ -358,17 +344,11 @@ class RakutenCsvExtension {
           return await this.executeDownloadCsv(selectors, retryCount);
 
         default:
-          return {
-            success: false,
-            error: `未対応のダウンロードステップです: ${downloadStep}`
-          };
+          return { success: false, error: `未対応のダウンロードステップです: ${downloadStep}` };
       }
     } catch (error) {
       console.error(`ステップ ${downloadStep} 実行エラー:`, error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました`
-      };
+      return { success: false, error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました` };
     }
   }
 
@@ -378,50 +358,18 @@ class RakutenCsvExtension {
   private async executeNavigateToPage(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
     const { menuLink } = selectors;
 
-    if (!menuLink) {
-      return {
-        success: false,
-        error: 'メニューリンクのセレクターが指定されていません'
-      };
-    }
+    if (!menuLink)
+      return { success: false, error: 'メニューリンクのセレクターが指定されていません' };
 
-    try {
-      console.log(`ページ遷移実行中 (試行回数: ${retryCount + 1})`);
+    console.log(`ページ遷移実行中 (試行回数: ${retryCount + 1})`);
+    if (retryCount === 0)
+      this.debugMenuElements();
 
-      // デバッグ: 現在のページでメニュー要素を探索
-      if (retryCount === 0)
-        this.debugMenuElements();
-
-      const element = await this.waitForElement(menuLink);
-
-      if (element) {
-        const clickSuccess = DomUtils.safeClick(element);
-
-        if (clickSuccess) {
-          console.log('ページ遷移を実行しました');
-          // ページ遷移の完了を待つ
-          // await this.waitForPageLoad(15000);
-          return {
-            success: true,
-            message: 'ページ遷移が完了しました'
-          };
-        } else {
-          return {
-            success: false,
-            error: 'メニューリンクのクリックに失敗しました'
-          };
-        }
-      } else {
-        return {
-          success: false,
-          error: 'メニューリンクが見つからないか非表示です'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: `ページ遷移に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
+    const element = await this.waitForElement(menuLink);
+    if (DomUtils.safeClick(element)) {
+      return { success: true, message: 'ページ遷移が完了しました' };
+    } else {
+      return { success: false, error: 'メニューリンクのクリックに失敗しました' };
     }
   }
 
@@ -431,44 +379,16 @@ class RakutenCsvExtension {
   private async executeSelectTab(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
     const { tabSelector } = selectors;
 
-    if (!tabSelector) {
-      return {
-        success: false,
-        error: 'タブセレクターが指定されていません'
-      };
-    }
+    if (!tabSelector)
+      return { success: false, error: 'タブセレクターが指定されていません' };
 
-    try {
-      console.log(`タブ選択実行中 (試行回数: ${retryCount + 1})`);
-      const element = await this.waitForElement(tabSelector, 6000);
+    console.log(`タブ選択実行中 (試行回数: ${retryCount + 1})`);
+    const element = await this.waitForElement(tabSelector);
 
-      if (element) {
-        const clickSuccess = DomUtils.safeClick(element);
-
-        if (clickSuccess) {
-          console.log('タブ選択を実行しました');
-          await this.waitForElementUpdate(2000);
-          return {
-            success: true,
-            message: 'タブ選択が完了しました'
-          };
-        } else {
-          return {
-            success: false,
-            error: 'タブのクリックに失敗しました'
-          };
-        }
-      } else {
-        return {
-          success: false,
-          error: 'タブが見つからないか非表示です'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: `タブ選択に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
+    if (DomUtils.safeClick(element)) {
+      return { success: true, message: 'タブ選択が完了しました' };
+    } else {
+      return { success: false, error: 'タブのクリックに失敗しました' };
     }
   }
 
@@ -478,44 +398,16 @@ class RakutenCsvExtension {
   private async executeSelectPeriod(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
     const { periodRadio } = selectors;
 
-    if (!periodRadio) {
-      return {
-        success: false,
-        error: '期間選択セレクターが指定されていません'
-      };
-    }
+    if (!periodRadio)
+      return { success: false, error: '期間選択セレクターが指定されていません' };
 
-    try {
-      console.log(`期間選択実行中 (試行回数: ${retryCount + 1})`);
-      const element = await this.waitForElement(periodRadio, 6000);
+    console.log(`期間選択実行中 (試行回数: ${retryCount + 1})`);
+    const element = await this.waitForElement(periodRadio);
 
-      if (element && DomUtils.isElementVisible(element)) {
-        const clickSuccess = DomUtils.safeClick(element);
-
-        if (clickSuccess) {
-          console.log('期間選択を実行しました');
-          await this.waitForElementUpdate(1500);
-          return {
-            success: true,
-            message: '期間選択が完了しました'
-          };
-        } else {
-          return {
-            success: false,
-            error: '期間選択ボタンのクリックに失敗しました'
-          };
-        }
-      } else {
-        return {
-          success: false,
-          error: '期間選択ボタンが見つからないか非表示です'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: `期間選択に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
+    if (DomUtils.safeClick(element)) {
+      return { success: true, message: '期間選択が完了しました' };
+    } else {
+      return { success: false, error: '期間選択ボタンのクリックに失敗しました' };
     }
   }
 
@@ -525,45 +417,16 @@ class RakutenCsvExtension {
   private async executeDisplayData(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
     const { displayButton } = selectors;
 
-    if (!displayButton) {
-      return {
-        success: false,
-        error: '表示ボタンセレクターが指定されていません'
-      };
-    }
+    if (!displayButton)
+      return { success: false, error: '表示ボタンセレクターが指定されていません' };
 
-    try {
-      console.log(`データ表示実行中 (試行回数: ${retryCount + 1})`);
-      const element = await this.waitForElement(displayButton, 6000);
+    console.log(`データ表示実行中 (試行回数: ${retryCount + 1})`);
+    const element = await this.waitForElement(displayButton);
 
-      if (element && DomUtils.isElementVisible(element)) {
-        const clickSuccess = DomUtils.safeClick(element);
-
-        if (clickSuccess) {
-          console.log('データ表示を実行しました');
-          // データの読み込み完了を待つ
-          await this.waitForDataLoad(8000);
-          return {
-            success: true,
-            message: 'データ表示が完了しました'
-          };
-        } else {
-          return {
-            success: false,
-            error: '表示ボタンのクリックに失敗しました'
-          };
-        }
-      } else {
-        return {
-          success: false,
-          error: '表示ボタンが見つからないか非表示です'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: `データ表示に失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
+    if (DomUtils.safeClick(element)) {
+      return { success: true, message: 'データ表示が完了しました' };
+    } else {
+      return { success: false, error: '表示ボタンのクリックに失敗しました' };
     }
   }
 
@@ -573,52 +436,23 @@ class RakutenCsvExtension {
   private async executeDownloadCsv(selectors: any, retryCount: number = 0): Promise<DownloadResponse> {
     const { csvButton } = selectors;
 
-    if (!csvButton) {
-      return {
-        success: false,
-        error: 'CSVボタンセレクターが指定されていません'
-      };
-    }
+    if (!csvButton)
+      return { success: false, error: 'CSVボタンセレクターが指定されていません' };
 
-    try {
-      console.log(`CSVダウンロード実行中 (試行回数: ${retryCount + 1})`);
-      const element = await this.waitForElement(csvButton, 6000);
+    console.log(`CSVダウンロード実行中 (試行回数: ${retryCount + 1})`);
+    const element = await this.waitForElement(csvButton);
 
-      if (element && DomUtils.isElementVisible(element)) {
-        const clickSuccess = DomUtils.safeClick(element);
-
-        if (clickSuccess) {
-          console.log('CSVダウンロードを実行しました');
-          // ダウンロード開始の確認
-          await this.waitForDownload(3000);
-          return {
-            success: true,
-            message: 'CSVダウンロードが完了しました'
-          };
-        } else {
-          return {
-            success: false,
-            error: 'CSVボタンのクリックに失敗しました'
-          };
-        }
-      } else {
-        return {
-          success: false,
-          error: 'CSVボタンが見つからないか非表示です'
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: `CSVダウンロードに失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
+    if (DomUtils.safeClick(element)) {
+      return { success: true, message: 'CSVダウンロードが完了しました' };
+    } else {
+      return { success: false, error: 'CSVボタンが見つからないか非表示です' };
     }
   }
 
   /**
    * ページロードの完了を待つ
    */
-  private async waitForPageLoad(timeout: number = 10000): Promise<void> {
+  private async waitForPageLoad(timeout: number = 500): Promise<void> {
     return new Promise((resolve) => {
       let timeoutId: number;
 
@@ -647,27 +481,9 @@ class RakutenCsvExtension {
   }
 
   /**
-   * 要素の更新を待つ
-   */
-  private async waitForElementUpdate(timeout: number = 3000): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, timeout);
-    });
-  }
-
-  /**
-   * データロードの完了を待つ
-   */
-  private async waitForDataLoad(timeout: number = 5000): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, timeout);
-    });
-  }
-
-  /**
    * 要素が表示されるまで待機（MPA対応で強化）
    */
-  private waitForElement(selectorGroup: string, timeout: number = 5000): Promise<Element> {
+  private waitForElement(selectorGroup: string, timeout: number = 100): Promise<Element> {
     return new Promise((resolve, reject) => {
       // 複数のセレクターをカンマで分割して試行
       const selectors = selectorGroup.split(',').map(s => s.trim());
@@ -722,15 +538,6 @@ class RakutenCsvExtension {
         observer.disconnect();
         reject(new Error(`要素の待機がタイムアウトしました: ${selectorGroup}`));
       }, timeout);
-    });
-  }
-
-  /**
-   * ダウンロード完了を待機
-   */
-  private async waitForDownload(timeout: number = 3000): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, timeout);
     });
   }
 
@@ -815,9 +622,7 @@ if (document.readyState === 'loading') {
 // ページ完全読み込み後にも再度初期化
 window.addEventListener('load', () => {
   console.log('Window load - 拡張機能を初期化');
-  setTimeout(() => {
-    initializeRakutenCsvExtension();
-  }, 500);
+  setTimeout(() => { initializeRakutenCsvExtension(); }, 500);
 });
 
 // フォーカス時の初期化（タブ切り替え時など）
