@@ -12,7 +12,6 @@ interface DownloadOption {
   readonly id: CsvDownloadType;
   readonly label: string;
   readonly icon: string;
-  readonly description: string;
   readonly category: 'portfolio' | 'transaction' | 'income';
 }
 
@@ -31,12 +30,12 @@ interface AppConfig {
  */
 const RakutenCsvExtensionApp: React.FC = () => {
   const { message, showError, showSuccess, clearMessage } = useApplicationMessage();
-  const { 
-    isDownloading, 
-    currentOperation, 
-    progress, 
-    downloadCsv, 
-    cancelDownload 
+  const {
+    isDownloading,
+    currentOperation,
+    progress,
+    downloadCsv,
+    cancelDownload
   } = useCsvDownload();
 
   // アプリケーション設定
@@ -50,30 +49,26 @@ const RakutenCsvExtensionApp: React.FC = () => {
   const downloadOptions: readonly DownloadOption[] = useMemo(() => [
     {
       id: 'assetbalance',
-      label: '保有銘柄',
+      label: '国内株式',
       icon: '📊',
-      description: 'ポートフォリオの保有銘柄データ',
       category: 'portfolio'
     },
     {
       id: 'dividend',
       label: '配当金・分配金',
       icon: '💰',
-      description: '配当金・分配金の履歴',
       category: 'income'
     },
     {
       id: 'domesticstock',
-      label: '国内株式取引履歴',
+      label: '国内株式',
       icon: '📋',
-      description: '国内株式の取引履歴',
       category: 'transaction'
     },
     {
       id: 'mutualfund',
-      label: '投資信託取引履歴',
+      label: '投資信託',
       icon: '📋',
-      description: '投資信託の取引履歴',
       category: 'transaction'
     }
   ], []);
@@ -146,7 +141,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
     setSelectedOptions(prev => {
       const newSet = new Set(prev);
-      
+
       if (allSelected) {
         // 全て選択されている場合は解除
         categoryOptions.forEach(id => newSet.delete(id));
@@ -154,7 +149,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
         // 一部または未選択の場合は全て選択
         categoryOptions.forEach(id => newSet.add(id));
       }
-      
+
       return newSet;
     });
   }, [categorizedOptions, selectedOptions]);
@@ -186,10 +181,10 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
     try {
       const result = await downloadCsv(selectedOptions);
-      
+
       if (result.success) {
         showSuccess(result.message || 'CSVダウンロードが完了しました');
-        
+
         // 成功時は選択をクリア（オプション）
         if (appConfig.enableBatchOperations) {
           setSelectedOptions(new Set());
@@ -252,8 +247,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* カテゴリヘッダー */}
         <div className="d-flex align-items-center justify-content-between mb-2">
           <div className="d-flex align-items-center">
-            <IconLabel 
-              icon={getCategoryIcon(category)} 
+            <IconLabel
+              icon={getCategoryIcon(category)}
               label={getCategoryLabel(category)}
               containerClassName="h6 mb-0 d-flex align-items-center"
             />
@@ -285,15 +280,12 @@ const RakutenCsvExtensionApp: React.FC = () => {
               />
               <label className="form-check-label w-100" htmlFor={option.id}>
                 <div className="d-flex align-items-center">
-                  <IconLabel 
-                    icon={option.icon} 
-                    label={option.label} 
+                  <IconLabel
+                    icon={option.icon}
+                    label={option.label}
                     containerClassName="d-inline-flex align-items-center"
                   />
                 </div>
-                <small className="text-muted d-block ms-4">
-                  {option.description}
-                </small>
               </label>
             </div>
           ))}
@@ -356,10 +348,10 @@ const RakutenCsvExtensionApp: React.FC = () => {
         <div className="d-flex align-items-center justify-content-between">
           <div className="alert alert-info py-2 flex-grow-1 me-2 mb-0">
             <small>
-              <IconLabel 
-                icon="📝" 
-                label={`${selectedCount}件のオプションが選択されています`} 
-                containerClassName="d-flex align-items-center" 
+              <IconLabel
+                icon="📝"
+                label={`${selectedCount}件のオプションが選択されています`}
+                containerClassName="d-flex align-items-center"
               />
             </small>
           </div>
@@ -390,10 +382,10 @@ const RakutenCsvExtensionApp: React.FC = () => {
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && handleOpenRakutenPage()}
         >
-          <IconLabel 
-            icon="🔗" 
-            label="楽天証券を開く" 
-            containerClassName="text-primary d-flex align-items-center" 
+          <IconLabel
+            icon="🔗"
+            label="楽天証券を開く"
+            containerClassName="text-primary d-flex align-items-center"
           />
         </div>
 
@@ -406,10 +398,10 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* 取得オプションセクション */}
         <div className="mb-3">
           <div className="h6 mb-3">
-            <IconLabel 
-              icon="📊" 
-              label="取得オプション" 
-              containerClassName="d-flex align-items-center" 
+            <IconLabel
+              icon="📊"
+              label="取得オプション"
+              containerClassName="d-flex align-items-center"
             />
           </div>
 
@@ -422,11 +414,10 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* ダウンロードボタン */}
         <div className="d-grid mb-3">
           <button
-            className={`btn btn-lg ${
-              selectedOptions.size > 0 && !isDownloading 
-                ? 'btn-primary' 
-                : 'btn-secondary'
-            }`}
+            className={`btn btn-lg ${selectedOptions.size > 0 && !isDownloading
+              ? 'btn-primary'
+              : 'btn-secondary'
+              }`}
             onClick={handleDownload}
             disabled={isDownloading || selectedOptions.size === 0}
             type="button"
