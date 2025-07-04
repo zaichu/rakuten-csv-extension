@@ -4,6 +4,7 @@ import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
 import type { CsvDownloadType } from '../types';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import { ShokenWebUtils } from '../utils/shokenwebUtils';
 
 /**
  * CSV ダウンロードオプション
@@ -213,6 +214,13 @@ const RakutenCsvExtensionApp: React.FC = () => {
   }, []);
 
   /**
+   * 証券Webページを開く
+   */
+  const handleOpenShokenWebPage = useCallback((): void => {
+    ShokenWebUtils.openShokenWebPage();
+  }, []);
+
+  /**
    * ダウンロードボタンの内容を取得
    */
   const getDownloadButtonContent = useCallback(() => {
@@ -372,7 +380,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
   }, [downloadOptions.length, selectedOptions.size, handleSelectAll, isDownloading]);
 
   return (
-    <div className="popup-container" style={{ width: '350px', height: '480px', overflow: 'hidden' }}>
+    <div className="popup-container" style={{ width: '350px', height: 'auto', overflow: 'hidden' }}>
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
       <main className="p-2" style={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
@@ -388,6 +396,22 @@ const RakutenCsvExtensionApp: React.FC = () => {
           <IconLabel
             icon="🔗"
             label="楽天証券を開く"
+            containerClassName="text-primary d-flex align-items-center"
+          />
+        </div>
+
+        {/* 証券Webを開くリンク */}
+        <div
+          className="mb-2 p-1 bg-light rounded cursor-pointer border"
+          onClick={handleOpenShokenWebPage}
+          style={{ cursor: 'pointer' }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && handleOpenShokenWebPage()}
+        >
+          <IconLabel
+            icon="🔗"
+            label="証券Webを開く"
             containerClassName="text-primary d-flex align-items-center"
           />
         </div>
