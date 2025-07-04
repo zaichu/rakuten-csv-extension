@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "楽天証券 CSV ダウンロード拡張機能",
-    "version": "1.0.1",
+    "version": "2.0.1",
     "description": "楽天証券から投資データをCSV形式で簡単にダウンロード。コンパクトなUIで保有銘柄、配当金、取引履歴を効率的に取得できます。",
     "background": {
         "service_worker": "src/background/backgroundService.ts"
