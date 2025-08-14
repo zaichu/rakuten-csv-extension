@@ -80,13 +80,13 @@ export class RakutenUtils {
           // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
           menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
           // 国内株式タブを選択
-          tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
+          // tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
           // 表示期間のラジオボタンをすべてを選択
           periodRadio: "#termCdALL",
           // この条件で表示するボタン押下
-          displayButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
+          displayButton: "button[onclick*='search()']",
           // csv保存ボタンを押下
-          csvButton: "#str-container > div > main > form:nth-child(10) > div:nth-child(7) > div > button:nth-child(3)"
+          csvButton: "button[onclick*='csvDownLoad()']"
         }
       },
       'mutualfund': {
@@ -97,13 +97,13 @@ export class RakutenUtils {
           // マイメニューから投資信託取引履歴のページに遷移 - 正確なonclickパターンを使用
           menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
           // 投資信託タブを選択
-          tabSelector: "#str-container > div > main > form:nth-child(10) > div:nth-child(3) > ul > li:nth-child(2) > a",
+          tabSelector: "a[href*='ass_fu_real_gain_loss.do']",
           // 表示期間のラジオボタンをすべてを選択
           periodRadio: "#termCdALL",
           // この条件で表示するボタン押下
-          displayButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(18) > div.pcmm-ass-real-gl-toggle.pcmm--is-mb-24 > div > button",
+          displayButton: "button[onclick*='search()']",
           // csv保存ボタンを押下
-          csvButton: "#str-container > div > main > form:nth-child(16) > div:nth-child(19) > div > button:nth-child(3)"
+          csvButton: "button[onclick*='csvDownLoad()']"
         }
       }
     };
