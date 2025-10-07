@@ -15,7 +15,7 @@ const mockChrome = {
     sendMessage: vi.fn(),
     create: vi.fn(),
   },
-} as any
+} as unknown as typeof chrome
 
 // beforeAll(() => {
 //   Object.defineProperty(global, 'chrome', {

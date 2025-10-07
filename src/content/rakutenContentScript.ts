@@ -293,8 +293,6 @@ class RakutenCsvExtension {
 
     // MutationObserverで要素の出現を待機
     return new Promise((resolve, reject) => {
-      let timeoutId: number;
-
       const observer = new MutationObserver(() => {
         for (const selector of selectors) {
           try {
@@ -320,7 +318,7 @@ class RakutenCsvExtension {
         attributeFilter: ['style', 'class', 'hidden']
       });
 
-      timeoutId = window.setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         observer.disconnect();
         reject(new Error(`要素が見つかりませんでした: ${selectorGroup} (${timeout}ms)`));
       }, timeout);

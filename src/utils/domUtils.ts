@@ -182,7 +182,6 @@ export class DomUtils {
         return;
       }
 
-      let timeoutId: number;
       const observer = new MutationObserver(() => {
         const element = document.querySelector(selector);
         if (element && this.isElementInteractable(element)) {
@@ -199,7 +198,7 @@ export class DomUtils {
         attributeFilter: ['style', 'class', 'hidden']
       });
 
-      timeoutId = window.setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         observer.disconnect();
         reject(new Error(`要素が見つかりませんでした: ${selector} (${timeout}ms)`));
       }, timeout);
@@ -322,7 +321,7 @@ export class DomUtils {
         case 'image':
           // 画像ボタンの場合、onclickイベントを直接実行
           if (element.onclick) {
-            element.onclick.call(element, new MouseEvent('click'));
+            element.onclick.call(element, new MouseEvent('click') as PointerEvent);
             console.log('onclick関数の直接実行が成功しました');
             return true;
           }
@@ -348,7 +347,7 @@ export class DomUtils {
 
       // onclick属性の直接実行
       if (element.onclick) {
-        element.onclick.call(element, new MouseEvent('click'));
+        element.onclick.call(element, new MouseEvent('click') as PointerEvent);
         console.log('ボタンのonclick関数実行が成功しました');
         return true;
       }

@@ -158,7 +158,7 @@ class RakutenCsvBackgroundService {
    */
   private handleTabUpdate(
     tabId: number,
-    changeInfo: chrome.tabs.TabChangeInfo,
+    changeInfo: chrome.tabs.OnUpdatedInfo,
     tab: chrome.tabs.Tab
   ): void {
     if (changeInfo.status === 'complete' && tab.url) {
@@ -182,7 +182,7 @@ class RakutenCsvBackgroundService {
   /**
    * タブアクティブ化処理
    */
-  private handleTabActivation(activeInfo: chrome.tabs.TabActiveInfo): void {
+  private handleTabActivation(activeInfo: chrome.tabs.OnActivatedInfo): void {
     chrome.tabs.get(activeInfo.tabId, (tab) => {
       if (!chrome.runtime.lastError && tab.url && this.isRakutenSecurities(tab.url)) {
         this.setActiveTab(activeInfo.tabId);
@@ -487,7 +487,7 @@ class RakutenCsvBackgroundService {
    */
   private notifyUpdate(): void {
     this.state.rakutenTabs.forEach(tabId => {
-      chrome.tabs.sendMessage(tabId, { action: 'extension-updated' }, (_response) => {
+      chrome.tabs.sendMessage(tabId, { action: 'extension-updated' }, () => {
         if (chrome.runtime.lastError) {
           this.log('タブへの更新通知に失敗:', chrome.runtime.lastError.message);
           this.removeRakutenTab(tabId);
