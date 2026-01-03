@@ -2,38 +2,36 @@ import { ShokenWebUrlConfig } from '../types/shokenweb';
 
 export class ShokenWebUtils {
     private static readonly URL_CONFIG: ShokenWebUrlConfig = {
-        baseUrl: 'https://zaichu.github.io/shoken-webapp/'
+        baseUrl: 'https://shoken-webapp.vercel.app'
     };
 
     /**
-     * 証券WebのURL設定
+     * 証券Webのトップページを新しいタブで開く
+     * @throws {Error} Chrome拡張機能のAPIが利用できない場合
+     * @returns {Promise<void>} タブの作成が完了したときに解決されるPromise
      */
-    private static readonly DOMAIN_PATTERN = 'zaichu.github.io/shoken-webapp/';
-
-    /**
-     * 証券Webのサイトかどうかを判定
-     */
-    static isShokenWeb(url: string): boolean {
-        try {
-            return url.includes(this.DOMAIN_PATTERN);
-        } catch (error) {
-            console.warn('URL判定エラー:', error);
-            return false;
+    static async openShokenWebPage(): Promise<void> {
+        if (!chrome?.tabs?.create) {
+            const error = new Error('Chrome拡張機能のAPIが利用できません');
+            console.error('証券Webページを開けませんでした:', error);
+            throw error;
         }
-    }
 
-    /**
-     * 証券Webのトップページを開く
-     */
-    static openShokenWebPage(): void {
         try {
-            chrome.tabs.create({
+            await chrome.tabs.create({
                 url: this.URL_CONFIG.baseUrl
             });
         } catch (error) {
             console.error('証券Webページを開けませんでした:', error);
-            // フォールバック：直接ブラウザで開く
-            window.open(this.URL_CONFIG.baseUrl, '_blank');
+            throw error;
         }
+    }
+
+    /**
+     * 証券WebのベースURLを取得
+     * @returns {string} ベースURL
+     */
+    static getBaseUrl(): string {
+        return this.URL_CONFIG.baseUrl;
     }
 }

@@ -216,8 +216,12 @@ const RakutenCsvExtensionApp: React.FC = () => {
   /**
    * 証券Webページを開く
    */
-  const handleOpenShokenWebPage = useCallback((): void => {
-    ShokenWebUtils.openShokenWebPage();
+  const handleOpenShokenWebPage = useCallback(async (): Promise<void> => {
+    try {
+      await ShokenWebUtils.openShokenWebPage();
+    } catch (error) {
+      console.error('証券Webページを開く際にエラーが発生しました:', error);
+    }
   }, []);
 
   /**
