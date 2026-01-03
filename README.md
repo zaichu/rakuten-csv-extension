@@ -2,7 +2,7 @@
 
 楽天証券の各種ページから投資データをCSV形式で簡単にダウンロードできるChrome拡張機能です。
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/zaichu6/rakuten-csv-extension)
+[![Version](https://img.shields.io/badge/version-2.0.3-blue.svg)](https://github.com/zaichu6/rakuten-csv-extension)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)](https://www.typescriptlang.org/)
 
