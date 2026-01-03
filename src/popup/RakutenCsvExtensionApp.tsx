@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Header, Footer, IconLabel, Message } from '../components';
 import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
@@ -26,6 +26,45 @@ interface AppConfig {
 }
 
 /**
+ * ダウンロードオプションの定義
+ */
+const DOWNLOAD_OPTIONS: readonly DownloadOption[] = [
+  {
+    id: 'assetbalance',
+    label: '国内株式',
+    icon: '📊',
+    category: 'portfolio'
+  },
+  {
+    id: 'dividend',
+    label: '配当金・分配金',
+    icon: '💰',
+    category: 'income'
+  },
+  {
+    id: 'domesticstock',
+    label: '国内株式',
+    icon: '📋',
+    category: 'transaction'
+  },
+  {
+    id: 'mutualfund',
+    label: '投資信託',
+    icon: '📋',
+    category: 'transaction'
+  }
+] as const;
+
+/**
+ * カテゴリ別にグループ化されたオプション
+ */
+const CATEGORIZED_OPTIONS: Record<string, DownloadOption[]> = {
+  portfolio: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'portfolio'),
+  income: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'income'),
+  transaction: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'transaction')
+};
+
+/**
  * 楽天証券CSV拡張機能のメインアプリケーション
  * 完全にリファクタリングされたバージョン
  */
@@ -41,58 +80,16 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
   // アプリケーション設定
   const appConfig: AppConfig = {
-    version: '1.0.0',
+    version: __APP_VERSION__,
     defaultSelectedOptions: [],
     enableBatchOperations: true
   };
-
-  // ダウンロードオプションの定義（useMemoで最適化）
-  const downloadOptions: readonly DownloadOption[] = useMemo(() => [
-    {
-      id: 'assetbalance',
-      label: '国内株式',
-      icon: '📊',
-      category: 'portfolio'
-    },
-    {
-      id: 'dividend',
-      label: '配当金・分配金',
-      icon: '💰',
-      category: 'income'
-    },
-    {
-      id: 'domesticstock',
-      label: '国内株式',
-      icon: '📋',
-      category: 'transaction'
-    },
-    {
-      id: 'mutualfund',
-      label: '投資信託',
-      icon: '📋',
-      category: 'transaction'
-    }
-  ], []);
 
   // 選択されたオプションの状態管理
   const [selectedOptions, setSelectedOptions] = useState<Set<CsvDownloadType>>(
     new Set(appConfig.defaultSelectedOptions)
   );
 
-  /**
-   * カテゴリ別のオプションを取得
-   */
-  const categorizedOptions = useMemo(() => {
-    const categories = downloadOptions.reduce((acc, option) => {
-      if (!acc[option.category]) {
-        acc[option.category] = [];
-      }
-      acc[option.category].push(option);
-      return acc;
-    }, {} as Record<string, DownloadOption[]>);
-
-    return categories;
-  }, [downloadOptions]);
 
   /**
    * カテゴリの表示名を取得
@@ -137,7 +134,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
    * カテゴリ全体の選択/解除
    */
   const handleCategoryToggle = useCallback((category: string) => {
-    const categoryOptions = categorizedOptions[category]?.map(opt => opt.id) || [];
+    const categoryOptions = CATEGORIZED_OPTIONS[category]?.map(opt => opt.id) || [];
     const allSelected = categoryOptions.every(id => selectedOptions.has(id));
 
     setSelectedOptions(prev => {
@@ -153,13 +150,13 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
       return newSet;
     });
-  }, [categorizedOptions, selectedOptions]);
+  }, [selectedOptions]);
 
   /**
    * 全選択/全解除の処理
    */
   const handleSelectAll = useCallback(() => {
-    const allOptions = downloadOptions.map(opt => opt.id);
+    const allOptions = DOWNLOAD_OPTIONS.map(opt => opt.id);
     const allSelected = allOptions.every(id => selectedOptions.has(id));
 
     if (allSelected) {
@@ -167,7 +164,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     } else {
       setSelectedOptions(new Set(allOptions));
     }
-  }, [downloadOptions, selectedOptions]);
+  }, [selectedOptions]);
 
   /**
    * CSVダウンロード処理
@@ -353,7 +350,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
    * 選択状況の表示
    */
   const renderSelectionSummary = useCallback(() => {
-    const allOptionsCount = downloadOptions.length;
+    const allOptionsCount = DOWNLOAD_OPTIONS.length;
     const selectedCount = selectedOptions.size;
     const allSelected = selectedCount === allOptionsCount;
 
@@ -381,7 +378,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
       </div>
     );
-  }, [downloadOptions.length, selectedOptions.size, handleSelectAll, isDownloading]);
+  }, [selectedOptions.size, handleSelectAll, isDownloading]);
 
   return (
     <div className="popup-container" style={{ width: '350px', height: 'auto', overflow: 'hidden' }}>
@@ -429,7 +426,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* 取得オプションセクション */}
         <div className="mb-2">
           {/* カテゴリ別オプション表示 */}
-          {Object.entries(categorizedOptions).map(([category, options]) =>
+          {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) =>
             renderCategoryOptions(category, options)
           )}
         </div>

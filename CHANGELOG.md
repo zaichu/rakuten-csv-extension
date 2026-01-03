@@ -12,6 +12,10 @@
   - 非同期処理への対応
   - Chrome API存在チェックの追加
   - 不適切なフォールバック処理の削除
+- RakutenCsvExtensionApp.tsxのパフォーマンス最適化
+  - useMemoの不要な使用を削除
+  - 定数をコンポーネント外に移動
+  - React Hooks v7のルールに準拠
 
 ### 追加
 - shokenwebUtils.tsの包括的なユニットテスト実装
@@ -22,6 +26,23 @@
 ### 変更
 - `openShokenWebPage()`を同期関数から非同期関数に変更
 - `getBaseUrl()`メソッドを追加
+- バージョン管理を一元化
+  - `package.json`を単一の真実の源として設定
+  - `vite.config.ts`でバージョンを`manifest.json`とアプリに自動注入
+  - `__APP_VERSION__`グローバル変数を追加
+
+### 依存関係の更新
+すべてのパッケージを最新版に更新:
+- React: 19.2.0 → 19.2.3
+- React DOM: 19.2.0 → 19.2.3
+- Vitest: 3.2.4 → 4.0.16（メジャーアップデート）
+- Vite: 7.1.9 → 7.3.0
+- ESLint: 9.37.0 → 9.39.2
+- eslint-plugin-react-hooks: 6.1.1 → 7.0.1（メジャーアップデート）
+- typescript-eslint: 8.46.0 → 8.51.0
+- @types/chrome: 0.1.22 → 0.1.32
+- その他のdevDependenciesを最新版に更新
+- セキュリティ脆弱性の修正（js-yaml）
 
 ## [2.0.2] - 2024-XX-XX
 
