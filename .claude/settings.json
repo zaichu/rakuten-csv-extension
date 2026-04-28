@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(fly version:*)",
+      "Bash(cargo:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(codex:*)",
+      "Bash(~/.vite-plus/0.1.12/bin/vp:*)",
+      "Bash(make:*)",
+      "Bash(bash:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(sed:*)",
+      "Bash(grep:*)"
+    ]
+  },
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
+}
