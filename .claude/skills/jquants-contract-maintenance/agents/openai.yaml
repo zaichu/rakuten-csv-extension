@@ -1,0 +1,5 @@
+interface:
+  display_name: "J-Quants Contract Maintenance"
+  short_description: "Maintain J-Quants API contracts and type sync"
+  default_prompt: "Use $jquants-contract-maintenance to investigate J-Quants API contract drift and update backend/frontend types."
+  brand_color: "#0F766E"
