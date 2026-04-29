@@ -1,7 +1,5 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import RakutenCsvExtensionApp from "./RakutenCsvExtensionApp";
 import 'bootstrap/dist/css/bootstrap.min.css';
 import '../styles/tailwind.css';
@@ -15,16 +13,8 @@ if (!root) {
 
 root.id = 'crx-popup-root';
 
-const queryClient = new QueryClient();
-
 createRoot(root).render(
     <StrictMode>
-        <QueryClientProvider client={queryClient}>
-            <MemoryRouter>
-                <Routes>
-                    <Route path="/" element={<RakutenCsvExtensionApp />} />
-                </Routes>
-            </MemoryRouter>
-        </QueryClientProvider>
+        <RakutenCsvExtensionApp />
     </StrictMode>
 );
