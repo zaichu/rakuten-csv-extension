@@ -165,7 +165,8 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
    * メッセージの自動処理
    */
   useEffect(() => {
-    processMessageQueue();
+    const timer = window.setTimeout(processMessageQueue, 0);
+    return () => window.clearTimeout(timer);
   }, [processMessageQueue]);
 
   /**
