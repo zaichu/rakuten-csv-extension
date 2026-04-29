@@ -11,6 +11,7 @@ permissions:
   contents: write
   pull-requests: write
   actions: write
+  statuses: write
 
 jobs:
   bump-version:
@@ -58,4 +59,50 @@ jobs:
             --title "バージョンを${VERSION}に更新" \
             --body "PR #${SOURCE_PR} の main マージに伴う自動 patch version 更新です。"
 
+          SHA="$(git rev-parse HEAD)"
+
           gh workflow run ci.yml --ref "$BRANCH" --field ref="$BRANCH"
+
+          sleep 10
+          RUN_ID=""
+          for i in $(seq 1 30); do
+            RUN_ID="$(gh run list \
+              --workflow ci.yml \
+              --branch "$BRANCH" \
+              --event workflow_dispatch \
+              --limit 1 \
+              --json databaseId,headSha \
+              --jq ".[] | select(.headSha == \"$SHA\") | .databaseId" 2>/dev/null || true)"
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "CI run not found for SHA $SHA" >&2
+            exit 1
+          fi
+
+          RUN_URL="$(gh run list \
+            --workflow ci.yml \
+            --branch "$BRANCH" \
+            --event workflow_dispatch \
+            --limit 1 \
+            --json databaseId,url \
+            --jq ".[] | select(.databaseId == $RUN_ID) | .url")"
+
+          if gh run watch "$RUN_ID" --exit-status; then
+            gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+              -f state=success \
+              -f context="Build and Test" \
+              -f description="CI workflow_dispatch passed" \
+              -f target_url="$RUN_URL"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+              -f state=failure \
+              -f context="Build and Test" \
+              -f description="CI workflow_dispatch failed" \
+              -f target_url="$RUN_URL"
+            exit 1
+          fi
