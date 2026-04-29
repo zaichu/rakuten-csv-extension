@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   bump-version:
@@ -56,3 +57,5 @@ jobs:
             --head "$BRANCH" \
             --title "バージョンを${VERSION}に更新" \
             --body "PR #${SOURCE_PR} の main マージに伴う自動 patch version 更新です。"
+
+          gh workflow run ci.yml --ref "$BRANCH" --field ref="$BRANCH"

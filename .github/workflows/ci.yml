@@ -7,6 +7,12 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or ref to run CI on'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -15,6 +21,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-node@v6
         with:
