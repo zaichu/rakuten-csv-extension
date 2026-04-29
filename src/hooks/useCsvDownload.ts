@@ -1,6 +1,17 @@
 import { useState, useCallback } from 'react';
 import type { DownloadResponse, CsvDownloadType, ChromeApiResponse } from '../types';
 
+function isDownloadResponse(value: unknown): value is DownloadResponse {
+  if (typeof value !== 'object' || value === null) return false;
+  return typeof (value as Record<string, unknown>).success === 'boolean';
+}
+
+function isWrappedResponse(value: unknown): value is ChromeApiResponse<DownloadResponse> {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.success === 'boolean' && 'data' in v;
+}
+
 /**
  * CSVダウンロード状態
  */
@@ -108,28 +119,31 @@ export const useCsvDownload = () => {
     tabId: number
   ): Promise<DownloadResponse> => {
     try {
-      const response = await chrome.runtime.sendMessage({
+      const rawResponse: unknown = await chrome.runtime.sendMessage({
         action: 'download-csv-request',
-        payload: { 
-          selectedOptions: Array.from(selectedOptions), 
-          tabId 
+        payload: {
+          selectedOptions: Array.from(selectedOptions),
+          tabId
         }
-      }) as ChromeApiResponse<DownloadResponse>;
+      });
 
-      if (!response) {
+      if (!rawResponse) {
         throw new Error('バックグラウンドサービスから応答がありません');
       }
 
       // レスポンスが直接DownloadResponseの場合とChrome APIResponseの場合を処理
-      if ('success' in response && typeof response.success === 'boolean') {
-        return response as DownloadResponse;
+      if (isWrappedResponse(rawResponse)) {
+        if (rawResponse.success && isDownloadResponse(rawResponse.data)) {
+          return rawResponse.data;
+        }
+        return { success: false, error: rawResponse.error || '不明なエラーが発生しました' };
       }
 
-      if (response.success && response.data) {
-        return response.data;
+      if (isDownloadResponse(rawResponse)) {
+        return rawResponse;
       }
 
-      throw new Error(response.error || '不明なエラーが発生しました');
+      return { success: false, error: '不正なレスポンス形式です' };
 
     } catch (error) {
       if (error instanceof Error) {
