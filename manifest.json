@@ -30,9 +30,7 @@
     ],
     "permissions": [
         "activeTab",
-        "downloads",
-        "tabs",
-        "contextMenus"
+        "tabs"
     ],
     "host_permissions": [
         "https://*.rakuten-sec.co.jp/*"

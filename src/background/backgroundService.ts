@@ -18,7 +18,7 @@ import type {
   CsvDownloadType,
   CsvDownloadStep
 } from '../types';
-import { RakutenUtils } from '../utils';
+import { RakutenUtils, withTimeout } from '../utils';
 
 /**
  * 拡張機能の設定
@@ -426,7 +426,7 @@ class RakutenCsvBackgroundService {
     step: CsvDownloadStep,
     selectors: CsvDownloadConfig['selectors']
   ): Promise<DownloadResponse> {
-    return new Promise((resolve) => {
+    const sendMessagePromise = new Promise<DownloadResponse>((resolve) => {
       chrome.tabs.sendMessage(tabId, {
         action: 'execute-csv-download',
         payload: {
@@ -444,6 +444,12 @@ class RakutenCsvBackgroundService {
         }
       });
     });
+
+    return withTimeout(
+      sendMessagePromise,
+      this.config.stepTimeout,
+      `ステップ ${step} がタイムアウトしました（${this.config.stepTimeout}ms）`
+    );
   }
 
   /**

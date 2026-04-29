@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import { vi, beforeEach } from 'vitest'
 
-// Chrome拡張機能のAPIモック
 const mockChrome = {
   runtime: {
     onMessage: {
@@ -17,14 +16,15 @@ const mockChrome = {
   },
 } as unknown as typeof chrome
 
-// beforeAll(() => {
-//   Object.defineProperty(global, 'chrome', {
-//     value: mockChrome,
-//     writable: true,
-//   })
-// })
+Object.defineProperty(globalThis, 'chrome', {
+  value: mockChrome,
+  writable: true,
+})
 
-// CSSのインポートをモック
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
 vi.mock('bootstrap/dist/css/bootstrap.min.css', () => ({}))
 vi.mock('../popup/custom.css', () => ({}))
 

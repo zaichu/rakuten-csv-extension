@@ -22,7 +22,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    minify: false, // デバッグ用に一時的に無効化
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         chunkFileNames: 'assets/[name]-[hash].js',
