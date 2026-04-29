@@ -1,0 +1,58 @@
+name: Auto Version Bump
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version:
+    name: Create Version Bump PR
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref != 'chore/auto-version-bump' &&
+      !startsWith(github.event.pull_request.head.ref, 'chore/version-bump-')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        run: npm version patch --no-git-tag-version
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_PR: ${{ github.event.pull_request.number }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          BRANCH="chore/version-bump-${SOURCE_PR}-to-${VERSION}"
+
+          git switch -c "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "chore: バージョンを${VERSION}に更新"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "バージョンを${VERSION}に更新" \
+            --body "PR #${SOURCE_PR} の main マージに伴う自動 patch version 更新です。"
