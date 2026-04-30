@@ -7,9 +7,9 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
   },
   webServer: {
-    command: 'npm run dev',
+    command: './node_modules/.bin/vite preview --port 5173 --strictPort',
     port: 5173,
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 10_000,
   },
 });
