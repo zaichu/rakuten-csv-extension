@@ -214,9 +214,6 @@ npm run test
 
 # カバレッジ付きテスト
 npm run test:coverage
-
-# UIテストの実行
-npm run test:ui
 ```
 
 ## 🔍 トラブルシューティング
