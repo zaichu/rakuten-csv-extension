@@ -89,7 +89,7 @@
 ### 技術スタック
 - **Frontend**: React 19 + TypeScript
 - **Styling**: Bootstrap 5 (コンパクトなデザイン)
-- **Build**: Vite + @crxjs/vite-plugin
+- **Build**: Vite + esbuild
 - **Testing**: Vitest + Testing Library
 - **Code Quality**: ESLint + TypeScript strict mode
 

@@ -4,12 +4,12 @@ export default defineConfig({
   testDir: './e2e',
   use: {
     headless: true,
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://127.0.0.1:5173',
   },
   webServer: {
-    command: './node_modules/.bin/vite preview --port 5173 --strictPort',
-    port: 5173,
-    reuseExistingServer: !process.env.CI,
+    command: 'node scripts/serve-dist.mjs --port 5173',
+    url: 'http://127.0.0.1:5173/',
+    reuseExistingServer: false,
     timeout: 10_000,
   },
 });
