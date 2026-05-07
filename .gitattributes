@@ -1,0 +1,2 @@
+*.ts whitespace=cr-at-eol
+*.tsx whitespace=cr-at-eol

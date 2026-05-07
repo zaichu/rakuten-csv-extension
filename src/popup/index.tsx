@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import RakutenCsvExtensionApp from "./RakutenCsvExtensionApp";
-import 'bootstrap/dist/css/bootstrap.min.css';
 import '../styles/tailwind.css';
 
 console.log("楽天証券CSV拡張機能のポップアップが読み込まれました");

@@ -25,7 +25,6 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-vi.mock('bootstrap/dist/css/bootstrap.min.css', () => ({}))
 vi.mock('../popup/custom.css', () => ({}))
 
 export { mockChrome }

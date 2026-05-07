@@ -22,10 +22,10 @@ export const Message = ({
 
   // クラス名マッピング
   const classMap = {
-    success: 'alert-success-custom',
-    error: 'alert-danger-custom',
-    warning: 'alert-warning-custom',
-    info: 'alert-info-custom'
+    success: 'bg-green-50 text-green-800 border border-green-200',
+    error: 'bg-red-50 text-red-800 border border-red-200',
+    warning: 'bg-yellow-50 text-yellow-800 border border-yellow-200',
+    info: 'bg-blue-50 text-blue-800 border border-blue-200'
   };
 
   const getLabel = (messageType: MessageProps['type']): string => {
@@ -48,24 +48,24 @@ export const Message = ({
 
   return (
     <div
-      className={`alert alert-custom ${classMap[type]}`}
+      className={`rounded p-2 text-sm ${classMap[type]}`}
       role="alert"
     >
-      <div className="d-flex justify-content-between align-items-center">
+      <div className="flex justify-between items-center">
         <div>
-          <IconLabel 
-            icon={iconMap[type]} 
-            label={getLabel(type)} 
+          <IconLabel
+            icon={iconMap[type]}
+            label={getLabel(type)}
           />
           <div className="mt-1">{content}</div>
         </div>
         {onClose && (
           <button
             type="button"
-            className="btn-close"
+            className="ml-2 text-lg leading-none opacity-70 hover:opacity-100"
             aria-label="Close"
             onClick={onClose}
-          />
+          >×</button>
         )}
       </div>
     </div>
