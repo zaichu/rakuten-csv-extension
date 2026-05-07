@@ -3,7 +3,6 @@ import { Header, Footer, IconLabel, Message } from '../components';
 import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
 import type { CsvDownloadType } from '../types';
-import 'bootstrap/dist/css/bootstrap.min.css';
 import { ShokenWebUtils } from '../utils/shokenwebUtils';
 
 /**
@@ -227,13 +226,13 @@ const RakutenCsvExtensionApp: React.FC = () => {
   const getDownloadButtonContent = useCallback(() => {
     if (isDownloading) {
       return (
-        <div className="d-flex align-items-center">
-          <div className="spinner-border spinner-border-sm me-2" role="status">
-            <span className="visually-hidden">読み込み中...</span>
+        <div className="flex items-center">
+          <div className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" role="status">
+            <span className="sr-only">読み込み中...</span>
           </div>
           <span>{currentOperation || 'ダウンロード中...'}</span>
           {progress !== undefined && (
-            <span className="ms-2">({Math.round(progress)}%)</span>
+            <span className="ml-2">({Math.round(progress)}%)</span>
           )}
         </div>
       );
@@ -254,20 +253,20 @@ const RakutenCsvExtensionApp: React.FC = () => {
     return (
       <div key={category} className="mb-2">
         {/* カテゴリヘッダー */}
-        <div className="d-flex align-items-center justify-content-between mb-1">
-          <div className="d-flex align-items-center">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center">
             <IconLabel
               icon={getCategoryIcon(category)}
               label={getCategoryLabel(category)}
-              containerClassName="h6 mb-0 d-flex align-items-center"
+              containerClassName="text-sm font-semibold mb-0 flex items-center"
             />
-            <span className="badge bg-secondary ms-1" style={{ fontSize: '0.7em' }}>
+            <span className="inline-block bg-gray-500 text-white text-xs px-1 rounded ml-1" style={{ fontSize: '0.7em' }}>
               {selectedInCategory}/{options.length}
             </span>
           </div>
           <button
             type="button"
-            className={`btn btn-xs ${allInCategorySelected ? 'btn-outline-danger' : 'btn-outline-primary'}`}
+            className={`text-xs px-1 py-0.5 rounded border ${allInCategorySelected ? 'border-red-600 text-red-600 hover:bg-red-50' : 'border-blue-600 text-blue-600 hover:bg-blue-50'}`}
             style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
             onClick={() => handleCategoryToggle(category)}
             disabled={isDownloading}
@@ -277,25 +276,23 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
 
         {/* カテゴリ内のオプション */}
-        <div className="border rounded p-2 bg-light">
+        <div className="border rounded p-2 bg-gray-100">
           {options.map((option) => (
-            <div key={option.id} className="form-check mb-1">
+            <div key={option.id} className="flex items-center gap-2 mb-1">
               <input
-                className="form-check-input"
+                className="cursor-pointer"
                 type="checkbox"
                 id={option.id}
                 checked={selectedOptions.has(option.id)}
                 onChange={() => handleOptionChange(option.id)}
                 disabled={isDownloading}
               />
-              <label className="form-check-label w-100" htmlFor={option.id}>
-                <div className="d-flex align-items-center">
-                  <IconLabel
-                    icon={option.icon}
-                    label={option.label}
-                    containerClassName="d-inline-flex align-items-center"
-                  />
-                </div>
+              <label className="flex items-center w-full cursor-pointer" htmlFor={option.id}>
+                <IconLabel
+                  icon={option.icon}
+                  label={option.label}
+                  containerClassName="inline-flex items-center"
+                />
               </label>
             </div>
           ))}
@@ -312,17 +309,17 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
     return (
       <div className="mb-2">
-        <div className="alert alert-info py-1" style={{ fontSize: '0.85em' }}>
-          <div className="d-flex align-items-center justify-content-between">
-            <div className="d-flex align-items-center">
-              <div className="spinner-border spinner-border-sm me-1" role="status" style={{ width: '0.8rem', height: '0.8rem' }}>
-                <span className="visually-hidden">読み込み中...</span>
+        <div className="rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2" style={{ fontSize: '0.85em' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="inline-block border-2 border-current border-t-transparent rounded-full animate-spin mr-1" role="status" style={{ width: '0.8rem', height: '0.8rem' }}>
+                <span className="sr-only">読み込み中...</span>
               </div>
               <span style={{ fontSize: '0.85em' }}>{currentOperation || 'ダウンロード中...'}</span>
             </div>
             <button
               type="button"
-              className="btn btn-xs btn-outline-danger"
+              className="text-xs px-1 py-0.5 rounded border border-red-600 text-red-600 hover:bg-red-50"
               style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
               onClick={handleCancelDownload}
             >
@@ -330,9 +327,9 @@ const RakutenCsvExtensionApp: React.FC = () => {
             </button>
           </div>
           {progress !== undefined && (
-            <div className="progress mt-1" style={{ height: '4px' }}>
+            <div className="overflow-hidden bg-gray-200 rounded mt-1" style={{ height: '4px' }}>
               <div
-                className="progress-bar"
+                className="bg-blue-500 h-full"
                 role="progressbar"
                 style={{ width: `${progress}%` }}
                 aria-valuenow={progress}
@@ -356,19 +353,19 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
     return (
       <div className="mb-3">
-        <div className="d-flex align-items-center justify-content-between">
-          <div className="alert alert-info py-1 flex-grow-1 me-2 mb-0" style={{ fontSize: '0.85em' }}>
+        <div className="flex items-center justify-between">
+          <div className="rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2 grow mr-2 mb-0" style={{ fontSize: '0.85em' }}>
             <small>
               <IconLabel
                 icon="📝"
                 label={`${selectedCount}件のオプションが選択されています`}
-                containerClassName="d-flex align-items-center"
+                containerClassName="flex items-center"
               />
             </small>
           </div>
           <button
             type="button"
-            className={`btn btn-xs ${allSelected ? 'btn-outline-danger' : 'btn-outline-success'}`}
+            className={`text-xs px-1 py-0.5 rounded border ${allSelected ? 'border-red-600 text-red-600 hover:bg-red-50' : 'border-green-600 text-green-600 hover:bg-green-50'}`}
             style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
             onClick={handleSelectAll}
             disabled={isDownloading}
@@ -387,7 +384,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
       <main className="p-2" style={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
         {/* 楽天証券を開くリンク */}
         <div
-          className="mb-2 p-1 bg-light rounded cursor-pointer border"
+          className="mb-2 p-1 bg-gray-100 rounded cursor-pointer border"
           onClick={handleOpenRakutenPage}
           style={{ cursor: 'pointer' }}
           role="button"
@@ -397,13 +394,13 @@ const RakutenCsvExtensionApp: React.FC = () => {
           <IconLabel
             icon="🔗"
             label="楽天証券を開く"
-            containerClassName="text-primary d-flex align-items-center"
+            containerClassName="text-blue-600 flex items-center"
           />
         </div>
 
         {/* 証券Webを開くリンク */}
         <div
-          className="mb-2 p-1 bg-light rounded cursor-pointer border"
+          className="mb-2 p-1 bg-gray-100 rounded cursor-pointer border"
           onClick={handleOpenShokenWebPage}
           style={{ cursor: 'pointer' }}
           role="button"
@@ -413,7 +410,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
           <IconLabel
             icon="🔗"
             label="証券Webを開く"
-            containerClassName="text-primary d-flex align-items-center"
+            containerClassName="text-blue-600 flex items-center"
           />
         </div>
 
@@ -432,11 +429,11 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
 
         {/* ダウンロードボタン */}
-        <div className="d-grid mb-2">
+        <div className="mb-2">
           <button
-            className={`btn ${selectedOptions.size > 0 && !isDownloading
-              ? 'btn-primary'
-              : 'btn-secondary'
+            className={`w-full py-1 rounded text-white ${selectedOptions.size > 0 && !isDownloading
+              ? 'bg-blue-600 hover:bg-blue-700'
+              : 'bg-gray-500'
               }`}
             onClick={handleDownload}
             disabled={isDownloading || selectedOptions.size === 0}

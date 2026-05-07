@@ -203,12 +203,12 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
    */
   const getMessageClass = useCallback((messageType: MessageType): string => {
     const classes: Record<MessageType, string> = {
-      success: 'alert-success',
-      error: 'alert-danger',
-      warning: 'alert-warning',
-      info: 'alert-info'
+      success: 'bg-green-50 text-green-800 border border-green-200',
+      error: 'bg-red-50 text-red-800 border border-red-200',
+      warning: 'bg-yellow-50 text-yellow-800 border border-yellow-200',
+      info: 'bg-blue-50 text-blue-800 border border-blue-200'
     };
-    return classes[messageType] || 'alert-info';
+    return classes[messageType] || classes.info;
   }, []);
 
   return {

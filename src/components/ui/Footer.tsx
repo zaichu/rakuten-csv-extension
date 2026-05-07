@@ -5,7 +5,7 @@ import type { FooterProps } from '../../types';
  */
 export const Footer = ({ 
   version, 
-  className = 'badge bg-secondary text-center w-100' 
+  className = 'block bg-gray-500 text-white text-center w-full text-xs px-2 py-0.5'
 }: FooterProps) => (
   <footer>
     <div className={className}>
