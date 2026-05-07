@@ -3,9 +3,9 @@ import type { FooterProps } from '../../types';
 /**
  * アプリケーションフッターコンポーネント
  */
-export const Footer = ({ 
-  version, 
-  className = 'block bg-gray-500 text-white text-center w-full text-xs px-2 py-0.5'
+export const Footer = ({
+  version,
+  className = 'popup-footer'
 }: FooterProps) => (
   <footer>
     <div className={className}>

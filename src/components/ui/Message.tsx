@@ -22,10 +22,10 @@ export const Message = ({
 
   // クラス名マッピング
   const classMap = {
-    success: 'bg-green-50 text-green-800 border border-green-200',
-    error: 'bg-red-50 text-red-800 border border-red-200',
-    warning: 'bg-yellow-50 text-yellow-800 border border-yellow-200',
-    info: 'bg-blue-50 text-blue-800 border border-blue-200'
+    success: 'msg-success',
+    error: 'msg-error',
+    warning: 'msg-warning',
+    info: 'msg-info'
   };
 
   const getLabel = (messageType: MessageProps['type']): string => {
@@ -47,22 +47,16 @@ export const Message = ({
   }, [autoClose, onClose, duration]);
 
   return (
-    <div
-      className={`rounded p-2 text-sm ${classMap[type]}`}
-      role="alert"
-    >
-      <div className="flex justify-between items-center">
-        <div>
-          <IconLabel
-            icon={iconMap[type]}
-            label={getLabel(type)}
-          />
+    <div className={classMap[type]} role="alert">
+      <div className="msg-inner">
+        <div className="flex-1">
+          <IconLabel icon={iconMap[type]} label={getLabel(type)} />
           <div className="mt-1">{content}</div>
         </div>
         {onClose && (
           <button
             type="button"
-            className="ml-2 text-lg leading-none opacity-70 hover:opacity-100"
+            className="msg-close"
             aria-label="Close"
             onClick={onClose}
           >×</button>
