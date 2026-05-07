@@ -1,1 +1,216 @@
-@import "tailwindcss/utilities";
+@import "tailwindcss";
+
+@layer components {
+  /* ── Popup layout ────────────────────────────────────────── */
+  .popup-container {
+    @apply flex flex-col bg-white text-gray-900 box-border;
+    width: 350px;
+    height: auto;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  .popup-main {
+    @apply p-2 overflow-y-auto;
+  }
+
+  /* ── Header ──────────────────────────────────────────────── */
+  .popup-header {
+    @apply font-bold bg-red-600 text-white text-center py-1 px-2;
+    font-size: 0.9rem;
+  }
+
+  /* ── Footer ──────────────────────────────────────────────── */
+  .popup-footer {
+    @apply block bg-gray-500 text-white text-center w-full text-xs px-2 py-0.5;
+  }
+
+  /* ── Link rows (role=button divs) ────────────────────────── */
+  .link-row {
+    @apply flex items-center gap-1.5 mb-2 px-2 py-1 bg-gray-100 rounded border border-gray-300 cursor-pointer text-blue-600 text-xs select-none;
+  }
+  .link-row:hover {
+    @apply bg-blue-50 border-blue-300;
+  }
+  .link-row:focus-visible {
+    @apply outline-2 outline-blue-500 outline-offset-1;
+  }
+
+  /* ── Category section ────────────────────────────────────── */
+  .category-section {
+    @apply mb-2;
+  }
+
+  .category-header {
+    @apply flex items-center justify-between mb-1;
+  }
+
+  .category-title {
+    @apply text-xs font-semibold flex items-center gap-1;
+  }
+
+  /* カテゴリ内選択数チップ */
+  .category-count {
+    @apply inline-block bg-gray-500 text-white rounded px-1 leading-snug ml-1;
+    font-size: 0.68em;
+  }
+
+  .category-body {
+    @apply border border-gray-200 rounded px-2 pt-1 pb-0 bg-gray-50;
+  }
+
+  /* ── Option rows (checkbox + label) ─────────────────────── */
+  .option-row {
+    @apply flex items-center gap-2 mb-1;
+  }
+  .option-row:last-child {
+    @apply mb-0;
+  }
+  .option-row input[type="checkbox"] {
+    @apply cursor-pointer accent-blue-600;
+  }
+  .option-row label {
+    @apply flex items-center w-full cursor-pointer text-xs;
+  }
+
+  /* ── Small toggle buttons (全選択 / 全解除) ──────────────── */
+  /* カテゴリ：全選択 */
+  .tog-on {
+    @apply rounded border border-blue-600 text-blue-600 cursor-pointer leading-none;
+    font-size: 0.68em;
+    padding: 0.15rem 0.35rem;
+  }
+  .tog-on:hover:not(:disabled) {
+    @apply bg-blue-50;
+  }
+  .tog-on:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* カテゴリ：全解除 */
+  .tog-off {
+    @apply rounded border border-red-600 text-red-600 cursor-pointer leading-none;
+    font-size: 0.68em;
+    padding: 0.15rem 0.35rem;
+  }
+  .tog-off:hover:not(:disabled) {
+    @apply bg-red-50;
+  }
+  .tog-off:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* 全体：全選択 */
+  .tog-all-on {
+    @apply rounded border border-green-600 text-green-600 cursor-pointer leading-none;
+    font-size: 0.68em;
+    padding: 0.15rem 0.35rem;
+  }
+  .tog-all-on:hover:not(:disabled) {
+    @apply bg-green-50;
+  }
+  .tog-all-on:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* 全体：全解除 */
+  .tog-all-off {
+    @apply rounded border border-red-600 text-red-600 cursor-pointer leading-none;
+    font-size: 0.68em;
+    padding: 0.15rem 0.35rem;
+  }
+  .tog-all-off:hover:not(:disabled) {
+    @apply bg-red-50;
+  }
+  .tog-all-off:disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* ── Download button ─────────────────────────────────────── */
+  .cta-active {
+    @apply w-full py-1.5 rounded text-white text-xs font-medium flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
+  }
+  .cta-active:hover {
+    @apply bg-blue-700;
+  }
+  .cta-active:focus-visible {
+    @apply outline-2 outline-blue-400 outline-offset-1;
+  }
+
+  .cta-disabled {
+    @apply w-full py-1.5 rounded text-white text-xs font-medium flex items-center justify-center gap-1 bg-gray-400 cursor-not-allowed opacity-70;
+  }
+
+  /* ── Selection summary ───────────────────────────────────── */
+  .selection-summary {
+    @apply flex items-center justify-between gap-2 mb-3;
+  }
+
+  .selection-info {
+    @apply flex-1 rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2 flex items-center gap-1;
+    font-size: 0.78em;
+  }
+
+  /* ── Progress / in-progress notice ──────────────────────── */
+  .progress-notice {
+    @apply mb-2 rounded border bg-blue-50 text-blue-800 border-blue-200 py-1 px-2;
+    font-size: 0.82em;
+  }
+
+  .progress-row {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .progress-label {
+    @apply flex items-center gap-1;
+  }
+
+  .progress-track {
+    @apply overflow-hidden bg-gray-200 rounded mt-1;
+    height: 4px;
+  }
+
+  .progress-fill {
+    @apply bg-blue-500 h-full transition-all;
+  }
+
+  /* ── Spinner ─────────────────────────────────────────────── */
+  .spinner-xs {
+    @apply inline-block border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0;
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  /* ── Message component ───────────────────────────────────── */
+  .msg-success {
+    @apply rounded p-2 text-xs bg-green-50 text-green-800 border border-green-200;
+  }
+
+  .msg-error {
+    @apply rounded p-2 text-xs bg-red-50 text-red-800 border border-red-200;
+  }
+
+  .msg-warning {
+    @apply rounded p-2 text-xs bg-yellow-50 text-yellow-800 border border-yellow-200;
+  }
+
+  .msg-info {
+    @apply rounded p-2 text-xs bg-blue-50 text-blue-800 border border-blue-200;
+  }
+
+  .msg-inner {
+    @apply flex justify-between items-start gap-2;
+  }
+
+  .msg-close {
+    @apply flex-shrink-0 text-base leading-none opacity-60 cursor-pointer;
+  }
+  .msg-close:hover {
+    @apply opacity-100;
+  }
+
+  /* ── Icon label ──────────────────────────────────────────── */
+  .icon-label {
+    @apply flex items-center gap-1;
+  }
+}

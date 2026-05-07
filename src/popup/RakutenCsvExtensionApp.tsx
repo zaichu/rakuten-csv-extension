@@ -226,15 +226,11 @@ const RakutenCsvExtensionApp: React.FC = () => {
   const getDownloadButtonContent = useCallback(() => {
     if (isDownloading) {
       return (
-        <div className="flex items-center">
-          <div className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" role="status">
-            <span className="sr-only">読み込み中...</span>
-          </div>
+        <>
+          <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
           <span>{currentOperation || 'ダウンロード中...'}</span>
-          {progress !== undefined && (
-            <span className="ml-2">({Math.round(progress)}%)</span>
-          )}
-        </div>
+          {progress !== undefined && <span>({Math.round(progress)}%)</span>}
+        </>
       );
     }
 
@@ -251,23 +247,16 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allInCategorySelected = selectedInCategory === options.length;
 
     return (
-      <div key={category} className="mb-2">
-        {/* カテゴリヘッダー */}
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center">
-            <IconLabel
-              icon={getCategoryIcon(category)}
-              label={getCategoryLabel(category)}
-              containerClassName="text-sm font-semibold mb-0 flex items-center"
-            />
-            <span className="inline-block bg-gray-500 text-white text-xs px-1 rounded ml-1" style={{ fontSize: '0.7em' }}>
-              {selectedInCategory}/{options.length}
-            </span>
+      <div key={category} className="category-section">
+        <div className="category-header">
+          <div className="category-title">
+            <span>{getCategoryIcon(category)}</span>
+            <span>{getCategoryLabel(category)}</span>
+            <span className="category-count">{selectedInCategory}/{options.length}</span>
           </div>
           <button
             type="button"
-            className={`text-xs px-1 py-0.5 rounded border ${allInCategorySelected ? 'border-red-600 text-red-600 hover:bg-red-50' : 'border-blue-600 text-blue-600 hover:bg-blue-50'}`}
-            style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
+            className={allInCategorySelected ? 'tog-off' : 'tog-on'}
             onClick={() => handleCategoryToggle(category)}
             disabled={isDownloading}
           >
@@ -275,24 +264,18 @@ const RakutenCsvExtensionApp: React.FC = () => {
           </button>
         </div>
 
-        {/* カテゴリ内のオプション */}
-        <div className="border rounded p-2 bg-gray-100">
+        <div className="category-body">
           {options.map((option) => (
-            <div key={option.id} className="flex items-center gap-2 mb-1">
+            <div key={option.id} className="option-row">
               <input
-                className="cursor-pointer"
                 type="checkbox"
                 id={option.id}
                 checked={selectedOptions.has(option.id)}
                 onChange={() => handleOptionChange(option.id)}
                 disabled={isDownloading}
               />
-              <label className="flex items-center w-full cursor-pointer" htmlFor={option.id}>
-                <IconLabel
-                  icon={option.icon}
-                  label={option.label}
-                  containerClassName="inline-flex items-center"
-                />
+              <label htmlFor={option.id}>
+                <IconLabel icon={option.icon} label={option.label} />
               </label>
             </div>
           ))}
@@ -308,37 +291,32 @@ const RakutenCsvExtensionApp: React.FC = () => {
     if (!isDownloading) return null;
 
     return (
-      <div className="mb-2">
-        <div className="rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2" style={{ fontSize: '0.85em' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <div className="inline-block border-2 border-current border-t-transparent rounded-full animate-spin mr-1" role="status" style={{ width: '0.8rem', height: '0.8rem' }}>
-                <span className="sr-only">読み込み中...</span>
-              </div>
-              <span style={{ fontSize: '0.85em' }}>{currentOperation || 'ダウンロード中...'}</span>
-            </div>
-            <button
-              type="button"
-              className="text-xs px-1 py-0.5 rounded border border-red-600 text-red-600 hover:bg-red-50"
-              style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
-              onClick={handleCancelDownload}
-            >
-              キャンセル
-            </button>
+      <div className="progress-notice">
+        <div className="progress-row">
+          <div className="progress-label">
+            <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
+            <span>{currentOperation || 'ダウンロード中...'}</span>
           </div>
-          {progress !== undefined && (
-            <div className="overflow-hidden bg-gray-200 rounded mt-1" style={{ height: '4px' }}>
-              <div
-                className="bg-blue-500 h-full"
-                role="progressbar"
-                style={{ width: `${progress}%` }}
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              />
-            </div>
-          )}
+          <button
+            type="button"
+            className="tog-off"
+            onClick={handleCancelDownload}
+          >
+            キャンセル
+          </button>
         </div>
+        {progress !== undefined && (
+          <div className="progress-track">
+            <div
+              className="progress-fill"
+              role="progressbar"
+              style={{ width: `${progress}%` }}
+              aria-valuenow={progress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            />
+          </div>
+        )}
       </div>
     );
   }, [isDownloading, currentOperation, progress, handleCancelDownload]);
@@ -352,66 +330,50 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allSelected = selectedCount === allOptionsCount;
 
     return (
-      <div className="mb-3">
-        <div className="flex items-center justify-between">
-          <div className="rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2 grow mr-2 mb-0" style={{ fontSize: '0.85em' }}>
-            <small>
-              <IconLabel
-                icon="📝"
-                label={`${selectedCount}件のオプションが選択されています`}
-                containerClassName="flex items-center"
-              />
-            </small>
-          </div>
-          <button
-            type="button"
-            className={`text-xs px-1 py-0.5 rounded border ${allSelected ? 'border-red-600 text-red-600 hover:bg-red-50' : 'border-green-600 text-green-600 hover:bg-green-50'}`}
-            style={{ fontSize: '0.7em', padding: '0.1rem 0.3rem' }}
-            onClick={handleSelectAll}
-            disabled={isDownloading}
-          >
-            {allSelected ? '全解除' : '全選択'}
-          </button>
+      <div className="selection-summary">
+        <div className="selection-info">
+          <span>📝</span>
+          <span>{selectedCount}件のオプションが選択されています</span>
         </div>
+        <button
+          type="button"
+          className={allSelected ? 'tog-all-off' : 'tog-all-on'}
+          onClick={handleSelectAll}
+          disabled={isDownloading}
+        >
+          {allSelected ? '全解除' : '全選択'}
+        </button>
       </div>
     );
   }, [selectedOptions.size, handleSelectAll, isDownloading]);
 
   return (
-    <div className="popup-container" style={{ width: '350px', height: 'auto', overflow: 'hidden' }}>
+    <div className="popup-container">
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
-      <main className="p-2" style={{ height: 'calc(100% - 60px)', overflowY: 'auto' }}>
+      <main className="popup-main">
         {/* 楽天証券を開くリンク */}
         <div
-          className="mb-2 p-1 bg-gray-100 rounded cursor-pointer border"
+          className="link-row"
           onClick={handleOpenRakutenPage}
-          style={{ cursor: 'pointer' }}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && handleOpenRakutenPage()}
         >
-          <IconLabel
-            icon="🔗"
-            label="楽天証券を開く"
-            containerClassName="text-blue-600 flex items-center"
-          />
+          <span>🔗</span>
+          <span>楽天証券を開く</span>
         </div>
 
         {/* 証券Webを開くリンク */}
         <div
-          className="mb-2 p-1 bg-gray-100 rounded cursor-pointer border"
+          className="link-row"
           onClick={handleOpenShokenWebPage}
-          style={{ cursor: 'pointer' }}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && handleOpenShokenWebPage()}
         >
-          <IconLabel
-            icon="🔗"
-            label="証券Webを開く"
-            containerClassName="text-blue-600 flex items-center"
-          />
+          <span>🔗</span>
+          <span>証券Webを開く</span>
         </div>
 
         {/* 進捗表示 */}
@@ -420,21 +382,15 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* 選択状況の表示 */}
         {renderSelectionSummary()}
 
-        {/* 取得オプションセクション */}
-        <div className="mb-2">
-          {/* カテゴリ別オプション表示 */}
-          {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) =>
-            renderCategoryOptions(category, options)
-          )}
-        </div>
+        {/* カテゴリ別オプション */}
+        {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) =>
+          renderCategoryOptions(category, options)
+        )}
 
         {/* ダウンロードボタン */}
-        <div className="mb-2">
+        <div className="mb-2 mt-1">
           <button
-            className={`w-full py-1 rounded text-white ${selectedOptions.size > 0 && !isDownloading
-              ? 'bg-blue-600 hover:bg-blue-700'
-              : 'bg-gray-500'
-              }`}
+            className={selectedOptions.size > 0 && !isDownloading ? 'cta-active' : 'cta-disabled'}
             onClick={handleDownload}
             disabled={isDownloading || selectedOptions.size === 0}
             type="button"
@@ -445,7 +401,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
         {/* メッセージ表示 */}
         {message && (
-          <div className="mb-2">
+          <div className="mb-1">
             <Message
               type={message.type}
               content={message.content}

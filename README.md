@@ -2,7 +2,7 @@
 
 楽天証券の各種ページから投資データをCSV形式で簡単にダウンロードできるChrome拡張機能です。
 
-[![Version](https://img.shields.io/badge/version-2.0.3-blue.svg)](https://github.com/zaichu6/rakuten-csv-extension)
+[![Version](https://img.shields.io/github/package-json/v/zaichu6/rakuten-csv-extension?filename=package.json)](https://github.com/zaichu6/rakuten-csv-extension)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)](https://www.typescriptlang.org/)
 
@@ -88,9 +88,9 @@
 
 ### 技術スタック
 - **Frontend**: React 19 + TypeScript
-- **Styling**: Bootstrap 5 (コンパクトなデザイン)
+- **Styling**: Tailwind CSS（ローカル semantic クラス）
 - **Build**: Vite + esbuild
-- **Testing**: Vitest + Testing Library
+- **Testing**: Vitest + React Testing Library + Playwright
 - **Code Quality**: ESLint + TypeScript strict mode
 
 ### プロジェクト構造
@@ -192,20 +192,9 @@ npm run lint
 - **レスポンシブデザイン**: 350×400pxでの最適表示
 
 ### バージョン管理
-バージョン番号は `package.json` で一元管理されています。
+バージョンのソースは `package.json` です。`manifest.json` の `version` フィールドは `0.0.0` のプレースホルダで、`npm run build` 実行時に `scripts/build-extension.mjs` が `package.json` の version を読み取り `dist/manifest.json` へ反映します。
 
-```json
-{
-  "version": "2.0.3"
-}
-```
-
-ビルド時に以下の場所に自動的に反映されます：
-- `dist/manifest.json` - Chrome拡張機能のマニフェスト
-- アプリケーション内のフッター表示
-
-バージョンを更新する場合は、`package.json` のバージョン番号のみを変更してください。
-`manifest.json` の `version` フィールド（現在は `0.0.0`）は編集不要です。
+main への PR マージ後、GitHub Actions が `npm version patch --no-git-tag-version` で `package.json` / `package-lock.json` を更新する patch version bump PR を自動作成します。手動でバージョンを書き換える必要はありません。
 
 ### テスト
 ```bash
