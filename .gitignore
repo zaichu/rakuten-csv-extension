@@ -20,6 +20,7 @@ dist-ssr
 .agents
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+docs/tasks/
 
 # Editor directories and files
 .vscode/*
