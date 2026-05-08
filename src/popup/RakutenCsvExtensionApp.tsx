@@ -332,8 +332,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     return (
       <div className="selection-summary">
         <div className="selection-info">
-          <span>📝</span>
-          <span>{selectedCount}件のオプションが選択されています</span>
+          <span><strong className="text-gray-600">{selectedCount}</strong> / {allOptionsCount} 件選択</span>
         </div>
         <button
           type="button"
@@ -352,28 +351,28 @@ const RakutenCsvExtensionApp: React.FC = () => {
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
       <main className="popup-main">
-        {/* 楽天証券を開くリンク */}
-        <div
-          className="link-row"
-          onClick={handleOpenRakutenPage}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && handleOpenRakutenPage()}
-        >
-          <span>🔗</span>
-          <span>楽天証券を開く</span>
-        </div>
-
-        {/* 証券Webを開くリンク */}
-        <div
-          className="link-row"
-          onClick={handleOpenShokenWebPage}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && handleOpenShokenWebPage()}
-        >
-          <span>🔗</span>
-          <span>証券Webを開く</span>
+        {/* クイックリンク */}
+        <div className="mb-3">
+          <div
+            className="link-row"
+            onClick={handleOpenRakutenPage}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && handleOpenRakutenPage()}
+          >
+            <span>🔗</span>
+            <span>楽天証券を開く</span>
+          </div>
+          <div
+            className="link-row"
+            onClick={handleOpenShokenWebPage}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && handleOpenShokenWebPage()}
+          >
+            <span>🔗</span>
+            <span>証券Webを開く</span>
+          </div>
         </div>
 
         {/* 進捗表示 */}

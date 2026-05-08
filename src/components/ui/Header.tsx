@@ -9,7 +9,7 @@ export const Header = ({
   className = 'popup-header'
 }: HeaderProps) => (
   <header className={className}>
-    {icon && <span className="mr-1">{icon}</span>}
-    {title}
+    {icon && <span>{icon}</span>}
+    <span>{title}</span>
   </header>
 );
