@@ -11,26 +11,26 @@
   }
 
   .popup-main {
-    @apply p-2 overflow-y-auto;
+    @apply p-2 overflow-y-auto bg-gray-50;
   }
 
   /* ── Header ──────────────────────────────────────────────── */
   .popup-header {
-    @apply font-bold bg-red-600 text-white text-center py-1 px-2;
+    @apply flex items-center justify-center gap-1 font-bold bg-red-600 text-white py-2 px-2;
     font-size: 0.9rem;
   }
 
   /* ── Footer ──────────────────────────────────────────────── */
   .popup-footer {
-    @apply block bg-gray-500 text-white text-center w-full text-xs px-2 py-0.5;
+    @apply block bg-gray-50 text-gray-400 text-center w-full text-xs px-2 py-1 border-t border-gray-100;
   }
 
   /* ── Link rows (role=button divs) ────────────────────────── */
   .link-row {
-    @apply flex items-center gap-1.5 mb-2 px-2 py-1 bg-gray-100 rounded border border-gray-300 cursor-pointer text-blue-600 text-xs select-none;
+    @apply flex items-center gap-1 px-1 py-0.5 cursor-pointer text-blue-600 text-xs select-none rounded;
   }
   .link-row:hover {
-    @apply bg-blue-50 border-blue-300;
+    @apply bg-blue-50 text-blue-700;
   }
   .link-row:focus-visible {
     @apply outline-2 outline-blue-500 outline-offset-1;
@@ -46,89 +46,99 @@
   }
 
   .category-title {
-    @apply text-xs font-semibold flex items-center gap-1;
+    @apply text-xs font-semibold flex items-center gap-1 text-gray-700;
   }
 
   /* カテゴリ内選択数チップ */
   .category-count {
-    @apply inline-block bg-gray-500 text-white rounded px-1 leading-snug ml-1;
+    @apply inline-flex items-center bg-gray-100 text-gray-400 rounded-full px-1.5 ml-1 border border-gray-200;
     font-size: 0.68em;
+    line-height: 1.6;
   }
 
   .category-body {
-    @apply border border-gray-200 rounded px-2 pt-1 pb-0 bg-gray-50;
+    @apply pl-3 pt-0.5 pb-0.5 border-l-2 border-gray-200;
   }
 
   /* ── Option rows (checkbox + label) ─────────────────────── */
   .option-row {
-    @apply flex items-center gap-2 mb-1;
-  }
-  .option-row:last-child {
-    @apply mb-0;
+    @apply flex items-center gap-2 py-0.5;
   }
   .option-row input[type="checkbox"] {
-    @apply cursor-pointer accent-blue-600;
+    @apply cursor-pointer accent-blue-600 flex-shrink-0;
   }
   .option-row label {
-    @apply flex items-center w-full cursor-pointer text-xs;
+    @apply flex items-center w-full cursor-pointer text-xs py-0.5;
   }
 
   /* ── Small toggle buttons (全選択 / 全解除) ──────────────── */
   /* カテゴリ：全選択 */
   .tog-on {
-    @apply rounded border border-blue-600 text-blue-600 cursor-pointer leading-none;
+    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
     font-size: 0.68em;
-    padding: 0.15rem 0.35rem;
+    padding: 0.15rem 0.4rem;
   }
   .tog-on:hover:not(:disabled) {
-    @apply bg-blue-50;
+    @apply border-blue-400 text-blue-600 bg-white;
+  }
+  .tog-on:focus-visible {
+    @apply outline-1 outline-blue-400 outline-offset-1;
   }
   .tog-on:disabled {
-    @apply opacity-40 cursor-not-allowed;
+    @apply opacity-30 cursor-not-allowed;
   }
 
   /* カテゴリ：全解除 */
   .tog-off {
-    @apply rounded border border-red-600 text-red-600 cursor-pointer leading-none;
+    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
     font-size: 0.68em;
-    padding: 0.15rem 0.35rem;
+    padding: 0.15rem 0.4rem;
   }
   .tog-off:hover:not(:disabled) {
-    @apply bg-red-50;
+    @apply border-red-400 text-red-500 bg-white;
+  }
+  .tog-off:focus-visible {
+    @apply outline-1 outline-red-400 outline-offset-1;
   }
   .tog-off:disabled {
-    @apply opacity-40 cursor-not-allowed;
+    @apply opacity-30 cursor-not-allowed;
   }
 
   /* 全体：全選択 */
   .tog-all-on {
-    @apply rounded border border-green-600 text-green-600 cursor-pointer leading-none;
+    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
     font-size: 0.68em;
-    padding: 0.15rem 0.35rem;
+    padding: 0.15rem 0.4rem;
   }
   .tog-all-on:hover:not(:disabled) {
-    @apply bg-green-50;
+    @apply border-green-500 text-green-600 bg-white;
+  }
+  .tog-all-on:focus-visible {
+    @apply outline-1 outline-green-400 outline-offset-1;
   }
   .tog-all-on:disabled {
-    @apply opacity-40 cursor-not-allowed;
+    @apply opacity-30 cursor-not-allowed;
   }
 
   /* 全体：全解除 */
   .tog-all-off {
-    @apply rounded border border-red-600 text-red-600 cursor-pointer leading-none;
+    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
     font-size: 0.68em;
-    padding: 0.15rem 0.35rem;
+    padding: 0.15rem 0.4rem;
   }
   .tog-all-off:hover:not(:disabled) {
-    @apply bg-red-50;
+    @apply border-red-400 text-red-500 bg-white;
+  }
+  .tog-all-off:focus-visible {
+    @apply outline-1 outline-red-400 outline-offset-1;
   }
   .tog-all-off:disabled {
-    @apply opacity-40 cursor-not-allowed;
+    @apply opacity-30 cursor-not-allowed;
   }
 
   /* ── Download button ─────────────────────────────────────── */
   .cta-active {
-    @apply w-full py-1.5 rounded text-white text-xs font-medium flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
+    @apply w-full py-1.5 rounded text-white text-xs font-semibold flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
   }
   .cta-active:hover {
     @apply bg-blue-700;
@@ -138,16 +148,16 @@
   }
 
   .cta-disabled {
-    @apply w-full py-1.5 rounded text-white text-xs font-medium flex items-center justify-center gap-1 bg-gray-400 cursor-not-allowed opacity-70;
+    @apply w-full py-1.5 rounded text-gray-400 text-xs font-medium flex items-center justify-center gap-1 bg-white border border-gray-200 cursor-not-allowed;
   }
 
   /* ── Selection summary ───────────────────────────────────── */
   .selection-summary {
-    @apply flex items-center justify-between gap-2 mb-3;
+    @apply flex items-center justify-between gap-2 mb-2;
   }
 
   .selection-info {
-    @apply flex-1 rounded bg-blue-50 text-blue-800 border border-blue-200 py-1 px-2 flex items-center gap-1;
+    @apply flex-1 text-gray-400 flex items-center gap-1;
     font-size: 0.78em;
   }
 
