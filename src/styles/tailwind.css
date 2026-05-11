@@ -18,14 +18,14 @@
 
   /* ── Header ──────────────────────────────────────────────── */
   .popup-header {
-    @apply flex items-center justify-center gap-1.5 font-semibold bg-slate-900 text-white py-2.5 px-3;
+    @apply flex items-center justify-center gap-1.5 font-semibold text-white py-2.5 px-3;
     font-size: 0.9rem;
-    border-top: 3px solid #bf0000;
+    background-color: #bf0000;
   }
 
   /* ── Footer ──────────────────────────────────────────────── */
   .popup-footer {
-    @apply block bg-slate-900 text-slate-400 text-center w-full text-xs px-2 py-1.5 border-t border-slate-700;
+    @apply block bg-white text-slate-500 text-center w-full text-xs px-2 py-1.5 border-t border-slate-200;
   }
 
   /* ── Quick actions (role=button divs) ────────────────────── */
@@ -114,9 +114,10 @@
   /* ── Small toggle buttons (全選択 / 全解除) ──────────────── */
   /* カテゴリ：全選択 */
   .tog-on {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
-    font-size: 0.68em;
-    padding: 0.15rem 0.4rem;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.5rem;
   }
   .tog-on:hover:not(:disabled) {
     @apply border-blue-300 bg-blue-50 text-blue-700;
@@ -130,9 +131,10 @@
 
   /* カテゴリ：全解除 */
   .tog-off {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
-    font-size: 0.68em;
-    padding: 0.15rem 0.4rem;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.5rem;
   }
   .tog-off:hover:not(:disabled) {
     @apply border-red-200 bg-red-50 text-red-600;
@@ -146,9 +148,10 @@
 
   /* 全体：全選択 */
   .tog-all-on {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
-    font-size: 0.68em;
-    padding: 0.15rem 0.4rem;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.5rem;
   }
   .tog-all-on:hover:not(:disabled) {
     @apply border-blue-300 bg-blue-50 text-blue-700;
@@ -162,9 +165,10 @@
 
   /* 全体：全解除 */
   .tog-all-off {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
-    font-size: 0.68em;
-    padding: 0.15rem 0.4rem;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.5rem;
   }
   .tog-all-off:hover:not(:disabled) {
     @apply border-red-200 bg-red-50 text-red-600;
