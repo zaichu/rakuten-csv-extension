@@ -247,11 +247,9 @@ export class DomUtils {
     }
 
     try {
-      // 要素が操作可能かチェック（コメントアウトされた条件を削除）
-      if (!this.isElementInteractable(element)) {
-        console.warn('要素が操作不可能な状態です');
-        // return false; // 楽天証券サイトでは非表示要素でもクリック可能な場合があるため、警告のみ
-      }
+      // 楽天証券サイトでは非表示要素でもクリック可能な場合があるため、
+      // interactable 判定でブロックせず、そのまま click() を試す。
+      // 成功する非致命ケースを Chrome 拡張のエラー一覧に残さないため warn は出さない。
 
       // フォーカスを当ててからクリック
       element.focus();

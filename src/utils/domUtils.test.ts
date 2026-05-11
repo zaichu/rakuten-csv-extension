@@ -318,7 +318,7 @@ describe('DomUtils', () => {
       expect(clickSpy).toHaveBeenCalledOnce()
     })
 
-    it('操作不可能なHTMLElementでも警告を出してclick()を呼ぶ', () => {
+    it('操作不可能なHTMLElementでも警告なしでclick()を継続する', () => {
       const button = document.createElement('button')
       button.disabled = true
       document.body.appendChild(button)
@@ -327,7 +327,7 @@ describe('DomUtils', () => {
       const result = DomUtils.safeClick(button)
       expect(result).toBe(true)
       expect(clickSpy).toHaveBeenCalledOnce()
-      expect(console.warn).toHaveBeenCalled()
+      expect(console.warn).not.toHaveBeenCalled()
     })
   })
 
