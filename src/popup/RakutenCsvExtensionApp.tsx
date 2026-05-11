@@ -247,7 +247,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const allInCategorySelected = selectedInCategory === options.length;
 
     return (
-      <div key={category} className="category-section">
+      <div key={category} className="category-section" data-category={category}>
         <div className="category-header">
           <div className="category-title">
             <span>{getCategoryIcon(category)}</span>
@@ -266,7 +266,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
         <div className="category-body">
           {options.map((option) => (
-            <div key={option.id} className="option-row">
+            <div key={option.id} className={`option-row${selectedOptions.has(option.id) ? ' option-row-selected' : ''}`}>
               <input
                 type="checkbox"
                 id={option.id}
@@ -332,7 +332,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     return (
       <div className="selection-summary">
         <div className="selection-info">
-          <span>選択中 <strong className="text-slate-900 font-semibold">{selectedCount}</strong> / {allOptionsCount}</span>
+          <span>選択中 <strong className="text-blue-700 font-bold">{selectedCount}</strong> / {allOptionsCount}</span>
         </div>
         <button
           type="button"

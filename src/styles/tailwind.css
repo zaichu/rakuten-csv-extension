@@ -3,28 +3,29 @@
 @layer components {
   /* ── Popup layout ────────────────────────────────────────── */
   .popup-container {
-    @apply flex flex-col bg-slate-100 text-slate-900 box-border;
+    @apply flex flex-col text-slate-900 box-border;
     width: 350px;
     height: auto;
     overflow: hidden;
     font-size: 13px;
+    background-color: #f0f4f8;
   }
 
   .popup-main {
-    @apply p-3 overflow-y-auto bg-slate-100;
+    @apply p-3 overflow-y-auto;
+    background-color: #f0f4f8;
   }
 
   /* ── Header ──────────────────────────────────────────────── */
   .popup-header {
-    @apply flex items-center justify-center gap-1.5 font-semibold bg-white text-slate-900 py-2.5 px-3;
+    @apply flex items-center justify-center gap-1.5 font-semibold bg-slate-900 text-white py-2.5 px-3;
     font-size: 0.9rem;
-    border-top: 4px solid #bf0000;
-    border-bottom: 1px solid #e2e8f0;
+    border-top: 3px solid #bf0000;
   }
 
   /* ── Footer ──────────────────────────────────────────────── */
   .popup-footer {
-    @apply block bg-white text-slate-500 text-center w-full text-xs px-2 py-1.5 border-t border-slate-300;
+    @apply block bg-slate-900 text-slate-400 text-center w-full text-xs px-2 py-1.5 border-t border-slate-700;
   }
 
   /* ── Quick actions (role=button divs) ────────────────────── */
@@ -34,9 +35,11 @@
 
   .link-row {
     @apply flex items-center gap-2 px-2 py-1.5 cursor-pointer text-slate-700 text-xs select-none rounded-md border border-slate-200 bg-white;
+    border-left: 3px solid #bf0000;
   }
   .link-row:hover {
-    @apply bg-blue-50 text-blue-700 border-blue-300;
+    @apply bg-slate-50 text-slate-800 border-slate-200;
+    border-left-color: #9b0000;
   }
   .link-row:focus-visible {
     @apply outline-2 outline-blue-500 outline-offset-1;
@@ -44,17 +47,29 @@
 
   /* ── Selection summary ───────────────────────────────────── */
   .selection-summary {
-    @apply flex items-center justify-between gap-2 mb-2 bg-white border border-slate-200 rounded-md px-3 py-1.5;
+    @apply flex items-center justify-between gap-2 mb-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5;
   }
 
   .selection-info {
-    @apply flex-1 text-slate-500 flex items-center gap-1;
+    @apply flex-1 text-slate-600 flex items-center gap-1;
     font-size: 0.8em;
   }
 
   /* ── Category section ────────────────────────────────────── */
   .category-section {
-    @apply mb-2 bg-white border border-slate-200 rounded-md px-3 py-2;
+    @apply mb-2 bg-white border border-slate-200 rounded-md px-3 py-2 shadow-sm;
+  }
+
+  .category-section[data-category="portfolio"] {
+    border-left: 3px solid #3b82f6;
+  }
+
+  .category-section[data-category="income"] {
+    border-left: 3px solid #10b981;
+  }
+
+  .category-section[data-category="transaction"] {
+    border-left: 3px solid #f59e0b;
   }
 
   .category-header {
@@ -82,6 +97,9 @@
   }
   .option-row:hover {
     @apply bg-slate-50;
+  }
+  .option-row-selected {
+    background-color: rgba(219, 234, 254, 0.5);
   }
   .option-row input[type="checkbox"] {
     @apply cursor-pointer accent-blue-600 flex-shrink-0;
@@ -170,7 +188,7 @@
   }
 
   .cta-disabled {
-    @apply w-full py-2 rounded text-slate-400 text-xs font-medium flex items-center justify-center gap-1 bg-slate-100 border border-slate-200 cursor-not-allowed;
+    @apply w-full py-2 rounded text-slate-500 text-xs font-medium flex items-center justify-center gap-1 bg-slate-200 border border-slate-300 cursor-not-allowed;
   }
 
   /* ── Progress / in-progress notice ──────────────────────── */
