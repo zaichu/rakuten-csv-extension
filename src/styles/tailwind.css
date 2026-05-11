@@ -3,7 +3,7 @@
 @layer components {
   /* ── Popup layout ────────────────────────────────────────── */
   .popup-container {
-    @apply flex flex-col bg-white text-gray-900 box-border;
+    @apply flex flex-col bg-slate-100 text-slate-900 box-border;
     width: 350px;
     height: auto;
     overflow: hidden;
@@ -11,58 +11,77 @@
   }
 
   .popup-main {
-    @apply p-2 overflow-y-auto bg-gray-50;
+    @apply p-3 overflow-y-auto bg-slate-100;
   }
 
   /* ── Header ──────────────────────────────────────────────── */
   .popup-header {
-    @apply flex items-center justify-center gap-1 font-bold bg-red-600 text-white py-2 px-2;
+    @apply flex items-center justify-center gap-1.5 font-semibold bg-white text-slate-900 py-2.5 px-3;
     font-size: 0.9rem;
+    border-top: 4px solid #bf0000;
+    border-bottom: 1px solid #e2e8f0;
   }
 
   /* ── Footer ──────────────────────────────────────────────── */
   .popup-footer {
-    @apply block bg-gray-50 text-gray-400 text-center w-full text-xs px-2 py-1 border-t border-gray-100;
+    @apply block bg-white text-slate-500 text-center w-full text-xs px-2 py-1.5 border-t border-slate-300;
   }
 
-  /* ── Link rows (role=button divs) ────────────────────────── */
+  /* ── Quick actions (role=button divs) ────────────────────── */
+  .quick-actions {
+    @apply mb-3 space-y-1.5;
+  }
+
   .link-row {
-    @apply flex items-center gap-1 px-1 py-0.5 cursor-pointer text-blue-600 text-xs select-none rounded;
+    @apply flex items-center gap-2 px-2 py-1.5 cursor-pointer text-slate-700 text-xs select-none rounded-md border border-slate-200 bg-white;
   }
   .link-row:hover {
-    @apply bg-blue-50 text-blue-700;
+    @apply bg-blue-50 text-blue-700 border-blue-300;
   }
   .link-row:focus-visible {
     @apply outline-2 outline-blue-500 outline-offset-1;
   }
 
+  /* ── Selection summary ───────────────────────────────────── */
+  .selection-summary {
+    @apply flex items-center justify-between gap-2 mb-2 bg-white border border-slate-200 rounded-md px-3 py-1.5;
+  }
+
+  .selection-info {
+    @apply flex-1 text-slate-500 flex items-center gap-1;
+    font-size: 0.8em;
+  }
+
   /* ── Category section ────────────────────────────────────── */
   .category-section {
-    @apply mb-2;
+    @apply mb-2 bg-white border border-slate-200 rounded-md px-3 py-2;
   }
 
   .category-header {
-    @apply flex items-center justify-between mb-1;
+    @apply flex items-center justify-between mb-1.5;
   }
 
   .category-title {
-    @apply text-xs font-semibold flex items-center gap-1 text-gray-700;
+    @apply text-xs font-semibold flex items-center gap-1 text-slate-800;
   }
 
   /* カテゴリ内選択数チップ */
   .category-count {
-    @apply inline-flex items-center bg-gray-100 text-gray-400 rounded-full px-1.5 ml-1 border border-gray-200;
+    @apply inline-flex items-center bg-blue-50 text-blue-600 rounded-full px-1.5 ml-1 border border-blue-200;
     font-size: 0.68em;
     line-height: 1.6;
   }
 
   .category-body {
-    @apply pl-3 pt-0.5 pb-0.5 border-l-2 border-gray-200;
+    @apply space-y-0.5;
   }
 
   /* ── Option rows (checkbox + label) ─────────────────────── */
   .option-row {
-    @apply flex items-center gap-2 py-0.5;
+    @apply flex items-center gap-2 px-2 py-1 rounded;
+  }
+  .option-row:hover {
+    @apply bg-slate-50;
   }
   .option-row input[type="checkbox"] {
     @apply cursor-pointer accent-blue-600 flex-shrink-0;
@@ -70,16 +89,19 @@
   .option-row label {
     @apply flex items-center w-full cursor-pointer text-xs py-0.5;
   }
+  .option-row:focus-within {
+    @apply outline-1 outline-blue-400 outline-offset-1;
+  }
 
   /* ── Small toggle buttons (全選択 / 全解除) ──────────────── */
   /* カテゴリ：全選択 */
   .tog-on {
-    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
     font-size: 0.68em;
     padding: 0.15rem 0.4rem;
   }
   .tog-on:hover:not(:disabled) {
-    @apply border-blue-400 text-blue-600 bg-white;
+    @apply border-blue-300 bg-blue-50 text-blue-700;
   }
   .tog-on:focus-visible {
     @apply outline-1 outline-blue-400 outline-offset-1;
@@ -90,12 +112,12 @@
 
   /* カテゴリ：全解除 */
   .tog-off {
-    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
     font-size: 0.68em;
     padding: 0.15rem 0.4rem;
   }
   .tog-off:hover:not(:disabled) {
-    @apply border-red-400 text-red-500 bg-white;
+    @apply border-red-200 bg-red-50 text-red-600;
   }
   .tog-off:focus-visible {
     @apply outline-1 outline-red-400 outline-offset-1;
@@ -106,15 +128,15 @@
 
   /* 全体：全選択 */
   .tog-all-on {
-    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
     font-size: 0.68em;
     padding: 0.15rem 0.4rem;
   }
   .tog-all-on:hover:not(:disabled) {
-    @apply border-green-500 text-green-600 bg-white;
+    @apply border-blue-300 bg-blue-50 text-blue-700;
   }
   .tog-all-on:focus-visible {
-    @apply outline-1 outline-green-400 outline-offset-1;
+    @apply outline-1 outline-blue-400 outline-offset-1;
   }
   .tog-all-on:disabled {
     @apply opacity-30 cursor-not-allowed;
@@ -122,12 +144,12 @@
 
   /* 全体：全解除 */
   .tog-all-off {
-    @apply rounded border border-gray-300 text-gray-400 cursor-pointer leading-none;
+    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer leading-none;
     font-size: 0.68em;
     padding: 0.15rem 0.4rem;
   }
   .tog-all-off:hover:not(:disabled) {
-    @apply border-red-400 text-red-500 bg-white;
+    @apply border-red-200 bg-red-50 text-red-600;
   }
   .tog-all-off:focus-visible {
     @apply outline-1 outline-red-400 outline-offset-1;
@@ -138,7 +160,7 @@
 
   /* ── Download button ─────────────────────────────────────── */
   .cta-active {
-    @apply w-full py-1.5 rounded text-white text-xs font-semibold flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
+    @apply w-full py-2 rounded text-white text-xs font-semibold flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
   }
   .cta-active:hover {
     @apply bg-blue-700;
@@ -148,17 +170,7 @@
   }
 
   .cta-disabled {
-    @apply w-full py-1.5 rounded text-gray-400 text-xs font-medium flex items-center justify-center gap-1 bg-white border border-gray-200 cursor-not-allowed;
-  }
-
-  /* ── Selection summary ───────────────────────────────────── */
-  .selection-summary {
-    @apply flex items-center justify-between gap-2 mb-2;
-  }
-
-  .selection-info {
-    @apply flex-1 text-gray-400 flex items-center gap-1;
-    font-size: 0.78em;
+    @apply w-full py-2 rounded text-slate-400 text-xs font-medium flex items-center justify-center gap-1 bg-slate-100 border border-slate-200 cursor-not-allowed;
   }
 
   /* ── Progress / in-progress notice ──────────────────────── */

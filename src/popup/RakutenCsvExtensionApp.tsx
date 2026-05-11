@@ -332,7 +332,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     return (
       <div className="selection-summary">
         <div className="selection-info">
-          <span><strong className="text-gray-600">{selectedCount}</strong> / {allOptionsCount} 件選択</span>
+          <span>選択中 <strong className="text-slate-900 font-semibold">{selectedCount}</strong> / {allOptionsCount}</span>
         </div>
         <button
           type="button"
@@ -351,8 +351,8 @@ const RakutenCsvExtensionApp: React.FC = () => {
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
 
       <main className="popup-main">
-        {/* クイックリンク */}
-        <div className="mb-3">
+        {/* クイックアクション */}
+        <div className="quick-actions">
           <div
             className="link-row"
             onClick={handleOpenRakutenPage}
