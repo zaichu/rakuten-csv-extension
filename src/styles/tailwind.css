@@ -7,7 +7,9 @@
     width: 350px;
     height: auto;
     overflow: hidden;
-    font-size: 13px;
+    font-size: 13.5px;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo UI", Meiryo, system-ui, -apple-system, sans-serif;
+    font-feature-settings: "palt" 1;
     background-color: #f0f4f8;
   }
 
@@ -34,15 +36,39 @@
   }
 
   .link-row {
-    @apply flex items-center gap-2 px-2 py-1.5 cursor-pointer text-slate-700 text-xs select-none rounded-md border border-slate-200 bg-white;
+    @apply flex items-center gap-2 px-3 py-2 cursor-pointer text-blue-600 select-none rounded-md border border-blue-100 bg-white;
+    font-weight: 500;
+    line-height: 1.3;
     border-left: 3px solid #bf0000;
   }
   .link-row:hover {
-    @apply bg-slate-50 text-slate-800 border-slate-200;
+    background-color: #fff5f5;
+    color: #bf0000;
+    border-color: #fecaca;
     border-left-color: #9b0000;
   }
   .link-row:focus-visible {
     @apply outline-2 outline-blue-500 outline-offset-1;
+  }
+
+  .link-text {
+    text-decoration: underline;
+    text-decoration-color: rgba(37, 99, 235, 0.25);
+    text-underline-offset: 2px;
+  }
+  .link-row:hover .link-text,
+  .link-row:focus-visible .link-text {
+    text-decoration-color: currentColor;
+  }
+
+  .link-ext {
+    @apply ml-auto text-blue-400;
+    font-size: 0.7em;
+    opacity: 0.55;
+  }
+  .link-row:hover .link-ext {
+    color: #bf0000;
+    opacity: 1;
   }
 
   /* ── Selection summary ───────────────────────────────────── */
@@ -52,7 +78,7 @@
 
   .selection-info {
     @apply flex-1 text-slate-600 flex items-center gap-1;
-    font-size: 0.8em;
+    font-size: 0.85em;
   }
 
   /* ── Category section ────────────────────────────────────── */
@@ -77,7 +103,7 @@
   }
 
   .category-title {
-    @apply text-xs font-semibold flex items-center gap-1 text-slate-800;
+    @apply text-sm font-semibold flex items-center gap-1 text-slate-800;
   }
 
   /* カテゴリ内選択数チップ */
@@ -105,7 +131,7 @@
     @apply cursor-pointer accent-blue-600 flex-shrink-0;
   }
   .option-row label {
-    @apply flex items-center w-full cursor-pointer text-xs py-0.5;
+    @apply flex items-center w-full cursor-pointer py-0.5;
   }
   .option-row:focus-within {
     @apply outline-1 outline-blue-400 outline-offset-1;
@@ -115,7 +141,7 @@
   /* カテゴリ：全選択 */
   .tog-on {
     @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.2;
     padding: 0.25rem 0.5rem;
   }
@@ -132,7 +158,7 @@
   /* カテゴリ：全解除 */
   .tog-off {
     @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.2;
     padding: 0.25rem 0.5rem;
   }
@@ -149,7 +175,7 @@
   /* 全体：全選択 */
   .tog-all-on {
     @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.2;
     padding: 0.25rem 0.5rem;
   }
@@ -166,7 +192,7 @@
   /* 全体：全解除 */
   .tog-all-off {
     @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.2;
     padding: 0.25rem 0.5rem;
   }
@@ -182,7 +208,7 @@
 
   /* ── Download button ─────────────────────────────────────── */
   .cta-active {
-    @apply w-full py-2 rounded text-white text-xs font-semibold flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
+    @apply w-full py-2 rounded text-white font-semibold flex items-center justify-center gap-1 bg-blue-600 cursor-pointer;
   }
   .cta-active:hover {
     @apply bg-blue-700;
@@ -192,7 +218,7 @@
   }
 
   .cta-disabled {
-    @apply w-full py-2 rounded text-slate-500 text-xs font-medium flex items-center justify-center gap-1 bg-slate-200 border border-slate-300 cursor-not-allowed;
+    @apply w-full py-2 rounded text-slate-500 font-medium flex items-center justify-center gap-1 bg-slate-200 border border-slate-300 cursor-not-allowed;
   }
 
   /* ── Progress / in-progress notice ──────────────────────── */
