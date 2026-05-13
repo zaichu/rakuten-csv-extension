@@ -220,6 +220,16 @@ const RakutenCsvExtensionApp: React.FC = () => {
     }
   }, []);
 
+  const handleLinkKeyDown = useCallback(
+    (handler: () => void) => (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handler();
+      }
+    },
+    []
+  );
+
   /**
    * ダウンロードボタンの内容を取得
    */
@@ -356,22 +366,24 @@ const RakutenCsvExtensionApp: React.FC = () => {
           <div
             className="link-row"
             onClick={handleOpenRakutenPage}
-            role="button"
+            role="link"
             tabIndex={0}
-            onKeyDown={(e) => e.key === 'Enter' && handleOpenRakutenPage()}
+            onKeyDown={handleLinkKeyDown(handleOpenRakutenPage)}
           >
-            <span>🔗</span>
-            <span>楽天証券を開く</span>
+            <span aria-hidden="true">🔗</span>
+            <span className="link-text">楽天証券を開く</span>
+            <span className="link-ext" aria-hidden="true">↗</span>
           </div>
           <div
             className="link-row"
             onClick={handleOpenShokenWebPage}
-            role="button"
+            role="link"
             tabIndex={0}
-            onKeyDown={(e) => e.key === 'Enter' && handleOpenShokenWebPage()}
+            onKeyDown={handleLinkKeyDown(handleOpenShokenWebPage)}
           >
-            <span>🔗</span>
-            <span>証券Webを開く</span>
+            <span aria-hidden="true">🔗</span>
+            <span className="link-text">証券Webを開く</span>
+            <span className="link-ext" aria-hidden="true">↗</span>
           </div>
         </div>
 
