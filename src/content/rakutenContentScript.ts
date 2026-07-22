@@ -16,11 +16,7 @@ import { RakutenUtils, DomUtils } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private isInitialized = false;
-  private readonly retryConfig = {
-    maxRetries: 3,
-    retryDelay: 1000,
-    elementTimeout: 5000
-  };
+  private readonly elementTimeout = 5000;
 
   private constructor() {
     this.initialize();
@@ -143,14 +139,14 @@ class RakutenCsvExtension {
   private async handleCsvDownloadExecution(
     message: CsvDownloadInstruction
   ): Promise<DownloadResponse> {
-    const { downloadStep, selectors, retryCount = 0 } = message.payload;
+    const { downloadStep, selectors } = message.payload;
 
-    console.log(`CSVダウンロードステップ実行: ${downloadStep} (試行回数: ${retryCount + 1})`);
+    console.log(`CSVダウンロードステップ実行: ${downloadStep}`);
 
     // 楽天証券サイトの確認
     if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: '楽天証券のサイトではありません',
         step: downloadStep
       };
@@ -162,16 +158,6 @@ class RakutenCsvExtension {
       return result;
     } catch (error) {
       console.error(`ステップ ${downloadStep} 実行エラー:`, error);
-      
-      // リトライ可能なエラーかチェック
-      if (retryCount < this.retryConfig.maxRetries && this.isRetryableError(error)) {
-        console.log(`ステップ ${downloadStep} のリトライが可能です`);
-        return {
-          success: false,
-          error: `ステップ ${downloadStep} の実行に失敗しました (リトライ ${retryCount + 1}/${this.retryConfig.maxRetries})`,
-          step: downloadStep
-        };
-      }
 
       return {
         success: false,
@@ -277,8 +263,8 @@ class RakutenCsvExtension {
    * 要素をリトライ付きで検索
    */
   private async findElementWithRetry(
-    selectorGroup: string, 
-    timeout: number = this.retryConfig.elementTimeout
+    selectorGroup: string,
+    timeout: number = this.elementTimeout
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
@@ -371,24 +357,6 @@ class RakutenCsvExtension {
     }
   }
 
-  /**
-   * リトライ可能なエラーかどうかを判定
-   */
-  private isRetryableError(error: unknown): boolean {
-    if (!(error instanceof Error)) return false;
-
-    const retryableMessages = [
-      '要素が見つかりませんでした',
-      'クリックに失敗しました',
-      'タイムアウト',
-      'network error',
-      'connection failed'
-    ];
-
-    return retryableMessages.some(message => 
-      error.message.toLowerCase().includes(message.toLowerCase())
-    );
-  }
 }
 
 /**
