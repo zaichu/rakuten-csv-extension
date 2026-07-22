@@ -46,10 +46,8 @@ export interface CsvDownloadMessage extends ChromeMessage {
 export interface CsvDownloadInstruction extends ChromeMessage {
   readonly action: 'execute-csv-download';
   readonly payload: {
-    readonly downloadType: CsvDownloadType;
     readonly downloadStep: CsvDownloadStep;
     readonly selectors: CsvSelectors;
-    readonly retryCount?: number;
   };
 }
 
