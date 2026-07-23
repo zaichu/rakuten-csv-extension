@@ -1,6 +1,7 @@
-import type { 
-  CsvDownloadInstruction, 
-  DownloadResponse, 
+import type {
+  CsvDownloadInstruction,
+  CsvDownloadStepsInstruction,
+  DownloadResponse,
   TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
@@ -109,6 +110,9 @@ class RakutenCsvExtension {
       case 'execute-csv-download':
         return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
 
+      case 'execute-csv-download-steps':
+        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
+
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -165,6 +169,50 @@ class RakutenCsvExtension {
         step: downloadStep
       };
     }
+  }
+
+  /**
+   * 同一ページ内の連続ステップをまとめて実行
+   */
+  private async handleCsvDownloadStepsExecution(
+    message: CsvDownloadStepsInstruction
+  ): Promise<DownloadResponse> {
+    const { downloadSteps, selectors } = message.payload;
+
+    console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
+
+    // 楽天証券サイトの確認
+    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
+      return {
+        success: false,
+        error: '楽天証券のサイトではありません',
+        step: downloadSteps[0]
+      };
+    }
+
+    for (const step of downloadSteps) {
+      try {
+        const result = await this.executeDownloadStep(step, selectors);
+        console.log(`ステップ ${step} 完了:`, result);
+
+        if (!result.success) {
+          return { ...result, step };
+        }
+      } catch (error) {
+        console.error(`ステップ ${step} 実行エラー:`, error);
+
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : `ステップ ${step} の実行に失敗しました`,
+          step
+        };
+      }
+    }
+
+    return {
+      success: true,
+      message: 'ステップ群の実行が完了しました'
+    };
   }
 
   /**
