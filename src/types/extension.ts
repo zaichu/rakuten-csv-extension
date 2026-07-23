@@ -41,12 +41,23 @@ export interface CsvDownloadMessage extends ChromeMessage {
 }
 
 /**
- * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示
+ * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示（単一ステップ）
  */
 export interface CsvDownloadInstruction extends ChromeMessage {
   readonly action: 'execute-csv-download';
   readonly payload: {
     readonly downloadStep: CsvDownloadStep;
+    readonly selectors: CsvSelectors;
+  };
+}
+
+/**
+ * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示（同一ページ内の複数ステップを一括実行）
+ */
+export interface CsvDownloadStepsInstruction extends ChromeMessage {
+  readonly action: 'execute-csv-download-steps';
+  readonly payload: {
+    readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
   };
 }
