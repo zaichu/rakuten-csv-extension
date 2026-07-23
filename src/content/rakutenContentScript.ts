@@ -19,6 +19,11 @@ class RakutenCsvExtension {
   private isInitialized = false;
   private readonly elementTimeout = 5000;
 
+  /** display-dataクリック後、結果表示の更新が反映されるまでの猶予 */
+  private readonly displayDataSettleWaitMs = 800;
+  /** download-csvクリック後、ダウンロード要求がブラウザへ登録されるまでの猶予 */
+  private readonly downloadCsvSettleWaitMs = 800;
+
   private constructor() {
     this.initialize();
   }
@@ -197,6 +202,12 @@ class RakutenCsvExtension {
 
         if (!result.success) {
           return { ...result, step };
+        }
+
+        if (step === 'display-data') {
+          await this.sleep(this.displayDataSettleWaitMs);
+        } else if (step === 'download-csv') {
+          await this.sleep(this.downloadCsvSettleWaitMs);
         }
       } catch (error) {
         console.error(`ステップ ${step} 実行エラー:`, error);
@@ -383,6 +394,13 @@ class RakutenCsvExtension {
         error: `${actionName}のクリックに失敗しました` 
       };
     }
+  }
+
+  /**
+   * 待機
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
