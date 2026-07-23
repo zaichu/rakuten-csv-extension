@@ -31,6 +31,17 @@ interface ExtensionConfig {
 }
 
 /**
+ * 待機時間の設定
+ */
+interface WaitTimeConfig {
+  readonly 'navigate-to-page': number;
+  readonly 'select-tab': number;
+  readonly 'select-period': number;
+  readonly 'display-data': number;
+  readonly 'download-csv': number;
+}
+
+/**
  * 拡張機能の主要クラス
  */
 class RakutenCsvBackgroundService {
@@ -43,14 +54,13 @@ class RakutenCsvBackgroundService {
     debugMode: false
   };
 
-  /** navigate-to-page後にfresh navigation complete イベントを待つ最大時間 */
-  private readonly navigateCompleteTimeout = 1000;
-
-  /** download-csvクリック後、chrome.downloads.onCreatedの発火を待つ最大時間 */
-  private readonly downloadCreatedTimeout = 5000;
-
-  /** display-data成功後、楽天証券側の結果表示更新が反映されるまでの猶予 */
-  private readonly displayDataSettleWaitMs = 800;
+  private readonly waitTimes: WaitTimeConfig = {
+    'navigate-to-page': 500,
+    'select-tab': 500,
+    'select-period': 500,
+    'display-data': 500,
+    'download-csv': 500
+  };
 
   private state: ExtensionState = {
     rakutenTabs: new Set<number>(),
@@ -337,10 +347,6 @@ class RakutenCsvBackgroundService {
 
   /**
    * ダウンロードシーケンスの実行
-   *
-   * 各ステップは1メッセージ1ステップで順次実行する（バッチ化しない）。
-   * バッチ実行だと途中のクリックで遷移/再描画が起きた場合に
-   * message channelが応答前に閉じてしまうことがあるため。
    */
   private async executeDownloadSequence(
     tabId: number,
@@ -348,21 +354,10 @@ class RakutenCsvBackgroundService {
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
 
-    for (const step of steps) {
-      this.log(`ステップ: ${step} を実行中...`);
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex];
 
-      // navigate-to-page はクリック直後にページ遷移が始まるため、
-      // executeStep 呼び出し前に fresh navigation complete イベントの
-      // 待ち受けを準備しておく（後から仕掛けるとイベントを取りこぼす）
-      const navigationCompletePromise = step === 'navigate-to-page'
-        ? this.waitForFreshNavigationComplete(tabId, this.navigateCompleteTimeout)
-        : undefined;
-
-      // download-csvはクリック直後にダウンロードが登録されるため、
-      // executeStep 呼び出し前にonCreatedの待ち受けを準備しておく
-      const downloadCreatedPromise = step === 'download-csv'
-        ? this.waitForDownloadCreated(this.downloadCreatedTimeout)
-        : undefined;
+      this.log(`ステップ ${stepIndex + 1}/${steps.length}: ${step} を実行中...`);
 
       const result = await this.executeStepWithRetry(tabId, step, selectors);
 
@@ -373,20 +368,9 @@ class RakutenCsvBackgroundService {
         };
       }
 
-      if (navigationCompletePromise) {
-        // ページ遷移完了を待つ
-        await navigationCompletePromise;
-      }
-
-      if (downloadCreatedPromise) {
-        // ダウンロードがブラウザに登録されてから次のステップへ進む
-        await downloadCreatedPromise;
-      }
-
-      if (step === 'display-data') {
-        // 楽天証券側の結果表示更新が反映されるまで待ってから次ステップへ進む
-        await this.sleep(this.displayDataSettleWaitMs);
-      }
+      // 次のステップまで待機
+      const waitTime = this.waitTimes[step] || 1000;
+      await this.sleep(waitTime);
     }
 
     return {
@@ -567,77 +551,6 @@ class RakutenCsvBackgroundService {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * fresh navigation complete イベントを待つ
-   *
-   * navigate-to-page のクリックを送る前に呼び出すことで、
-   * クリック直後に発火する chrome.tabs.onUpdated の complete イベントを
-   * 取りこぼさずに捕捉する（クリック後に chrome.tabs.get で現在の
-   * status を見ると、navigation 開始前の古い complete 状態を
-   * 誤って「遷移完了」と判定してしまうレースコンディションがあるため、
-   * 現在の status は参照しない）。
-   * navigation が発生しない、またはイベントを取りこぼした場合に備えて
-   * timeoutMs 経過時にも resolve する。
-   */
-  private waitForFreshNavigationComplete(tabId: number, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let settled = false;
-
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        chrome.tabs.onUpdated.removeListener(listener);
-        clearTimeout(timer);
-        resolve();
-      };
-
-      const listener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          finish();
-        }
-      };
-
-      chrome.tabs.onUpdated.addListener(listener);
-      const timer = setTimeout(finish, timeoutMs);
-    });
-  }
-
-  /**
-   * chrome.downloads.onCreated イベントを待つ
-   *
-   * download-csv のクリックを送る前に呼び出すことで、クリック直後に
-   * 発火する onCreated イベントを取りこぼさずに捕捉する。
-   * ダウンロードが発生しない、またはイベントを取りこぼした場合に備えて
-   * timeoutMs 経過時にも resolve する。
-   */
-  private waitForDownloadCreated(timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let settled = false;
-
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        chrome.downloads.onCreated.removeListener(listener);
-        clearTimeout(timer);
-        resolve();
-      };
-
-      const listener = (): void => {
-        finish();
-      };
-
-      chrome.downloads.onCreated.addListener(listener);
-      const timer = setTimeout(finish, timeoutMs);
-    });
   }
 
   /**

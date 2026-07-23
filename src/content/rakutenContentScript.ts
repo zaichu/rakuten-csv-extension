@@ -1,6 +1,6 @@
-import type {
-  CsvDownloadInstruction,
-  DownloadResponse,
+import type { 
+  CsvDownloadInstruction, 
+  DownloadResponse, 
   TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
@@ -16,7 +16,11 @@ import { RakutenUtils, DomUtils } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private isInitialized = false;
-  private readonly elementTimeout = 5000;
+  private readonly retryConfig = {
+    maxRetries: 3,
+    retryDelay: 1000,
+    elementTimeout: 5000
+  };
 
   private constructor() {
     this.initialize();
@@ -139,14 +143,14 @@ class RakutenCsvExtension {
   private async handleCsvDownloadExecution(
     message: CsvDownloadInstruction
   ): Promise<DownloadResponse> {
-    const { downloadStep, selectors } = message.payload;
+    const { downloadStep, selectors, retryCount = 0 } = message.payload;
 
-    console.log(`CSVダウンロードステップ実行: ${downloadStep}`);
+    console.log(`CSVダウンロードステップ実行: ${downloadStep} (試行回数: ${retryCount + 1})`);
 
     // 楽天証券サイトの確認
     if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return {
-        success: false,
+      return { 
+        success: false, 
         error: '楽天証券のサイトではありません',
         step: downloadStep
       };
@@ -158,6 +162,16 @@ class RakutenCsvExtension {
       return result;
     } catch (error) {
       console.error(`ステップ ${downloadStep} 実行エラー:`, error);
+      
+      // リトライ可能なエラーかチェック
+      if (retryCount < this.retryConfig.maxRetries && this.isRetryableError(error)) {
+        console.log(`ステップ ${downloadStep} のリトライが可能です`);
+        return {
+          success: false,
+          error: `ステップ ${downloadStep} の実行に失敗しました (リトライ ${retryCount + 1}/${this.retryConfig.maxRetries})`,
+          step: downloadStep
+        };
+      }
 
       return {
         success: false,
@@ -249,10 +263,6 @@ class RakutenCsvExtension {
 
   /**
    * CSVダウンロードを実行
-   *
-   * クリックを即時実行せず、sendResponse後の次tickへ遅延させる。
-   * クリック直後に遷移が起きるとレスポンス送信前にmessage channelが
-   * 閉じてしまうことがあるため、応答を先に返してからクリックする。
    */
   private async executeDownloadCsv(selector?: string): Promise<DownloadResponse> {
     if (!selector) {
@@ -260,22 +270,15 @@ class RakutenCsvExtension {
     }
 
     const element = await this.findElementWithRetry(selector);
-
-    setTimeout(() => {
-      if (!DomUtils.safeClick(element)) {
-        console.error('CSVダウンロードのクリックに失敗しました');
-      }
-    }, 0);
-
-    return { success: true, message: 'CSVダウンロードの予約が完了しました' };
+    return this.clickElementSafely(element, 'CSVダウンロード');
   }
 
   /**
    * 要素をリトライ付きで検索
    */
   private async findElementWithRetry(
-    selectorGroup: string,
-    timeout: number = this.elementTimeout
+    selectorGroup: string, 
+    timeout: number = this.retryConfig.elementTimeout
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
@@ -368,6 +371,24 @@ class RakutenCsvExtension {
     }
   }
 
+  /**
+   * リトライ可能なエラーかどうかを判定
+   */
+  private isRetryableError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+
+    const retryableMessages = [
+      '要素が見つかりませんでした',
+      'クリックに失敗しました',
+      'タイムアウト',
+      'network error',
+      'connection failed'
+    ];
+
+    return retryableMessages.some(message => 
+      error.message.toLowerCase().includes(message.toLowerCase())
+    );
+  }
 }
 
 /**
