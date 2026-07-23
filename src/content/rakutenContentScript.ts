@@ -1,6 +1,5 @@
 import type {
   CsvDownloadInstruction,
-  CsvDownloadStepsInstruction,
   DownloadResponse,
   TabRegistrationMessage,
   PageReadyMessage,
@@ -18,9 +17,6 @@ class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private isInitialized = false;
   private readonly elementTimeout = 5000;
-
-  /** display-dataクリック後、結果表示の更新が反映されるまでの猶予 */
-  private readonly displayDataSettleWaitMs = 800;
 
   private constructor() {
     this.initialize();
@@ -113,9 +109,6 @@ class RakutenCsvExtension {
       case 'execute-csv-download':
         return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
 
-      case 'execute-csv-download-steps':
-        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
-
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -172,54 +165,6 @@ class RakutenCsvExtension {
         step: downloadStep
       };
     }
-  }
-
-  /**
-   * 同一ページ内の連続ステップをまとめて実行
-   */
-  private async handleCsvDownloadStepsExecution(
-    message: CsvDownloadStepsInstruction
-  ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors } = message.payload;
-
-    console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
-
-    // 楽天証券サイトの確認
-    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return {
-        success: false,
-        error: '楽天証券のサイトではありません',
-        step: downloadSteps[0]
-      };
-    }
-
-    for (const step of downloadSteps) {
-      try {
-        const result = await this.executeDownloadStep(step, selectors);
-        console.log(`ステップ ${step} 完了:`, result);
-
-        if (!result.success) {
-          return { ...result, step };
-        }
-
-        if (step === 'display-data') {
-          await this.sleep(this.displayDataSettleWaitMs);
-        }
-      } catch (error) {
-        console.error(`ステップ ${step} 実行エラー:`, error);
-
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : `ステップ ${step} の実行に失敗しました`,
-          step
-        };
-      }
-    }
-
-    return {
-      success: true,
-      message: 'ステップ群の実行が完了しました'
-    };
   }
 
   /**
@@ -401,13 +346,6 @@ class RakutenCsvExtension {
         error: `${actionName}のクリックに失敗しました` 
       };
     }
-  }
-
-  /**
-   * 待機
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**

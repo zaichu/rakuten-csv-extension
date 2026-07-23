@@ -49,6 +49,9 @@ class RakutenCsvBackgroundService {
   /** download-csvクリック後、chrome.downloads.onCreatedの発火を待つ最大時間 */
   private readonly downloadCreatedTimeout = 5000;
 
+  /** display-data成功後、楽天証券側の結果表示更新が反映されるまでの猶予 */
+  private readonly displayDataSettleWaitMs = 800;
+
   private state: ExtensionState = {
     rakutenTabs: new Set<number>(),
     lastActiveTime: Date.now()
@@ -333,97 +336,56 @@ class RakutenCsvBackgroundService {
   }
 
   /**
-   * ステップ列を実行単位でグルーピング
-   *
-   * navigate-to-page はページ遷移でcontent scriptが入れ替わるため単独実行にし、
-   * それ以外の連続ステップは同一ページ内のDOM操作としてまとめて1メッセージで実行する。
-   */
-  private groupSteps(
-    steps: readonly CsvDownloadStep[]
-  ): ReadonlyArray<
-    | { readonly kind: 'single'; readonly step: CsvDownloadStep }
-    | { readonly kind: 'batch'; readonly steps: readonly CsvDownloadStep[] }
-  > {
-    const groups: Array<
-      | { kind: 'single'; step: CsvDownloadStep }
-      | { kind: 'batch'; steps: CsvDownloadStep[] }
-    > = [];
-
-    for (const step of steps) {
-      if (step === 'navigate-to-page') {
-        groups.push({ kind: 'single', step });
-        continue;
-      }
-
-      const lastGroup = groups[groups.length - 1];
-      if (lastGroup && lastGroup.kind === 'batch') {
-        lastGroup.steps.push(step);
-      } else {
-        groups.push({ kind: 'batch', steps: [step] });
-      }
-    }
-
-    return groups;
-  }
-
-  /**
    * ダウンロードシーケンスの実行
+   *
+   * 各ステップは1メッセージ1ステップで順次実行する（バッチ化しない）。
+   * バッチ実行だと途中のクリックで遷移/再描画が起きた場合に
+   * message channelが応答前に閉じてしまうことがあるため。
    */
   private async executeDownloadSequence(
     tabId: number,
     config: CsvDownloadConfig
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
-    const groups = this.groupSteps(steps);
 
-    for (const group of groups) {
-      if (group.kind === 'single') {
-        const step = group.step;
+    for (const step of steps) {
+      this.log(`ステップ: ${step} を実行中...`);
 
-        this.log(`ステップ: ${step} を実行中...`);
+      // navigate-to-page はクリック直後にページ遷移が始まるため、
+      // executeStep 呼び出し前に fresh navigation complete イベントの
+      // 待ち受けを準備しておく（後から仕掛けるとイベントを取りこぼす）
+      const navigationCompletePromise = step === 'navigate-to-page'
+        ? this.waitForFreshNavigationComplete(tabId, this.navigateCompleteTimeout)
+        : undefined;
 
-        // navigate-to-page はクリック直後にページ遷移が始まるため、
-        // executeStep 呼び出し前に fresh navigation complete イベントの
-        // 待ち受けを準備しておく（後から仕掛けるとイベントを取りこぼす）
-        const navigationCompletePromise = this.waitForFreshNavigationComplete(
-          tabId,
-          this.navigateCompleteTimeout
-        );
+      // download-csvはクリック直後にダウンロードが登録されるため、
+      // executeStep 呼び出し前にonCreatedの待ち受けを準備しておく
+      const downloadCreatedPromise = step === 'download-csv'
+        ? this.waitForDownloadCreated(this.downloadCreatedTimeout)
+        : undefined;
 
-        const result = await this.executeStepWithRetry(tabId, step, selectors);
+      const result = await this.executeStepWithRetry(tabId, step, selectors);
 
-        if (!result.success) {
-          return {
-            success: false,
-            error: `${description}の${step}ステップで失敗: ${result.error}`
-          };
-        }
+      if (!result.success) {
+        return {
+          success: false,
+          error: `${description}の${step}ステップで失敗: ${result.error}`
+        };
+      }
 
-        // ページ遷移完了を待つ（それ以外のステップは次ステップのDOM探索側の待機に委ねる）
+      if (navigationCompletePromise) {
+        // ページ遷移完了を待つ
         await navigationCompletePromise;
-      } else {
-        this.log(`ステップ群: ${group.steps.join(', ')} を実行中...`);
+      }
 
-        // download-csvはクリック直後にダウンロードが登録されるため、
-        // 実行前にonCreatedの待ち受けを準備しておく（後から仕掛けると取りこぼす）
-        const downloadCreatedPromise = group.steps.includes('download-csv')
-          ? this.waitForDownloadCreated(this.downloadCreatedTimeout)
-          : undefined;
+      if (downloadCreatedPromise) {
+        // ダウンロードがブラウザに登録されてから次のステップへ進む
+        await downloadCreatedPromise;
+      }
 
-        const result = await this.executeStepsWithRetry(tabId, group.steps, selectors);
-
-        if (!result.success) {
-          const failedStep = result.step ?? group.steps[group.steps.length - 1];
-          return {
-            success: false,
-            error: `${description}の${failedStep}ステップで失敗: ${result.error}`
-          };
-        }
-
-        if (downloadCreatedPromise) {
-          // ダウンロードがブラウザに登録されてから次のdownloadTypeへ進む
-          await downloadCreatedPromise;
-        }
+      if (step === 'display-data') {
+        // 楽天証券側の結果表示更新が反映されるまで待ってから次ステップへ進む
+        await this.sleep(this.displayDataSettleWaitMs);
       }
     }
 
@@ -473,48 +435,6 @@ class RakutenCsvBackgroundService {
   }
 
   /**
-   * 同一ページ内の連続ステップをリトライ付きで実行
-   */
-  private async executeStepsWithRetry(
-    tabId: number,
-    steps: readonly CsvDownloadStep[],
-    selectors: CsvDownloadConfig['selectors']
-  ): Promise<DownloadResponse> {
-    let lastError: string = '';
-    let lastStep: CsvDownloadStep | undefined;
-
-    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-      try {
-        const result = await this.executeSteps(tabId, steps, selectors);
-
-        if (result.success) {
-          return result;
-        }
-
-        lastError = result.error || 'ステップの実行に失敗しました';
-        lastStep = result.step;
-
-        if (attempt < this.config.maxRetries) {
-          this.log(`ステップ群 ${steps.join(', ')} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
-          await this.sleep(this.config.retryInterval);
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
-
-        if (attempt < this.config.maxRetries) {
-          await this.sleep(this.config.retryInterval);
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`,
-      step: lastStep
-    };
-  }
-
-  /**
    * 単一ステップの実行
    */
   private executeStep(
@@ -545,40 +465,6 @@ class RakutenCsvBackgroundService {
       sendMessagePromise,
       this.config.stepTimeout,
       `ステップ ${step} がタイムアウトしました（${this.config.stepTimeout}ms）`
-    );
-  }
-
-  /**
-   * 同一ページ内の連続ステップの実行
-   */
-  private executeSteps(
-    tabId: number,
-    steps: readonly CsvDownloadStep[],
-    selectors: CsvDownloadConfig['selectors']
-  ): Promise<DownloadResponse> {
-    const sendMessagePromise = new Promise<DownloadResponse>((resolve) => {
-      chrome.tabs.sendMessage(tabId, {
-        action: 'execute-csv-download-steps',
-        payload: {
-          downloadSteps: steps,
-          selectors: selectors
-        }
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({
-            success: false,
-            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`
-          });
-        } else {
-          resolve(response || { success: false, error: 'レスポンスがありません' });
-        }
-      });
-    });
-
-    return withTimeout(
-      sendMessagePromise,
-      this.config.stepTimeout,
-      `ステップ群 ${steps.join(', ')} がタイムアウトしました（${this.config.stepTimeout}ms）`
     );
   }
 
