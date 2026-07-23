@@ -57,7 +57,7 @@ class RakutenCsvBackgroundService {
   private readonly waitTimes: WaitTimeConfig = {
     'navigate-to-page': 500,
     'select-tab': 500,
-    'select-period': 500,
+    'select-period': 0,
     'display-data': 500,
     'download-csv': 500
   };
@@ -369,8 +369,10 @@ class RakutenCsvBackgroundService {
       }
 
       // 次のステップまで待機
-      const waitTime = this.waitTimes[step] || 1000;
-      await this.sleep(waitTime);
+      const waitTime = this.waitTimes[step] ?? 1000;
+      if (waitTime > 0) {
+        await this.sleep(waitTime);
+      }
     }
 
     return {
