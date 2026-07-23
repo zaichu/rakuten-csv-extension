@@ -21,8 +21,6 @@ class RakutenCsvExtension {
 
   /** display-dataクリック後、結果表示の更新が反映されるまでの猶予 */
   private readonly displayDataSettleWaitMs = 800;
-  /** download-csvクリック後、ダウンロード要求がブラウザへ登録されるまでの猶予 */
-  private readonly downloadCsvSettleWaitMs = 800;
 
   private constructor() {
     this.initialize();
@@ -206,8 +204,6 @@ class RakutenCsvExtension {
 
         if (step === 'display-data') {
           await this.sleep(this.displayDataSettleWaitMs);
-        } else if (step === 'download-csv') {
-          await this.sleep(this.downloadCsvSettleWaitMs);
         }
       } catch (error) {
         console.error(`ステップ ${step} 実行エラー:`, error);
@@ -308,6 +304,10 @@ class RakutenCsvExtension {
 
   /**
    * CSVダウンロードを実行
+   *
+   * クリックを即時実行せず、sendResponse後の次tickへ遅延させる。
+   * クリック直後に遷移が起きるとレスポンス送信前にmessage channelが
+   * 閉じてしまうことがあるため、応答を先に返してからクリックする。
    */
   private async executeDownloadCsv(selector?: string): Promise<DownloadResponse> {
     if (!selector) {
@@ -315,7 +315,14 @@ class RakutenCsvExtension {
     }
 
     const element = await this.findElementWithRetry(selector);
-    return this.clickElementSafely(element, 'CSVダウンロード');
+
+    setTimeout(() => {
+      if (!DomUtils.safeClick(element)) {
+        console.error('CSVダウンロードのクリックに失敗しました');
+      }
+    }, 0);
+
+    return { success: true, message: 'CSVダウンロードの予約が完了しました' };
   }
 
   /**

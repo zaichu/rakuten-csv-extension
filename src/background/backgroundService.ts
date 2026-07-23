@@ -46,6 +46,9 @@ class RakutenCsvBackgroundService {
   /** navigate-to-page後にfresh navigation complete イベントを待つ最大時間 */
   private readonly navigateCompleteTimeout = 1000;
 
+  /** download-csvクリック後、chrome.downloads.onCreatedの発火を待つ最大時間 */
+  private readonly downloadCreatedTimeout = 5000;
+
   private state: ExtensionState = {
     rakutenTabs: new Set<number>(),
     lastActiveTime: Date.now()
@@ -401,6 +404,12 @@ class RakutenCsvBackgroundService {
       } else {
         this.log(`ステップ群: ${group.steps.join(', ')} を実行中...`);
 
+        // download-csvはクリック直後にダウンロードが登録されるため、
+        // 実行前にonCreatedの待ち受けを準備しておく（後から仕掛けると取りこぼす）
+        const downloadCreatedPromise = group.steps.includes('download-csv')
+          ? this.waitForDownloadCreated(this.downloadCreatedTimeout)
+          : undefined;
+
         const result = await this.executeStepsWithRetry(tabId, group.steps, selectors);
 
         if (!result.success) {
@@ -409,6 +418,11 @@ class RakutenCsvBackgroundService {
             success: false,
             error: `${description}の${failedStep}ステップで失敗: ${result.error}`
           };
+        }
+
+        if (downloadCreatedPromise) {
+          // ダウンロードがブラウザに登録されてから次のdownloadTypeへ進む
+          await downloadCreatedPromise;
         }
       }
     }
@@ -705,6 +719,37 @@ class RakutenCsvBackgroundService {
       };
 
       chrome.tabs.onUpdated.addListener(listener);
+      const timer = setTimeout(finish, timeoutMs);
+    });
+  }
+
+  /**
+   * chrome.downloads.onCreated イベントを待つ
+   *
+   * download-csv のクリックを送る前に呼び出すことで、クリック直後に
+   * 発火する onCreated イベントを取りこぼさずに捕捉する。
+   * ダウンロードが発生しない、またはイベントを取りこぼした場合に備えて
+   * timeoutMs 経過時にも resolve する。
+   */
+  private waitForDownloadCreated(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        chrome.downloads.onCreated.removeListener(listener);
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const listener = (): void => {
+        finish();
+      };
+
+      chrome.downloads.onCreated.addListener(listener);
       const timer = setTimeout(finish, timeoutMs);
     });
   }
