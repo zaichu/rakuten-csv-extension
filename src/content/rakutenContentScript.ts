@@ -1,7 +1,6 @@
-import type {
-  CsvDownloadInstruction,
-  CsvDownloadStepsInstruction,
-  DownloadResponse,
+import type { 
+  CsvDownloadInstruction, 
+  DownloadResponse, 
   TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
@@ -17,7 +16,11 @@ import { RakutenUtils, DomUtils } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private isInitialized = false;
-  private readonly elementTimeout = 5000;
+  private readonly retryConfig = {
+    maxRetries: 3,
+    retryDelay: 1000,
+    elementTimeout: 5000
+  };
 
   private constructor() {
     this.initialize();
@@ -110,9 +113,6 @@ class RakutenCsvExtension {
       case 'execute-csv-download':
         return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
 
-      case 'execute-csv-download-steps':
-        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
-
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -143,14 +143,14 @@ class RakutenCsvExtension {
   private async handleCsvDownloadExecution(
     message: CsvDownloadInstruction
   ): Promise<DownloadResponse> {
-    const { downloadStep, selectors } = message.payload;
+    const { downloadStep, selectors, retryCount = 0 } = message.payload;
 
-    console.log(`CSVダウンロードステップ実行: ${downloadStep}`);
+    console.log(`CSVダウンロードステップ実行: ${downloadStep} (試行回数: ${retryCount + 1})`);
 
     // 楽天証券サイトの確認
     if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return {
-        success: false,
+      return { 
+        success: false, 
         error: '楽天証券のサイトではありません',
         step: downloadStep
       };
@@ -162,6 +162,16 @@ class RakutenCsvExtension {
       return result;
     } catch (error) {
       console.error(`ステップ ${downloadStep} 実行エラー:`, error);
+      
+      // リトライ可能なエラーかチェック
+      if (retryCount < this.retryConfig.maxRetries && this.isRetryableError(error)) {
+        console.log(`ステップ ${downloadStep} のリトライが可能です`);
+        return {
+          success: false,
+          error: `ステップ ${downloadStep} の実行に失敗しました (リトライ ${retryCount + 1}/${this.retryConfig.maxRetries})`,
+          step: downloadStep
+        };
+      }
 
       return {
         success: false,
@@ -169,50 +179,6 @@ class RakutenCsvExtension {
         step: downloadStep
       };
     }
-  }
-
-  /**
-   * 同一ページ内の連続ステップをまとめて実行
-   */
-  private async handleCsvDownloadStepsExecution(
-    message: CsvDownloadStepsInstruction
-  ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors } = message.payload;
-
-    console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
-
-    // 楽天証券サイトの確認
-    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return {
-        success: false,
-        error: '楽天証券のサイトではありません',
-        step: downloadSteps[0]
-      };
-    }
-
-    for (const step of downloadSteps) {
-      try {
-        const result = await this.executeDownloadStep(step, selectors);
-        console.log(`ステップ ${step} 完了:`, result);
-
-        if (!result.success) {
-          return { ...result, step };
-        }
-      } catch (error) {
-        console.error(`ステップ ${step} 実行エラー:`, error);
-
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : `ステップ ${step} の実行に失敗しました`,
-          step
-        };
-      }
-    }
-
-    return {
-      success: true,
-      message: 'ステップ群の実行が完了しました'
-    };
   }
 
   /**
@@ -311,8 +277,8 @@ class RakutenCsvExtension {
    * 要素をリトライ付きで検索
    */
   private async findElementWithRetry(
-    selectorGroup: string,
-    timeout: number = this.elementTimeout
+    selectorGroup: string, 
+    timeout: number = this.retryConfig.elementTimeout
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
@@ -405,6 +371,24 @@ class RakutenCsvExtension {
     }
   }
 
+  /**
+   * リトライ可能なエラーかどうかを判定
+   */
+  private isRetryableError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+
+    const retryableMessages = [
+      '要素が見つかりませんでした',
+      'クリックに失敗しました',
+      'タイムアウト',
+      'network error',
+      'connection failed'
+    ];
+
+    return retryableMessages.some(message => 
+      error.message.toLowerCase().includes(message.toLowerCase())
+    );
+  }
 }
 
 /**

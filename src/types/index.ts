@@ -17,7 +17,6 @@ export type {
   ChromeMessage,
   CsvDownloadMessage,
   CsvDownloadInstruction,
-  CsvDownloadStepsInstruction,
   CsvDownloadStep,
   CsvDownloadConfig,
   CsvSelectors,
