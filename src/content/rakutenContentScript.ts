@@ -1,6 +1,7 @@
-import type { 
-  CsvDownloadInstruction, 
-  DownloadResponse, 
+import type {
+  CsvDownloadInstruction,
+  CsvDownloadStepsInstruction,
+  DownloadResponse,
   TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
@@ -20,6 +21,12 @@ class RakutenCsvExtension {
     maxRetries: 3,
     retryDelay: 1000,
     elementTimeout: 5000
+  };
+  /** display-data後の結果反映待ち（DOM settle）の設定 */
+  private readonly domSettleConfig = {
+    noMutationTimeout: 400,
+    quietPeriod: 200,
+    hardTimeout: 3000
   };
 
   private constructor() {
@@ -113,6 +120,9 @@ class RakutenCsvExtension {
       case 'execute-csv-download':
         return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
 
+      case 'execute-csv-download-steps':
+        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
+
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -179,6 +189,171 @@ class RakutenCsvExtension {
         step: downloadStep
       };
     }
+  }
+
+  /**
+   * 同一ページ内の連続ステップをまとめて実行
+   *
+   * navigate-to-page/select-tab のようにページ遷移を伴うステップは
+   * バックグラウンド側で単独実行されるため、ここに渡ってくるのは
+   * 同一ページ内で完結するステップ（select-period/display-data/download-csv等）のみ。
+   */
+  private async handleCsvDownloadStepsExecution(
+    message: CsvDownloadStepsInstruction
+  ): Promise<DownloadResponse> {
+    const { downloadSteps, selectors } = message.payload;
+
+    console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
+
+    // 楽天証券サイトの確認
+    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
+      return {
+        success: false,
+        error: '楽天証券のサイトではありません',
+        step: downloadSteps[0]
+      };
+    }
+
+    for (let i = 0; i < downloadSteps.length; i++) {
+      const step = downloadSteps[i];
+
+      // display-dataの直後にdownload-csvが続く場合、csvButtonが
+      // display-data前から既にDOM上にinteractableな状態で存在することがあり、
+      // 結果反映を待たずにクリックすると古い/不完全なCSVを取得しかねない。
+      // クリックで発火する変化を取りこぼさないよう、クリック前（要素検索前）に
+      // MutationObserverを仕込んでおく（タイムアウト計測はクリック成功後に開始する）。
+      const nextStep = downloadSteps[i + 1];
+      const settleWaiter =
+        step === 'display-data' && nextStep === 'download-csv'
+          ? this.createDomSettleWaiter()
+          : null;
+
+      try {
+        const result = await this.executeDownloadStep(step, selectors);
+        console.log(`ステップ ${step} 完了:`, result);
+
+        if (!result.success) {
+          settleWaiter?.cancel();
+          return { ...result, step };
+        }
+
+        if (settleWaiter) {
+          settleWaiter.start();
+          await settleWaiter.promise;
+        }
+      } catch (error) {
+        settleWaiter?.cancel();
+        console.error(`ステップ ${step} 実行エラー:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : `ステップ ${step} の実行に失敗しました`,
+          step
+        };
+      }
+    }
+
+    return {
+      success: true,
+      message: 'ステップ群の実行が完了しました'
+    };
+  }
+
+  /**
+   * DOM変化が収まるまで待機するウェイターを作成
+   *
+   * data-display後の結果反映（AJAX等による再描画）を検知するため、
+   * document.body配下の変化を監視する。MutationObserverの登録自体は
+   * 生成時（クリック前）に行い、取りこぼしを防ぐ。
+   * タイムアウト計測はクリック成功後にstart()を呼ぶまで開始しない
+   * （要素検索に時間がかかった場合に、タイムアウトが早期に尽きるのを防ぐため）。
+   * - 変化が来たら、一定の静穏期間（quietPeriod）変化がないことを確認してから進む
+   * - 変化が全く来ない場合は短いフォールバック（noMutationTimeout）で進む
+   * - どちらにも該当しない場合に備え、ハング防止の絶対上限（hardTimeout）を設ける
+   * 呼び出し元でクリックが失敗した場合はcancel()でobserver/タイマーを解放する。
+   */
+  private createDomSettleWaiter(): {
+    readonly promise: Promise<void>;
+    readonly start: () => void;
+    readonly cancel: () => void;
+  } {
+    const { noMutationTimeout, quietPeriod, hardTimeout } = this.domSettleConfig;
+
+    let settled = false;
+    let started = false;
+    let mutationSeenBeforeStart = false;
+    let mutationSeenAfterStart = false;
+    let quietTimer: number | undefined;
+    let noMutationTimer: number | undefined;
+    let hardTimer: number | undefined;
+    let resolvePromise: () => void = () => {};
+
+    const promise = new Promise<void>((resolve) => {
+      resolvePromise = resolve;
+    });
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      observer.disconnect();
+      if (quietTimer !== undefined) {
+        clearTimeout(quietTimer);
+      }
+      if (noMutationTimer !== undefined) {
+        clearTimeout(noMutationTimer);
+      }
+      if (hardTimer !== undefined) {
+        clearTimeout(hardTimer);
+      }
+      resolvePromise();
+    };
+
+    const scheduleQuiet = () => {
+      if (quietTimer !== undefined) {
+        clearTimeout(quietTimer);
+      }
+      quietTimer = window.setTimeout(finish, quietPeriod);
+    };
+
+    const observer = new MutationObserver(() => {
+      if (!started) {
+        mutationSeenBeforeStart = true;
+        return;
+      }
+      mutationSeenAfterStart = true;
+      scheduleQuiet();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    });
+
+    const start = () => {
+      if (started || settled) {
+        return;
+      }
+      started = true;
+
+      // start()前に既に変化を検知していた場合も静穏期間の判定に含める
+      if (mutationSeenBeforeStart) {
+        mutationSeenAfterStart = true;
+        scheduleQuiet();
+      }
+
+      noMutationTimer = window.setTimeout(() => {
+        if (!mutationSeenAfterStart) {
+          finish();
+        }
+      }, noMutationTimeout);
+
+      hardTimer = window.setTimeout(finish, hardTimeout);
+    };
+
+    return { promise, start, cancel: finish };
   }
 
   /**
