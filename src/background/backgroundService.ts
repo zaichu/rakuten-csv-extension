@@ -56,7 +56,7 @@ class RakutenCsvBackgroundService {
 
   private readonly waitTimes: WaitTimeConfig = {
     'navigate-to-page': 500,
-    'select-tab': 500,
+    'select-tab': 0,
     'select-period': 0,
     'display-data': 500,
     'download-csv': 500
