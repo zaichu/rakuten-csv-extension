@@ -33,9 +33,15 @@ interface ExtensionConfig {
 /**
  * ステップ実行グループ
  *
- * navigate-to-page/select-tab はページ遷移（content scriptの再読み込み）を
- * 伴い得るため単独実行にし、それ以外の同一ページ内のステップは
- * 1メッセージにまとめてcontent scriptに渡す。
+ * navigate-to-page/select-tab/display-data はページ遷移・ページ更新
+ * （content scriptの再読み込み）を伴い得るため単独実行にし、
+ * それ以外の同一ページ内のステップは1メッセージにまとめてcontent scriptに渡す。
+ *
+ * display-dataは「表示する」ボタン押下がフォーム送信/ページ更新を伴う
+ * ページがあり、download-csvと同一メッセージに含めるとcontent scriptが
+ * sendResponseする前にページが遷移し、message channelが閉じて
+ * 「message channel closed before a response was received」で失敗する
+ * ことが実機で確認されたため、単独実行対象に含める。
  */
 type StepGroup =
   | { readonly kind: 'page-transition'; readonly step: CsvDownloadStep }
@@ -54,10 +60,11 @@ class RakutenCsvBackgroundService {
     debugMode: false
   };
 
-  /** ページ遷移を伴い得るステップ（単独実行のうえページ遷移完了を待つ対象） */
+  /** ページ遷移・ページ更新を伴い得るステップ（単独実行のうえ遷移完了を待つ対象） */
   private readonly pageTransitionSteps: ReadonlySet<CsvDownloadStep> = new Set([
     'navigate-to-page',
-    'select-tab'
+    'select-tab',
+    'display-data'
   ]);
 
   /** ページ遷移完了イベントを取りこぼした場合のハング防止タイムアウト */
@@ -353,8 +360,9 @@ class RakutenCsvBackgroundService {
   /**
    * ステップ列を実行単位でグルーピング
    *
-   * navigate-to-page/select-tab はページ遷移でcontent scriptが入れ替わり得るため単独実行にし、
-   * それ以外の連続ステップは同一ページ内のDOM操作としてまとめて1メッセージで実行する。
+   * navigate-to-page/select-tab/display-data はページ遷移やページ更新で
+   * content scriptが入れ替わり得るため単独実行にし、それ以外の連続ステップは
+   * 同一ページ内のDOM操作としてまとめて1メッセージで実行する。
    */
   private groupSteps(steps: readonly CsvDownloadStep[]): readonly StepGroup[] {
     const groups: Array<
