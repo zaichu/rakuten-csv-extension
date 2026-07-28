@@ -1,6 +1,7 @@
-import type { 
-  CsvDownloadInstruction, 
-  DownloadResponse, 
+import type {
+  CsvDownloadInstruction,
+  CsvDownloadStepsInstruction,
+  DownloadResponse,
   TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
@@ -113,6 +114,9 @@ class RakutenCsvExtension {
       case 'execute-csv-download':
         return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
 
+      case 'execute-csv-download-steps':
+        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
+
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -179,6 +183,53 @@ class RakutenCsvExtension {
         step: downloadStep
       };
     }
+  }
+
+  /**
+   * 同一ページ内の連続ステップをまとめて実行
+   *
+   * navigate-to-page/select-tab/display-data のようにページ遷移・ページ更新を
+   * 伴い得るステップはバックグラウンド側で単独実行されるため、ここに渡ってくるのは
+   * 同一ページ内で完結するステップ（select-period/download-csv等）のみ。
+   */
+  private async handleCsvDownloadStepsExecution(
+    message: CsvDownloadStepsInstruction
+  ): Promise<DownloadResponse> {
+    const { downloadSteps, selectors } = message.payload;
+
+    console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
+
+    // 楽天証券サイトの確認
+    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
+      return {
+        success: false,
+        error: '楽天証券のサイトではありません',
+        step: downloadSteps[0]
+      };
+    }
+
+    for (const step of downloadSteps) {
+      try {
+        const result = await this.executeDownloadStep(step, selectors);
+        console.log(`ステップ ${step} 完了:`, result);
+
+        if (!result.success) {
+          return { ...result, step };
+        }
+      } catch (error) {
+        console.error(`ステップ ${step} 実行エラー:`, error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : `ステップ ${step} の実行に失敗しました`,
+          step
+        };
+      }
+    }
+
+    return {
+      success: true,
+      message: 'ステップ群の実行が完了しました'
+    };
   }
 
   /**
@@ -257,7 +308,7 @@ class RakutenCsvExtension {
       return { success: false, error: 'データ表示のセレクターが指定されていません' };
     }
 
-    const element = await this.findElementWithRetry(selector);
+    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
     return this.clickElementSafely(element, 'データ表示');
   }
 
@@ -269,7 +320,7 @@ class RakutenCsvExtension {
       return { success: false, error: 'CSVダウンロードのセレクターが指定されていません' };
     }
 
-    const element = await this.findElementWithRetry(selector);
+    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
     return this.clickElementSafely(element, 'CSVダウンロード');
   }
 
@@ -277,16 +328,17 @@ class RakutenCsvExtension {
    * 要素をリトライ付きで検索
    */
   private async findElementWithRetry(
-    selectorGroup: string, 
-    timeout: number = this.retryConfig.elementTimeout
+    selectorGroup: string,
+    timeout: number = this.retryConfig.elementTimeout,
+    requireInteractable: boolean = false
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
     // 既存要素をチェック
     for (const selector of selectors) {
       const element = document.querySelector(selector);
-      if (element) {
-        console.log(`既存要素が見つかりました: ${selector}`);
+      if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
+        console.log("既存要素が見つかりました: " + selector);
         return element;
       }
     }
@@ -297,10 +349,10 @@ class RakutenCsvExtension {
         for (const selector of selectors) {
           try {
             const element = document.querySelector(selector);
-            if (element) {
+            if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
               observer.disconnect();
               clearTimeout(timeoutId);
-              console.log(`動的に要素が見つかりました: ${selector}`);
+              console.log("動的に要素が見つかりました: " + selector);
               resolve(element);
               return;
             }
