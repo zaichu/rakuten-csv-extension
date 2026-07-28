@@ -257,7 +257,7 @@ class RakutenCsvExtension {
       return { success: false, error: 'データ表示のセレクターが指定されていません' };
     }
 
-    const element = await this.findElementWithRetry(selector);
+    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
     return this.clickElementSafely(element, 'データ表示');
   }
 
@@ -269,7 +269,7 @@ class RakutenCsvExtension {
       return { success: false, error: 'CSVダウンロードのセレクターが指定されていません' };
     }
 
-    const element = await this.findElementWithRetry(selector);
+    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
     return this.clickElementSafely(element, 'CSVダウンロード');
   }
 
@@ -277,16 +277,17 @@ class RakutenCsvExtension {
    * 要素をリトライ付きで検索
    */
   private async findElementWithRetry(
-    selectorGroup: string, 
-    timeout: number = this.retryConfig.elementTimeout
+    selectorGroup: string,
+    timeout: number = this.retryConfig.elementTimeout,
+    requireInteractable: boolean = false
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
     // 既存要素をチェック
     for (const selector of selectors) {
       const element = document.querySelector(selector);
-      if (element && DomUtils.isElementInteractable(element)) {
-        console.log(`操作可能な既存要素が見つかりました: ${selector}`);
+      if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
+        console.log("既存要素が見つかりました: " + selector);
         return element;
       }
     }
@@ -297,10 +298,10 @@ class RakutenCsvExtension {
         for (const selector of selectors) {
           try {
             const element = document.querySelector(selector);
-            if (element && DomUtils.isElementInteractable(element)) {
+            if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
               observer.disconnect();
               clearTimeout(timeoutId);
-              console.log(`操作可能な要素が動的に見つかりました: ${selector}`);
+              console.log("動的に要素が見つかりました: " + selector);
               resolve(element);
               return;
             }
