@@ -285,8 +285,8 @@ class RakutenCsvExtension {
     // 既存要素をチェック
     for (const selector of selectors) {
       const element = document.querySelector(selector);
-      if (element) {
-        console.log(`既存要素が見つかりました: ${selector}`);
+      if (element && DomUtils.isElementInteractable(element)) {
+        console.log(`操作可能な既存要素が見つかりました: ${selector}`);
         return element;
       }
     }
@@ -297,10 +297,10 @@ class RakutenCsvExtension {
         for (const selector of selectors) {
           try {
             const element = document.querySelector(selector);
-            if (element) {
+            if (element && DomUtils.isElementInteractable(element)) {
               observer.disconnect();
               clearTimeout(timeoutId);
-              console.log(`動的に要素が見つかりました: ${selector}`);
+              console.log(`操作可能な要素が動的に見つかりました: ${selector}`);
               resolve(element);
               return;
             }
