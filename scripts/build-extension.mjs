@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild'
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -59,11 +59,9 @@ writeFileSync(
 )
 console.log('dist/manifest.json written')
 
-// icons コピー
-const iconsDir = join(root, 'icons')
-const distIconsDir = join(root, 'dist/icons')
-mkdirSync(distIconsDir, { recursive: true })
-for (const file of readdirSync(iconsDir)) {
-  copyFileSync(join(iconsDir, file), join(distIconsDir, file))
-}
-console.log('icons copied to dist/icons')
+// 拡張機能とChrome Web Storeで共通のアイコンをコピー
+const sourceIcon = join(root, 'assets/chrome-web-store/store-icon-128.png')
+const distIcon = join(root, 'dist/assets/chrome-web-store/store-icon-128.png')
+mkdirSync(dirname(distIcon), { recursive: true })
+copyFileSync(sourceIcon, distIcon)
+console.log('shared store icon copied to dist/assets/chrome-web-store')
