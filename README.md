@@ -196,6 +196,16 @@ npm run lint
 
 main への PR マージ後、GitHub Actions が `npm version patch --no-git-tag-version` で `package.json` / `package-lock.json` を更新する patch version bump PR を自動作成します。手動でバージョンを書き換える必要はありません。
 
+### アイコンとストア掲載素材
+
+アイコンは1ファイルを正本として、ストア掲載と拡張機能本体で共通利用します。
+
+- [`assets/chrome-web-store/store-icon-128.png`](assets/chrome-web-store/store-icon-128.png): `manifest.json` とChrome Web Storeで共通利用する唯一のアイコン正本
+- [`assets/chrome-web-store/`](assets/chrome-web-store/): Chrome Web Storeのスクリーンショット、プロモーション画像、共通アイコン
+- [`release/`](release/): `main` の最新コミットから生成した拡張機能パッケージと掲載素材ZIP
+
+ビルド時は共通アイコンだけを `dist/assets/chrome-web-store/` にコピーします。
+
 ### テスト
 ```bash
 # 全テストの実行
@@ -271,4 +281,3 @@ npm run test:coverage
 **🔒 プライバシーとセキュリティ**
 
 この拡張機能はユーザーのプライバシーを最優先に設計されています。すべてのデータ処理はローカルで行われ、外部への送信は一切行いません。詳細については [プライバシーポリシー](PRIVACY_POLICY.md) をご確認ください。
-
