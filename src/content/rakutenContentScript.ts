@@ -241,19 +241,19 @@ class RakutenCsvExtension {
   ): Promise<DownloadResponse> {
     switch (step) {
       case 'navigate-to-page':
-        return this.executeNavigateToPage(selectors.menuLink);
+        return this.runClickStep(selectors.menuLink, 'ページ遷移');
 
       case 'select-tab':
-        return this.executeSelectTab(selectors.tabSelector);
+        return this.runClickStep(selectors.tabSelector, 'タブ選択');
 
       case 'select-period':
-        return this.executeSelectPeriod(selectors.periodRadio);
+        return this.runClickStep(selectors.periodRadio, '期間選択');
 
       case 'display-data':
-        return this.executeDisplayData(selectors.displayButton);
+        return this.runClickStep(selectors.displayButton, 'データ表示', { requireInteractable: true });
 
       case 'download-csv':
-        return this.executeDownloadCsv(selectors.csvButton);
+        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', { requireInteractable: true });
 
       default:
         return { 
@@ -265,63 +265,24 @@ class RakutenCsvExtension {
   }
 
   /**
-   * ページ遷移を実行
+   * クリック系ステップの汎用実行
+   * navigate-to-page/select-tab/select-period/display-data/download-csv は
+   * 「セレクター未指定チェック→要素検索→安全なクリック」の同一処理のため1つに統合。
+   * display-data/download-csv のみ操作可能要素を必須とする。
    */
-  private async executeNavigateToPage(selector?: string): Promise<DownloadResponse> {
+  private async runClickStep(
+    selector: string | undefined,
+    actionName: string,
+    options?: { requireInteractable?: boolean }
+  ): Promise<DownloadResponse> {
     if (!selector) {
-      return { success: false, error: 'ページ遷移のセレクターが指定されていません' };
+      return { success: false, error: `${actionName}のセレクターが指定されていません` };
     }
 
-    const element = await this.findElementWithRetry(selector);
-    return this.clickElementSafely(element, 'ページ遷移');
-  }
-
-  /**
-   * タブ選択を実行
-   */
-  private async executeSelectTab(selector?: string): Promise<DownloadResponse> {
-    if (!selector) {
-      return { success: false, error: 'タブ選択のセレクターが指定されていません' };
-    }
-
-    const element = await this.findElementWithRetry(selector);
-    return this.clickElementSafely(element, 'タブ選択');
-  }
-
-  /**
-   * 期間選択を実行
-   */
-  private async executeSelectPeriod(selector?: string): Promise<DownloadResponse> {
-    if (!selector) {
-      return { success: false, error: '期間選択のセレクターが指定されていません' };
-    }
-
-    const element = await this.findElementWithRetry(selector);
-    return this.clickElementSafely(element, '期間選択');
-  }
-
-  /**
-   * データ表示を実行
-   */
-  private async executeDisplayData(selector?: string): Promise<DownloadResponse> {
-    if (!selector) {
-      return { success: false, error: 'データ表示のセレクターが指定されていません' };
-    }
-
-    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
-    return this.clickElementSafely(element, 'データ表示');
-  }
-
-  /**
-   * CSVダウンロードを実行
-   */
-  private async executeDownloadCsv(selector?: string): Promise<DownloadResponse> {
-    if (!selector) {
-      return { success: false, error: 'CSVダウンロードのセレクターが指定されていません' };
-    }
-
-    const element = await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true);
-    return this.clickElementSafely(element, 'CSVダウンロード');
+    const element = options?.requireInteractable
+      ? await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true)
+      : await this.findElementWithRetry(selector);
+    return this.clickElementSafely(element, actionName);
   }
 
   /**
