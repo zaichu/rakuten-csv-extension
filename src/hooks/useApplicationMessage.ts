@@ -6,41 +6,19 @@ import type { ApplicationMessage, MessageType } from '../types';
  */
 interface MessageConfig {
   readonly autoCloseDuration?: number;
-  readonly maxMessages?: number;
-  readonly enableQueue?: boolean;
-}
-
-/**
- * メッセージキューの項目
- */
-interface QueuedMessage extends ApplicationMessage {
-  readonly id: string;
-  readonly autoClose?: boolean;
-  readonly duration?: number;
 }
 
 /**
  * アプリケーションメッセージ管理のカスタムフック
- * メッセージの表示、自動削除、キュー管理を提供
+ * メッセージの表示、自動削除を提供
  */
 export const useApplicationMessage = (config: MessageConfig = {}) => {
   const {
-    autoCloseDuration = 5000,
-    maxMessages = 1,
-    enableQueue = false
+    autoCloseDuration = 5000
   } = config;
 
   const [message, setMessage] = useState<ApplicationMessage | null>(null);
-  const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   const timeoutRef = useRef<number | null>(null);
-  const messageIdCounter = useRef(0);
-
-  /**
-   * 一意のメッセージIDを生成
-   */
-  const generateMessageId = useCallback((): string => {
-    return `msg_${Date.now()}_${++messageIdCounter.current}`;
-  }, []);
 
   /**
    * タイマーをクリア
@@ -61,43 +39,29 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
     options: {
       autoClose?: boolean;
       duration?: number;
-      replace?: boolean;
     } = {}
   ) => {
     const {
       autoClose = type === 'success' || type === 'info',
-      duration = autoCloseDuration,
-      replace = !enableQueue
+      duration = autoCloseDuration
     } = options;
 
-    const newMessage: QueuedMessage = {
-      id: generateMessageId(),
+    const newMessage: ApplicationMessage = {
       type,
       content,
-      timestamp: new Date(),
-      autoClose,
-      duration
+      timestamp: new Date()
     };
 
-    if (replace || !enableQueue) {
-      // 既存のメッセージを置き換え
-      clearTimer();
-      setMessage(newMessage);
-      setMessageQueue([]);
+    // 既存のメッセージを置き換え
+    clearTimer();
+    setMessage(newMessage);
 
-      if (autoClose) {
-        timeoutRef.current = window.setTimeout(() => {
-          setMessage(null);
-        }, duration);
-      }
-    } else {
-      // キューに追加
-      setMessageQueue(prev => {
-        const newQueue = [...prev, newMessage];
-        return newQueue.slice(-maxMessages); // 最大数を超えた場合は古いものを削除
-      });
+    if (autoClose) {
+      timeoutRef.current = window.setTimeout(() => {
+        setMessage(null);
+      }, duration);
     }
-  }, [autoCloseDuration, enableQueue, maxMessages, generateMessageId, clearTimer]);
+  }, [autoCloseDuration, clearTimer]);
 
   /**
    * メッセージをクリア
@@ -105,15 +69,6 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
   const clearMessage = useCallback(() => {
     clearTimer();
     setMessage(null);
-  }, [clearTimer]);
-
-  /**
-   * 全てのメッセージをクリア
-   */
-  const clearAllMessages = useCallback(() => {
-    clearTimer();
-    setMessage(null);
-    setMessageQueue([]);
   }, [clearTimer]);
 
   /**
@@ -131,45 +86,6 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
   }, [showMessage]);
 
   /**
-   * 警告メッセージを表示
-   */
-  const showWarning = useCallback((content: string, options?: Parameters<typeof showMessage>[2]) => {
-    showMessage('warning', content, { autoClose: false, ...options });
-  }, [showMessage]);
-
-  /**
-   * 情報メッセージを表示
-   */
-  const showInfo = useCallback((content: string, options?: Parameters<typeof showMessage>[2]) => {
-    showMessage('info', content, options);
-  }, [showMessage]);
-
-  /**
-   * キューからメッセージを取得（キューが有効な場合）
-   */
-  const processMessageQueue = useCallback(() => {
-    if (enableQueue && messageQueue.length > 0 && !message) {
-      const nextMessage = messageQueue[0];
-      setMessageQueue(prev => prev.slice(1));
-      setMessage(nextMessage);
-
-      if (nextMessage.autoClose) {
-        timeoutRef.current = window.setTimeout(() => {
-          setMessage(null);
-        }, nextMessage.duration || autoCloseDuration);
-      }
-    }
-  }, [enableQueue, messageQueue, message, autoCloseDuration]);
-
-  /**
-   * メッセージの自動処理
-   */
-  useEffect(() => {
-    const timer = window.setTimeout(processMessageQueue, 0);
-    return () => window.clearTimeout(timer);
-  }, [processMessageQueue]);
-
-  /**
    * クリーンアップ
    */
   useEffect(() => {
@@ -182,58 +98,18 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
    * メッセージの存在チェック
    */
   const hasMessage = message !== null;
-  const hasQueuedMessages = messageQueue.length > 0;
-  const totalMessages = (hasMessage ? 1 : 0) + messageQueue.length;
-
-  /**
-   * メッセージタイプに応じたアイコンを取得
-   */
-  const getMessageIcon = useCallback((messageType: MessageType): string => {
-    const icons: Record<MessageType, string> = {
-      success: '✅',
-      error: '❌',
-      warning: '⚠️',
-      info: 'ℹ️'
-    };
-    return icons[messageType] || 'ℹ️';
-  }, []);
-
-  /**
-   * メッセージタイプに応じたCSSクラスを取得
-   */
-  const getMessageClass = useCallback((messageType: MessageType): string => {
-    const classes: Record<MessageType, string> = {
-      success: 'bg-green-50 text-green-800 border border-green-200',
-      error: 'bg-red-50 text-red-800 border border-red-200',
-      warning: 'bg-yellow-50 text-yellow-800 border border-yellow-200',
-      info: 'bg-blue-50 text-blue-800 border border-blue-200'
-    };
-    return classes[messageType] || classes.info;
-  }, []);
 
   return {
     // 現在のメッセージ
     message,
     hasMessage,
-    
-    // キュー関連
-    messageQueue: enableQueue ? messageQueue : [],
-    hasQueuedMessages: enableQueue ? hasQueuedMessages : false,
-    totalMessages: enableQueue ? totalMessages : (hasMessage ? 1 : 0),
-    
+
     // メッセージ操作
     showMessage,
     clearMessage,
-    clearAllMessages,
-    
+
     // 便利メソッド
     showSuccess,
-    showError,
-    showWarning,
-    showInfo,
-    
-    // ユーティリティ
-    getMessageIcon,
-    getMessageClass
+    showError
   };
 };
