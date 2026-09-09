@@ -1,19 +1,21 @@
 import React, { useState, useCallback } from 'react';
-import { Header, Footer, IconLabel, Message } from '../components';
+import {
+  Header,
+  Footer,
+  IconLabel,
+  Message,
+  CategorySection,
+  ProgressDisplay,
+  SelectionSummary,
+  DOWNLOAD_OPTIONS,
+  CATEGORIZED_OPTIONS,
+  getCategoryLabel,
+  getCategoryIcon,
+} from '../components';
 import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
 import type { CsvDownloadType } from '../types';
 import { ShokenWebUtils } from '../utils/shokenwebUtils';
-
-/**
- * CSV ダウンロードオプション
- */
-interface DownloadOption {
-  readonly id: CsvDownloadType;
-  readonly label: string;
-  readonly icon: string;
-  readonly category: 'portfolio' | 'transaction' | 'income';
-}
 
 /**
  * アプリケーションの設定
@@ -23,45 +25,6 @@ interface AppConfig {
   readonly defaultSelectedOptions: readonly CsvDownloadType[];
   readonly enableBatchOperations: boolean;
 }
-
-/**
- * ダウンロードオプションの定義
- */
-const DOWNLOAD_OPTIONS: readonly DownloadOption[] = [
-  {
-    id: 'assetbalance',
-    label: '国内株式',
-    icon: '📊',
-    category: 'portfolio'
-  },
-  {
-    id: 'dividend',
-    label: '配当金・分配金',
-    icon: '💰',
-    category: 'income'
-  },
-  {
-    id: 'domesticstock',
-    label: '国内株式',
-    icon: '📋',
-    category: 'transaction'
-  },
-  {
-    id: 'mutualfund',
-    label: '投資信託',
-    icon: '📋',
-    category: 'transaction'
-  }
-] as const;
-
-/**
- * カテゴリ別にグループ化されたオプション
- */
-const CATEGORIZED_OPTIONS: Record<string, DownloadOption[]> = {
-  portfolio: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'portfolio'),
-  income: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'income'),
-  transaction: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'transaction')
-};
 
 /**
  * 楽天証券CSV拡張機能のメインアプリケーション
@@ -89,30 +52,6 @@ const RakutenCsvExtensionApp: React.FC = () => {
     new Set(appConfig.defaultSelectedOptions)
   );
 
-
-  /**
-   * カテゴリの表示名を取得
-   */
-  const getCategoryLabel = useCallback((category: string): string => {
-    const labels: Record<string, string> = {
-      portfolio: 'ポートフォリオ',
-      transaction: '取引履歴',
-      income: '収益情報'
-    };
-    return labels[category] || category;
-  }, []);
-
-  /**
-   * カテゴリのアイコンを取得
-   */
-  const getCategoryIcon = useCallback((category: string): string => {
-    const icons: Record<string, string> = {
-      portfolio: '📈',
-      transaction: '📊',
-      income: '💰'
-    };
-    return icons[category] || '📋';
-  }, []);
 
   /**
    * 個別チェックボックスの変更処理
@@ -249,113 +188,6 @@ const RakutenCsvExtensionApp: React.FC = () => {
     return <IconLabel icon="💾" label={label} />;
   }, [isDownloading, currentOperation, progress, selectedOptions.size]);
 
-  /**
-   * カテゴリ別オプションのレンダリング
-   */
-  const renderCategoryOptions = useCallback((category: string, options: readonly DownloadOption[]) => {
-    const selectedInCategory = options.filter(opt => selectedOptions.has(opt.id)).length;
-    const allInCategorySelected = selectedInCategory === options.length;
-
-    return (
-      <div key={category} className="category-section" data-category={category}>
-        <div className="category-header">
-          <div className="category-title">
-            <span>{getCategoryIcon(category)}</span>
-            <span>{getCategoryLabel(category)}</span>
-            <span className="category-count">{selectedInCategory}/{options.length}</span>
-          </div>
-          <button
-            type="button"
-            className={allInCategorySelected ? 'tog-off' : 'tog-on'}
-            onClick={() => handleCategoryToggle(category)}
-            disabled={isDownloading}
-          >
-            {allInCategorySelected ? '全解除' : '全選択'}
-          </button>
-        </div>
-
-        <div className="category-body">
-          {options.map((option) => (
-            <div key={option.id} className={`option-row${selectedOptions.has(option.id) ? ' option-row-selected' : ''}`}>
-              <input
-                type="checkbox"
-                id={option.id}
-                checked={selectedOptions.has(option.id)}
-                onChange={() => handleOptionChange(option.id)}
-                disabled={isDownloading}
-              />
-              <label htmlFor={option.id}>
-                <IconLabel icon={option.icon} label={option.label} />
-              </label>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }, [selectedOptions, isDownloading, getCategoryIcon, getCategoryLabel, handleOptionChange, handleCategoryToggle]);
-
-  /**
-   * 進捗表示のレンダリング
-   */
-  const renderProgressDisplay = useCallback(() => {
-    if (!isDownloading) return null;
-
-    return (
-      <div className="progress-notice">
-        <div className="progress-row">
-          <div className="progress-label">
-            <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
-            <span>{currentOperation || 'ダウンロード中...'}</span>
-          </div>
-          <button
-            type="button"
-            className="tog-off"
-            onClick={handleCancelDownload}
-          >
-            キャンセル
-          </button>
-        </div>
-        {progress !== undefined && (
-          <div className="progress-track">
-            <div
-              className="progress-fill"
-              role="progressbar"
-              style={{ width: `${progress}%` }}
-              aria-valuenow={progress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            />
-          </div>
-        )}
-      </div>
-    );
-  }, [isDownloading, currentOperation, progress, handleCancelDownload]);
-
-  /**
-   * 選択状況の表示
-   */
-  const renderSelectionSummary = useCallback(() => {
-    const allOptionsCount = DOWNLOAD_OPTIONS.length;
-    const selectedCount = selectedOptions.size;
-    const allSelected = selectedCount === allOptionsCount;
-
-    return (
-      <div className="selection-summary">
-        <div className="selection-info">
-          <span>選択中 <strong className="text-blue-700 font-bold">{selectedCount}</strong> / {allOptionsCount}</span>
-        </div>
-        <button
-          type="button"
-          className={allSelected ? 'tog-all-off' : 'tog-all-on'}
-          onClick={handleSelectAll}
-          disabled={isDownloading}
-        >
-          {allSelected ? '全解除' : '全選択'}
-        </button>
-      </div>
-    );
-  }, [selectedOptions.size, handleSelectAll, isDownloading]);
-
   return (
     <div className="popup-container">
       <Header title="楽天証券 CSV取得ツール" icon="📈" />
@@ -388,15 +220,41 @@ const RakutenCsvExtensionApp: React.FC = () => {
         </div>
 
         {/* 進捗表示 */}
-        {renderProgressDisplay()}
+        <ProgressDisplay
+          isDownloading={isDownloading}
+          currentOperation={currentOperation}
+          progress={progress}
+          onCancel={handleCancelDownload}
+        />
 
         {/* 選択状況の表示 */}
-        {renderSelectionSummary()}
+        <SelectionSummary
+          selectedCount={selectedOptions.size}
+          totalCount={DOWNLOAD_OPTIONS.length}
+          allSelected={selectedOptions.size === DOWNLOAD_OPTIONS.length}
+          isDownloading={isDownloading}
+          onSelectAll={handleSelectAll}
+        />
 
         {/* カテゴリ別オプション */}
-        {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) =>
-          renderCategoryOptions(category, options)
-        )}
+        {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) => {
+          const selectedInCategory = options.filter(opt => selectedOptions.has(opt.id)).length;
+          return (
+            <CategorySection
+              key={category}
+              category={category}
+              options={options}
+              categoryLabel={getCategoryLabel(category)}
+              categoryIcon={getCategoryIcon(category)}
+              selectedInCategory={selectedInCategory}
+              allInCategorySelected={selectedInCategory === options.length}
+              selectedOptions={selectedOptions}
+              isDownloading={isDownloading}
+              onOptionChange={handleOptionChange}
+              onCategoryToggle={handleCategoryToggle}
+            />
+          );
+        })}
 
         {/* ダウンロードボタン */}
         <div className="mb-2 mt-1">
