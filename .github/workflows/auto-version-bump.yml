@@ -37,10 +37,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Check for existing version bump PR
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EXISTING="$(gh pr list --repo "${GITHUB_REPOSITORY}" --state open --base main \
+            --json headRefName --jq '[.[] | select(.headRefName | startswith("chore/version-bump-"))] | length')"
+          echo "count=$EXISTING" >> "$GITHUB_OUTPUT"
+          if [ "$EXISTING" != "0" ]; then
+            echo "既にオープンなバージョン更新PRが${EXISTING}件あるため、今回は新規作成をスキップします。"
+          fi
+
       - name: Bump patch version
+        if: steps.check.outputs.count == '0'
         run: npm version patch --no-git-tag-version
 
       - name: Create pull request
+        if: steps.check.outputs.count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_PR: ${{ github.event.pull_request.number }}
