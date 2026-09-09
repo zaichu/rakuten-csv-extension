@@ -1,49 +1,9 @@
-import type { ElementSearchConfig } from '../types';
-
 /**
  * DOM操作関連のユーティリティクラス
  * 楽天証券サイトでの安全なDOM操作を提供
  */
 export class DomUtils {
   private static readonly DEFAULT_TIMEOUT = 5000;
-  private static readonly DEFAULT_RETRY_INTERVAL = 100;
-
-  /**
-   * XPathで要素を取得
-   */
-  static getElementByXPath(xpath: string): Element | null {
-    try {
-      const result = document.evaluate(
-        xpath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      );
-      return result.singleNodeValue as Element | null;
-    } catch (error) {
-      console.warn(`XPath実行エラー: ${xpath}`, error);
-      return null;
-    }
-  }
-
-  /**
-   * 複数のセレクターで要素を検索
-   */
-  static findElement(selectors: readonly string[]): Element | null {
-    for (const selector of selectors) {
-      try {
-        const element = document.querySelector(selector);
-        if (element && this.isElementInteractable(element)) {
-          return element;
-        }
-      } catch (error) {
-        console.warn(`セレクター実行エラー: ${selector}`, error);
-        continue;
-      }
-    }
-    return null;
-  }
 
   /**
    * 要素が操作可能かどうかをチェック
@@ -70,101 +30,6 @@ export class DomUtils {
     // 要素の位置とサイズのチェック
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
-  }
-
-  /**
-   * 要素が表示されているかチェック（後方互換性のため）
-   */
-  static isElementVisible(element: Element): boolean {
-    return this.isElementInteractable(element);
-  }
-
-  /**
-   * 複数のセレクターで要素を検索（設定可能な検索）
-   */
-  static findElementWithConfig(config: ElementSearchConfig): Element | null {
-    const { selectors, requireVisible = true } = config;
-
-    for (const selector of selectors) {
-      try {
-        // 通常のCSSセレクター
-        const element = document.querySelector(selector);
-        if (element) {
-          const isValid = requireVisible ? this.isElementInteractable(element) : true;
-          if (isValid) {
-            console.log(`要素が見つかりました: ${selector}`);
-            return element;
-          }
-        }
-
-        // XPath対応（//で始まる場合）
-        if (selector.startsWith('//')) {
-          const xpathElement = this.getElementByXPath(selector);
-          if (xpathElement) {
-            const isValid = requireVisible ? this.isElementInteractable(xpathElement) : true;
-            if (isValid) {
-              console.log(`XPathで要素が見つかりました: ${selector}`);
-              return xpathElement;
-            }
-          }
-        }
-
-        // テキスト内容で検索（contains関数対応）
-        if (selector.includes('contains(')) {
-          const textElement = this.findElementByText(selector);
-          if (textElement) {
-            const isValid = requireVisible ? this.isElementInteractable(textElement) : true;
-            if (isValid) {
-              console.log(`テキスト検索で要素が見つかりました: ${selector}`);
-              return textElement;
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`セレクター実行エラー: ${selector}`, error);
-        continue;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * 複数のセレクターで要素を検索（後方互換性のため）
-   */
-  static findElementWithMultipleSelectors(selectorGroup: string): Element | null {
-    const selectors = selectorGroup.split(',').map(s => s.trim());
-    return this.findElementWithConfig({ selectors });
-  }
-
-  /**
-   * テキスト内容で要素を検索
-   */
-  static findElementByText(selector: string): Element | null {
-    try {
-      // contains(text(), 'テキスト') パターンを解析
-      const containsMatch = selector.match(/contains\(text\(\),\s*['"]([^'"]+)['"]?\)/);
-      if (!containsMatch) return null;
-
-      const searchText = containsMatch[1];
-      const tagMatch = selector.match(/^([a-zA-Z]+)/);
-      const tagName = tagMatch ? tagMatch[1].toLowerCase() : '*';
-
-      // 指定されたタグまたは全ての要素からテキストを検索
-      const elements = tagName === '*'
-        ? document.querySelectorAll('*')
-        : document.querySelectorAll(tagName);
-
-      for (const element of elements) {
-        if (element.textContent?.includes(searchText)) {
-          return element;
-        }
-      }
-    } catch (error) {
-      console.warn(`テキスト検索エラー: ${selector}`, error);
-    }
-
-    return null;
   }
 
   /**
@@ -203,31 +68,6 @@ export class DomUtils {
         reject(new Error(`要素が見つかりませんでした: ${selector} (${timeout}ms)`));
       }, timeout);
     });
-  }
-
-  /**
-   * 設定可能な要素待機
-   */
-  static async waitForElementWithConfig(config: ElementSearchConfig): Promise<Element> {
-    const {
-      selectors,
-      timeout = this.DEFAULT_TIMEOUT,
-      retryInterval = this.DEFAULT_RETRY_INTERVAL,
-      requireVisible = true
-    } = config;
-
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const element = this.findElementWithConfig({ selectors, requireVisible });
-      if (element) {
-        return element;
-      }
-
-      await this.sleep(retryInterval);
-    }
-
-    throw new Error(`要素が見つかりませんでした: ${selectors.join(', ')} (${timeout}ms)`);
   }
 
   /**
