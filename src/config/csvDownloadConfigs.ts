@@ -23,8 +23,8 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
     selectors: {
       // マイメニューから配当金・分配金のページに遷移 - より広範囲のセレクターを使用
       menuLink: "a[onclick*='ass_dividend_history.do'], a[data-ratid='mem_pc_mymenu_dividend-history'], a[href*='dividend'], a[href*='配当'], a[onclick*='配当'], .pcm-gl-mega-list__link[onclick*='dividend']",
-      // 表示期間のラジオボタンをすべてを選択
-      periodRadio: "img[alt*='すべて'][onclick*='dispTermClick']",
+      // 表示期間のラジオボタンをすべてを選択（label クリックで onclick 発火 + ラジオチェック）
+      periodRadio: 'label[for="termCdAll"], #termCdAll',
       // 表示するボタンを押下
       displayButton: "input[type='image'][onclick*='clickSearch'], input[src*='btn-disp-noicon'], input.roll",
       // csvで保存ボタンを押下
