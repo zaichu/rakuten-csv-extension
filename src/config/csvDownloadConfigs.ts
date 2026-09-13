@@ -28,7 +28,7 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // 表示するボタンを押下
       displayButton: "button[onclick*='clickSearch']",
       // csvで保存ボタンを押下
-      csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
+      csvButton: "button[onclick*='csvOutput']"
     }
   },
   'domesticstock': {
