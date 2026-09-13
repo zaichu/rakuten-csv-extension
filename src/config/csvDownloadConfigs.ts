@@ -13,7 +13,7 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // マイメニューから保有銘柄のページに遷移 - 国内株式のリンクに対応
       menuLink: "a[onclick*='ass_jp_stk_possess_lst.do'][data-ratid='mem_pc_mymenu_jp-possess-lst'], .pcm-gl-mega-list__link[onclick*='possess']",
       // csvで保存ボタンを押下
-      csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
+      csvButton: "[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
     }
   },
   'dividend': {
@@ -24,11 +24,11 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // マイメニューから配当金・分配金のページに遷移 - より広範囲のセレクターを使用
       menuLink: "a[onclick*='ass_dividend_history.do'], a[data-ratid='mem_pc_mymenu_dividend-history'], a[href*='dividend'], a[href*='配当'], a[onclick*='配当'], .pcm-gl-mega-list__link[onclick*='dividend']",
       // 表示期間のラジオボタンをすべてを選択（label クリックで onclick 発火 + ラジオチェック）
-      periodRadio: 'label[for="termCdAll"], #termCdAll',
+      periodRadio: "[onclick*=\"dispTermClick('0')\"], #termCdAll",
       // 表示するボタンを押下
-      displayButton: "button[onclick*='clickSearch']",
+      displayButton: "[onclick*='clickSearch']",
       // csvで保存ボタンを押下
-      csvButton: "button[onclick*='csvOutput']"
+      csvButton: "[onclick*='csvOutput']"
     }
   },
   'domesticstock': {
@@ -43,9 +43,9 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // 表示期間のラジオボタンをすべてを選択
       periodRadio: "#termCdALL",
       // この条件で表示するボタン押下
-      displayButton: "button[onclick*='search()']",
+      displayButton: "[onclick*='search()']",
       // csv保存ボタンを押下
-      csvButton: "button[onclick*='csvDownLoad()']"
+      csvButton: "[onclick*='csvDownLoad()']"
     }
   },
   'mutualfund': {
@@ -60,9 +60,9 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // 表示期間のラジオボタンをすべてを選択
       periodRadio: "#termCdALL",
       // この条件で表示するボタン押下
-      displayButton: "button[onclick*='search()']",
+      displayButton: "[onclick*='search()']",
       // csv保存ボタンを押下
-      csvButton: "button[onclick*='csvDownLoad()']"
+      csvButton: "[onclick*='csvDownLoad()']"
     }
   }
 };
