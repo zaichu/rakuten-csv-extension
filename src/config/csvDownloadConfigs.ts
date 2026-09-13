@@ -26,7 +26,7 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
       // 表示期間のラジオボタンをすべてを選択（label クリックで onclick 発火 + ラジオチェック）
       periodRadio: 'label[for="termCdAll"], #termCdAll',
       // 表示するボタンを押下
-      displayButton: "input[type='image'][onclick*='clickSearch'], input[src*='btn-disp-noicon'], input.roll",
+      displayButton: "button[onclick*='clickSearch']",
       // csvで保存ボタンを押下
       csvButton: "a[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
     }
