@@ -31,7 +31,7 @@ describe('ShokenWebUtils', () => {
 
             expect(mockChromeTabsCreate).toHaveBeenCalledTimes(1);
             expect(mockChromeTabsCreate).toHaveBeenCalledWith({
-                url: 'https://shoken-webapp.vercel.app'
+                url: 'https://shoken-webapp.pages.dev'
             });
         });
 
@@ -97,7 +97,7 @@ describe('ShokenWebUtils', () => {
         it('正しいベースURLを返すこと', () => {
             const baseUrl = ShokenWebUtils.getBaseUrl();
 
-            expect(baseUrl).toBe('https://shoken-webapp.vercel.app');
+            expect(baseUrl).toBe('https://shoken-webapp.pages.dev');
         });
 
         it('返されるURLが文字列型であること', () => {

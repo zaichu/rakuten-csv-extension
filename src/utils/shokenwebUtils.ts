@@ -2,7 +2,7 @@ import { ShokenWebUrlConfig } from '../types/shokenweb';
 
 export class ShokenWebUtils {
     private static readonly URL_CONFIG: ShokenWebUrlConfig = {
-        baseUrl: 'https://shoken-webapp.vercel.app'
+        baseUrl: 'https://shoken-webapp.pages.dev'
     };
 
     /**
