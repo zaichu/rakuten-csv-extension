@@ -98,8 +98,14 @@
 src/
 ├── popup/                    # ポップアップUI (350×400px)
 │   ├── RakutenCsvExtensionApp.tsx  # メインアプリケーション
-│   └── index.tsx            # エントリーポイント
+│   ├── shokenWeb.ts         # 証券Webを開く
+│   ├── index.tsx            # エントリーポイント
+│   └── index.html           # ポップアップHTML
 ├── components/              # 再利用可能なUIコンポーネント
+│   ├── CategorySection.tsx  # カテゴリ別オプション
+│   ├── ProgressDisplay.tsx  # 進捗表示
+│   ├── SelectionSummary.tsx # 選択状況の表示
+│   ├── downloadOptions.ts   # ダウンロードオプション定義
 │   └── ui/
 │       ├── Header.tsx       # コンパクトヘッダー
 │       ├── Footer.tsx       # フッター
@@ -111,14 +117,24 @@ src/
 ├── content/                 # コンテンツスクリプト
 │   └── rakutenContentScript.ts # 楽天証券サイト操作
 ├── background/              # バックグラウンドサービス
-│   └── backgroundService.ts # メッセージルーティング
+│   ├── backgroundService.ts # イベント配線・メッセージルーティング・タブ状態
+│   └── downloadStepExecutor.ts # ダウンロードステップ実行
+├── config/                  # 設定
+│   └── csvDownloadConfigs.ts # CSVダウンロード設定
 ├── types/                   # TypeScript型定義
 │   ├── extension.ts         # 拡張機能関連
 │   ├── rakuten.ts          # 楽天証券データ
 │   └── ui.ts               # UI コンポーネント
-└── utils/                   # ユーティリティ
-    ├── rakutenUtils.ts     # 楽天証券固有処理
-    └── domUtils.ts         # DOM操作ヘルパー
+├── utils/                   # ユーティリティ
+│   ├── rakutenUtils.ts     # 楽天証券固有処理
+│   ├── domUtils.ts         # DOM操作ヘルパー
+│   └── asyncUtils.ts       # 非同期ヘルパー
+├── styles/
+│   └── tailwind.css        # Tailwind CSS
+└── tests/
+    └── setup.ts            # Vitestセットアップ(chrome APIモック)
+e2e/
+└── smoke.spec.ts           # Playwrightスモークテスト
 ```
 
 ## 🛡️ セキュリティとプライバシー
