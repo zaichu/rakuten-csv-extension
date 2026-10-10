@@ -34,8 +34,6 @@ export interface MessageProps {
   type: MessageType;
   content: string;
   onClose?: () => void;
-  autoClose?: boolean;
-  duration?: number;
 }
 
 /**

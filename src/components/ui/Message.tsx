@@ -1,4 +1,3 @@
-import React from 'react';
 import type { MessageProps } from '../../types';
 import { IconLabel } from './IconLabel';
 
@@ -8,9 +7,7 @@ import { IconLabel } from './IconLabel';
 export const Message = ({ 
   type, 
   content, 
-  onClose,
-  autoClose = false,
-  duration = 5000 
+  onClose
 }: MessageProps) => {
   // アイコンマッピング
   const iconMap = {
@@ -37,14 +34,6 @@ export const Message = ({
     };
     return labelMap[messageType];
   };
-
-  // 自動クローズの実装
-  React.useEffect(() => {
-    if (autoClose && onClose) {
-      const timer = setTimeout(onClose, duration);
-      return () => clearTimeout(timer);
-    }
-  }, [autoClose, onClose, duration]);
 
   return (
     <div className={classMap[type]} role="alert">

@@ -227,21 +227,8 @@
     font-size: 0.82em;
   }
 
-  .progress-row {
-    @apply flex items-center justify-between gap-2;
-  }
-
   .progress-label {
     @apply flex items-center gap-1;
-  }
-
-  .progress-track {
-    @apply overflow-hidden bg-gray-200 rounded mt-1;
-    height: 4px;
-  }
-
-  .progress-fill {
-    @apply bg-blue-500 h-full transition-all;
   }
 
   /* ── Spinner ─────────────────────────────────────────────── */
