@@ -41,20 +41,9 @@ export interface CsvDownloadMessage extends ChromeMessage {
 }
 
 /**
- * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示（単一ステップ）
- */
-export interface CsvDownloadInstruction extends ChromeMessage {
-  readonly action: 'execute-csv-download';
-  readonly payload: {
-    readonly downloadType: CsvDownloadType;
-    readonly downloadStep: CsvDownloadStep;
-    readonly selectors: CsvSelectors;
-    readonly retryCount?: number;
-  };
-}
-
-/**
- * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示（同一ページ内の複数ステップを一括実行）
+ * バックグラウンドからコンテンツスクリプトへのCSVダウンロード指示
+ *
+ * 単一ステップの実行も1要素の配列として送る。
  */
 export interface CsvDownloadStepsInstruction extends ChromeMessage {
   readonly action: 'execute-csv-download-steps';
@@ -65,6 +54,28 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
 }
 
 /**
+ * 拡張機能更新通知メッセージ
+ */
+export interface ExtensionUpdatedMessage extends ChromeMessage {
+  readonly action: 'extension-updated';
+}
+
+/**
+ * 生存確認メッセージ
+ */
+export interface PingMessage extends ChromeMessage {
+  readonly action: 'ping';
+}
+
+/**
+ * コンテンツスクリプトが受け取るメッセージ
+ */
+export type ContentScriptMessage =
+  | CsvDownloadStepsInstruction
+  | ExtensionUpdatedMessage
+  | PingMessage;
+
+/**
  * ダウンロードレスポンス
  */
 export interface DownloadResponse {
@@ -72,7 +83,6 @@ export interface DownloadResponse {
   readonly message?: string;
   readonly error?: string;
   readonly step?: CsvDownloadStep;
-  readonly nextStep?: CsvDownloadStep;
 }
 
 /**
@@ -162,16 +172,9 @@ export interface ElementSearchConfig {
 }
 
 /**
- * タブ登録メッセージ
- */
-export interface TabRegistrationMessage extends ChromeMessage {
-  readonly action: 'register-rakuten-tab';
-  readonly url: string;
-  readonly timestamp: number;
-}
-
-/**
  * ページ準備完了メッセージ
+ *
+ * 楽天証券タブの登録も兼ねる（登録専用のメッセージは設けない）。
  */
 export interface PageReadyMessage extends ChromeMessage {
   readonly action: 'page-ready';
@@ -184,3 +187,11 @@ export interface PageReadyMessage extends ChromeMessage {
 export interface GetExtensionStateMessage extends ChromeMessage {
   readonly action: 'get-extension-state';
 }
+
+/**
+ * バックグラウンドが受け取るメッセージ
+ */
+export type BackgroundMessage =
+  | PageReadyMessage
+  | CsvDownloadMessage
+  | GetExtensionStateMessage;

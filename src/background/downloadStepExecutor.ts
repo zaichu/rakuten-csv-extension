@@ -12,6 +12,7 @@
 
 import type {
   CsvDownloadMessage,
+  CsvDownloadStepsInstruction,
   DownloadResponse,
   CsvDownloadConfig,
   CsvDownloadType,
@@ -192,129 +193,39 @@ export class DownloadStepExecutor {
     const groups = this.groupSteps(steps);
 
     for (const group of groups) {
-      if (group.kind === 'page-transition') {
-        const step = group.step;
+      const steps: readonly CsvDownloadStep[] =
+        group.kind === 'page-transition' ? [group.step] : group.steps;
 
-        this.log(`ステップ: ${step} を実行中...`);
+      this.log(`ステップ: ${steps.join(', ')} を実行中...`);
 
-        // クリック直後に発火するページ遷移完了イベントを取りこぼさないよう、
-        // executeStep呼び出し前（クリック前）に待ち受けを準備しておく。
-        const pageTransitionPromise = this.waitForPageTransition(tabId, this.pageTransitionTimeout);
+      // クリック直後に発火するページ遷移完了・ダウンロード開始イベントを
+      // 取りこぼさないよう、executeSteps呼び出し前（クリック前）に
+      // 待ち受けを準備しておく。
+      const pageTransitionPromise = group.kind === 'page-transition'
+        ? this.waitForPageTransition(tabId, this.pageTransitionTimeout)
+        : null;
+      const downloadStartPromise = group.kind === 'batch' && group.steps.includes('download-csv')
+        ? this.waitForDownloadStart(this.downloadStartTimeout)
+        : null;
 
-        const result = await this.executeStepWithRetry(tabId, step, selectors);
+      const result = await this.executeStepsWithRetry(tabId, steps, selectors);
 
-        if (!result.success) {
-          return {
-            success: false,
-            error: `${description}の${step}ステップで失敗: ${result.error}`
-          };
-        }
-
-        await pageTransitionPromise;
-      } else {
-        this.log(`ステップ群: ${group.steps.join(', ')} を実行中...`);
-
-        // download-csvを含む場合、クリック直後に発火するdownloads.onCreatedを
-        // 取りこぼさないよう、executeSteps呼び出し前（クリック前）に
-        // ダウンロード開始の待ち受けを準備しておく。
-        const includesDownloadCsv = group.steps.includes('download-csv');
-        const downloadStartPromise = includesDownloadCsv
-          ? this.waitForDownloadStart(this.downloadStartTimeout)
-          : null;
-
-        const result = await this.executeStepsWithRetry(tabId, group.steps, selectors);
-
-        if (!result.success) {
-          const failedStep = result.step ?? group.steps[group.steps.length - 1];
-          return {
-            success: false,
-            error: `${description}の${failedStep}ステップで失敗: ${result.error}`
-          };
-        }
-
-        if (downloadStartPromise) {
-          await downloadStartPromise;
-        }
+      if (!result.success) {
+        const failedStep = result.step ?? steps[steps.length - 1];
+        return {
+          success: false,
+          error: `${description}の${failedStep}ステップで失敗: ${result.error}`
+        };
       }
+
+      await pageTransitionPromise;
+      await downloadStartPromise;
     }
 
     return {
       success: true,
       message: `${description}のCSVダウンロードが完了しました`
     };
-  }
-
-  /**
-   * ステップをリトライ付きで実行
-   */
-  private async executeStepWithRetry(
-    tabId: number,
-    step: CsvDownloadStep,
-    selectors: CsvDownloadConfig['selectors']
-  ): Promise<DownloadResponse> {
-    let lastError: string = '';
-
-    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-      try {
-        const result = await this.executeStep(tabId, step, selectors);
-
-        if (result.success) {
-          return result;
-        }
-
-        lastError = result.error || 'ステップの実行に失敗しました';
-
-        if (attempt < this.config.maxRetries) {
-          this.log(`ステップ ${step} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
-          await sleep(this.config.retryInterval);
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
-
-        if (attempt < this.config.maxRetries) {
-          await sleep(this.config.retryInterval);
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: `ステップ ${step} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`
-    };
-  }
-
-  /**
-   * 単一ステップの実行
-   */
-  private executeStep(
-    tabId: number,
-    step: CsvDownloadStep,
-    selectors: CsvDownloadConfig['selectors']
-  ): Promise<DownloadResponse> {
-    const sendMessagePromise = new Promise<DownloadResponse>((resolve) => {
-      chrome.tabs.sendMessage(tabId, {
-        action: 'execute-csv-download',
-        payload: {
-          downloadStep: step,
-          selectors: selectors
-        }
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({
-            success: false,
-            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`
-          });
-        } else {
-          resolve(response || { success: false, error: 'レスポンスがありません' });
-        }
-      });
-    });
-
-    return withTimeout(
-      sendMessagePromise,
-      this.config.stepTimeout,
-      `ステップ ${step} がタイムアウトしました（${this.config.stepTimeout}ms）`
-    );
   }
 
   /**
@@ -367,14 +278,16 @@ export class DownloadStepExecutor {
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors']
   ): Promise<DownloadResponse> {
+    const instruction: CsvDownloadStepsInstruction = {
+      action: 'execute-csv-download-steps',
+      payload: {
+        downloadSteps: steps,
+        selectors: selectors
+      }
+    };
+
     const sendMessagePromise = new Promise<DownloadResponse>((resolve) => {
-      chrome.tabs.sendMessage(tabId, {
-        action: 'execute-csv-download-steps',
-        payload: {
-          downloadSteps: steps,
-          selectors: selectors
-        }
-      }, (response) => {
+      chrome.tabs.sendMessage(tabId, instruction, (response) => {
         if (chrome.runtime.lastError) {
           resolve({
             success: false,

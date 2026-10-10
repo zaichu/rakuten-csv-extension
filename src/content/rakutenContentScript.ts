@@ -1,8 +1,7 @@
 import type {
-  CsvDownloadInstruction,
   CsvDownloadStepsInstruction,
+  ContentScriptMessage,
   DownloadResponse,
-  TabRegistrationMessage,
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
@@ -16,12 +15,7 @@ import { RakutenUtils, DomUtils } from '../utils';
  */
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
-  private isInitialized = false;
-  private readonly retryConfig = {
-    maxRetries: 3,
-    retryDelay: 1000,
-    elementTimeout: 5000
-  };
+  private readonly elementTimeout = 5000;
 
   private constructor() {
     this.initialize();
@@ -41,41 +35,14 @@ class RakutenCsvExtension {
    * 拡張機能の初期化
    */
   private initialize(): void {
-    if (this.isInitialized) return;
-
     console.log('楽天証券CSV拡張機能を初期化中...');
-    
+
     try {
       this.setupMessageListener();
-      this.registerWithBackground();
       this.notifyPageReady();
-      this.isInitialized = true;
       console.log('楽天証券CSV拡張機能の初期化が完了しました');
     } catch (error) {
       console.error('楽天証券CSV拡張機能の初期化に失敗:', error);
-    }
-  }
-
-  /**
-   * バックグラウンドサービスに登録
-   */
-  private registerWithBackground(): void {
-    try {
-      const registrationMessage: TabRegistrationMessage = {
-        action: 'register-rakuten-tab',
-        url: window.location.href,
-        timestamp: Date.now()
-      };
-
-      chrome.runtime.sendMessage(registrationMessage, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('バックグラウンドサービスへの登録に失敗:', chrome.runtime.lastError.message);
-        } else {
-          console.log('バックグラウンドサービスに正常に登録されました:', response);
-        }
-      });
-    } catch (error) {
-      console.error('バックグラウンドサービスへの登録でエラー:', error);
     }
   }
 
@@ -84,7 +51,7 @@ class RakutenCsvExtension {
    */
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
-      (message: ChromeMessage, _sender, sendResponse) => {
+      (message: ContentScriptMessage, _sender, sendResponse) => {
         console.log('コンテンツスクリプトでメッセージを受信:', message);
 
         // 非同期処理を適切に処理
@@ -109,13 +76,10 @@ class RakutenCsvExtension {
   /**
    * メッセージを処理
    */
-  private async handleMessage(message: ChromeMessage): Promise<DownloadResponse> {
+  private async handleMessage(message: ContentScriptMessage): Promise<DownloadResponse> {
     switch (message.action) {
-      case 'execute-csv-download':
-        return this.handleCsvDownloadExecution(message as CsvDownloadInstruction);
-
       case 'execute-csv-download-steps':
-        return this.handleCsvDownloadStepsExecution(message as CsvDownloadStepsInstruction);
+        return this.handleCsvDownloadStepsExecution(message);
 
       case 'extension-updated':
         this.handleExtensionUpdate();
@@ -125,72 +89,30 @@ class RakutenCsvExtension {
         return { success: true, message: 'pong' };
 
       default:
-        return { 
-          success: false, 
-          error: `未対応のアクション: ${message.action}` 
+        return {
+          success: false,
+          error: `未対応のアクション: ${(message as ChromeMessage).action}`
         };
     }
   }
 
   /**
    * 拡張機能更新の処理
+   *
+   * 更新でバックグラウンドが再起動するとタブ登録が消えるため、
+   * page-ready を送り直して再登録する。リスナーはcontent script側で
+   * 生きているので再登録しない（重複登録になる）。
    */
   private handleExtensionUpdate(): void {
-    console.log('拡張機能が更新されました。再初期化します。');
-    this.isInitialized = false;
-    this.initialize();
+    console.log('拡張機能が更新されました。再登録します。');
+    this.notifyPageReady();
   }
 
   /**
-   * CSVダウンロード実行を処理
-   */
-  private async handleCsvDownloadExecution(
-    message: CsvDownloadInstruction
-  ): Promise<DownloadResponse> {
-    const { downloadStep, selectors, retryCount = 0 } = message.payload;
-
-    console.log(`CSVダウンロードステップ実行: ${downloadStep} (試行回数: ${retryCount + 1})`);
-
-    // 楽天証券サイトの確認
-    if (!RakutenUtils.isRakutenSecurities(window.location.href)) {
-      return { 
-        success: false, 
-        error: '楽天証券のサイトではありません',
-        step: downloadStep
-      };
-    }
-
-    try {
-      const result = await this.executeDownloadStep(downloadStep, selectors);
-      console.log(`ステップ ${downloadStep} 完了:`, result);
-      return result;
-    } catch (error) {
-      console.error(`ステップ ${downloadStep} 実行エラー:`, error);
-      
-      // リトライ可能なエラーかチェック
-      if (retryCount < this.retryConfig.maxRetries && this.isRetryableError(error)) {
-        console.log(`ステップ ${downloadStep} のリトライが可能です`);
-        return {
-          success: false,
-          error: `ステップ ${downloadStep} の実行に失敗しました (リトライ ${retryCount + 1}/${this.retryConfig.maxRetries})`,
-          step: downloadStep
-        };
-      }
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : `ステップ ${downloadStep} の実行に失敗しました`,
-        step: downloadStep
-      };
-    }
-  }
-
-  /**
-   * 同一ページ内の連続ステップをまとめて実行
+   * ステップ列をまとめて実行
    *
    * navigate-to-page/select-tab/display-data のようにページ遷移・ページ更新を
-   * 伴い得るステップはバックグラウンド側で単独実行されるため、ここに渡ってくるのは
-   * 同一ページ内で完結するステップ（select-period/download-csv等）のみ。
+   * 伴い得るステップはバックグラウンド側で1要素の配列にして送られる。
    */
   private async handleCsvDownloadStepsExecution(
     message: CsvDownloadStepsInstruction
@@ -280,47 +202,50 @@ class RakutenCsvExtension {
     }
 
     const element = options?.requireInteractable
-      ? await this.findElementWithRetry(selector, this.retryConfig.elementTimeout, true)
-      : await this.findElementWithRetry(selector);
+      ? await this.findElement(selector, this.elementTimeout, true)
+      : await this.findElement(selector);
     return this.clickElementSafely(element, actionName);
   }
 
   /**
-   * 要素をリトライ付きで検索
+   * 要素を検索（無ければ出現を監視してタイムアウトまで待つ）
    */
-  private async findElementWithRetry(
+  private async findElement(
     selectorGroup: string,
-    timeout: number = this.retryConfig.elementTimeout,
+    timeout: number = this.elementTimeout,
     requireInteractable: boolean = false
   ): Promise<Element> {
     const selectors = selectorGroup.split(',').map(s => s.trim());
 
-    // 既存要素をチェック
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
-        console.log("既存要素が見つかりました: " + selector);
-        return element;
+    // 不正セレクターは querySelector の例外をそのまま呼び出し元へ伝える。
+    // 初回チェックを通過した時点でセレクターは有効と分かるため、
+    // 監視側では例外処理を持たない。
+    const findMatching = (): { element: Element; selector: string } | null => {
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
+          return { element, selector };
+        }
       }
+      return null;
+    };
+
+    // 既存要素をチェック
+    const existing = findMatching();
+    if (existing) {
+      console.log(`既存要素が見つかりました: ${existing.selector}`);
+      return existing.element;
     }
 
     // MutationObserverで要素の出現を待機
     return new Promise((resolve, reject) => {
       const observer = new MutationObserver(() => {
-        for (const selector of selectors) {
-          try {
-            const element = document.querySelector(selector);
-            if (element && (!requireInteractable || DomUtils.isElementInteractable(element))) {
-              observer.disconnect();
-              clearTimeout(timeoutId);
-              console.log("動的に要素が見つかりました: " + selector);
-              resolve(element);
-              return;
-            }
-          } catch (error) {
-            console.warn(`セレクター実行エラー: ${selector}`, error);
-            continue;
-          }
+        const found = findMatching();
+        if (found) {
+          observer.disconnect();
+          clearTimeout(timeoutId);
+          console.log(`動的に要素が見つかりました: ${found.selector}`);
+          resolve(found.element);
         }
       });
 
@@ -382,25 +307,6 @@ class RakutenCsvExtension {
     } catch (error) {
       console.warn('ページ準備完了通知でエラー:', error);
     }
-  }
-
-  /**
-   * リトライ可能なエラーかどうかを判定
-   */
-  private isRetryableError(error: unknown): boolean {
-    if (!(error instanceof Error)) return false;
-
-    const retryableMessages = [
-      '要素が見つかりませんでした',
-      'クリックに失敗しました',
-      'タイムアウト',
-      'network error',
-      'connection failed'
-    ];
-
-    return retryableMessages.some(message => 
-      error.message.toLowerCase().includes(message.toLowerCase())
-    );
   }
 }
 

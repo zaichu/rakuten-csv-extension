@@ -4,9 +4,8 @@ import { RakutenUtils, DomUtils } from '../utils'
 import { onExecute } from './rakutenContentScript'
 
 /**
- * executeNavigateToPage / executeSelectTab / executeSelectPeriod /
- * executeDisplayData / executeDownloadCsv の現状挙動を固定する characterization test。
- * Issue #69 の統合リファクタ前後で無変更のまま全件パスすること。
+ * ステップ実行の挙動を固定する characterization test。
+ * 単一ステップも1要素の downloadSteps 配列として送る。
  */
 describe('rakutenContentScript ステップ実行', () => {
   type Listener = (message: ChromeMessage, sender: unknown, sendResponse: (r: DownloadResponse) => void) => boolean
@@ -21,8 +20,8 @@ describe('rakutenContentScript ステップ実行', () => {
 
   function singleStep(step: CsvDownloadStep, selectors: Record<string, string>) {
     return sendMessage({
-      action: 'execute-csv-download',
-      payload: { downloadType: 'dividend', downloadStep: step, selectors },
+      action: 'execute-csv-download-steps',
+      payload: { downloadSteps: [step], selectors },
     } as unknown as ChromeMessage)
   }
 
@@ -65,27 +64,27 @@ describe('rakutenContentScript ステップ実行', () => {
   describe('セレクター未指定時のエラーメッセージ', () => {
     it('navigate-to-page', async () => {
       const res = await singleStep('navigate-to-page', {})
-      expect(res).toEqual({ success: false, error: 'ページ遷移のセレクターが指定されていません' })
+      expect(res).toEqual({ success: false, error: 'ページ遷移のセレクターが指定されていません', step: 'navigate-to-page' })
     })
 
     it('select-tab', async () => {
       const res = await singleStep('select-tab', {})
-      expect(res).toEqual({ success: false, error: 'タブ選択のセレクターが指定されていません' })
+      expect(res).toEqual({ success: false, error: 'タブ選択のセレクターが指定されていません', step: 'select-tab' })
     })
 
     it('select-period', async () => {
       const res = await singleStep('select-period', {})
-      expect(res).toEqual({ success: false, error: '期間選択のセレクターが指定されていません' })
+      expect(res).toEqual({ success: false, error: '期間選択のセレクターが指定されていません', step: 'select-period' })
     })
 
     it('display-data', async () => {
       const res = await singleStep('display-data', {})
-      expect(res).toEqual({ success: false, error: 'データ表示のセレクターが指定されていません' })
+      expect(res).toEqual({ success: false, error: 'データ表示のセレクターが指定されていません', step: 'display-data' })
     })
 
     it('download-csv', async () => {
       const res = await singleStep('download-csv', {})
-      expect(res).toEqual({ success: false, error: 'CSVダウンロードのセレクターが指定されていません' })
+      expect(res).toEqual({ success: false, error: 'CSVダウンロードのセレクターが指定されていません', step: 'download-csv' })
     })
   })
 
@@ -95,7 +94,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'menu-link'
       document.body.appendChild(el)
       const res = await singleStep('navigate-to-page', { menuLink: '#menu-link' })
-      expect(res).toEqual({ success: true, message: 'ページ遷移が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('select-tab', async () => {
@@ -103,7 +102,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'tab'
       document.body.appendChild(el)
       const res = await singleStep('select-tab', { tabSelector: '#tab' })
-      expect(res).toEqual({ success: true, message: 'タブ選択が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('select-period', async () => {
@@ -111,7 +110,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'period'
       document.body.appendChild(el)
       const res = await singleStep('select-period', { periodRadio: '#period' })
-      expect(res).toEqual({ success: true, message: '期間選択が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('display-data', async () => {
@@ -120,7 +119,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await singleStep('display-data', { displayButton: '#display' })
-      expect(res).toEqual({ success: true, message: 'データ表示が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('download-csv', async () => {
@@ -129,7 +128,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: true, message: 'CSVダウンロードが完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
   })
 
@@ -140,7 +139,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       vi.spyOn(DomUtils, 'safeClick').mockReturnValue(false)
       const res = await singleStep('navigate-to-page', { menuLink: '#menu-link' })
-      expect(res).toEqual({ success: false, error: 'ページ遷移のクリックに失敗しました' })
+      expect(res).toEqual({ success: false, error: 'ページ遷移のクリックに失敗しました', step: 'navigate-to-page' })
     })
 
     it('download-csv はクリック失敗エラーを返す', async () => {
@@ -150,7 +149,7 @@ describe('rakutenContentScript ステップ実行', () => {
       makeInteractable(el)
       vi.spyOn(DomUtils, 'safeClick').mockReturnValue(false)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: false, error: 'CSVダウンロードのクリックに失敗しました' })
+      expect(res).toEqual({ success: false, error: 'CSVダウンロードのクリックに失敗しました', step: 'download-csv' })
     })
   })
 
@@ -161,10 +160,10 @@ describe('rakutenContentScript ステップ実行', () => {
       el.style.display = 'none'
       document.body.appendChild(el)
       const res = await singleStep('navigate-to-page', { menuLink: '#menu-link' })
-      expect(res).toEqual({ success: true, message: 'ページ遷移が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
-    it('display-data は要素不在でタイムアウトしリトライ応答を返す', async () => {
+    it('display-data は要素不在でタイムアウトエラーを返す', async () => {
       vi.useFakeTimers()
       try {
         const pending = singleStep('display-data', { displayButton: '#missing-display' })
@@ -172,7 +171,7 @@ describe('rakutenContentScript ステップ実行', () => {
         const res = await pending
         expect(res).toEqual({
           success: false,
-          error: 'ステップ display-data の実行に失敗しました (リトライ 1/3)',
+          error: '要素が見つかりませんでした: #missing-display (5000ms)',
           step: 'display-data',
         })
       } finally {
@@ -188,7 +187,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await pending
-      expect(res).toEqual({ success: true, message: 'データ表示が完了しました' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
   })
 

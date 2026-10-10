@@ -10,7 +10,8 @@ import type {
   ExtensionState,
   CsvDownloadMessage,
   DownloadResponse,
-  ChromeMessage,
+  BackgroundMessage,
+  ExtensionUpdatedMessage,
   CsvDownloadStep
 } from '../types';
 import { RakutenUtils } from '../utils';
@@ -89,7 +90,7 @@ class RakutenCsvBackgroundService {
     });
 
     // メッセージ処理
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
       this.handleMessage(message, sender, sendResponse);
       return true; // 非同期レスポンス
     });
@@ -170,7 +171,7 @@ class RakutenCsvBackgroundService {
    * メッセージ処理
    */
   private async handleMessage(
-    message: ChromeMessage,
+    message: BackgroundMessage,
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): Promise<void> {
@@ -180,16 +181,12 @@ class RakutenCsvBackgroundService {
       let response: unknown;
 
       switch (message.action) {
-        case 'register-rakuten-tab':
-          response = this.handleTabRegistration(sender);
-          break;
-
         case 'page-ready':
           response = this.handlePageReady(sender);
           break;
 
         case 'download-csv-request':
-          response = await this.handleCsvDownloadRequest(message as CsvDownloadMessage);
+          response = await this.handleCsvDownloadRequest(message);
           break;
 
         case 'get-extension-state':
@@ -211,19 +208,7 @@ class RakutenCsvBackgroundService {
   }
 
   /**
-   * タブ登録処理
-   */
-  private handleTabRegistration(sender: chrome.runtime.MessageSender): { success: boolean } {
-    if (sender.tab?.id) {
-      this.addRakutenTab(sender.tab.id);
-      this.setActiveTab(sender.tab.id);
-      this.log(`楽天証券タブが登録されました: ${sender.tab.id}`);
-    }
-    return { success: true };
-  }
-
-  /**
-   * ページ準備完了処理
+   * ページ準備完了処理（楽天証券タブの登録を兼ねる）
    */
   private handlePageReady(sender: chrome.runtime.MessageSender): { success: boolean } {
     if (sender.tab?.id) {
@@ -270,8 +255,9 @@ class RakutenCsvBackgroundService {
    * 更新通知
    */
   private notifyUpdate(): void {
+    const message: ExtensionUpdatedMessage = { action: 'extension-updated' };
     this.getState().rakutenTabs.forEach(tabId => {
-      chrome.tabs.sendMessage(tabId, { action: 'extension-updated' }, () => {
+      chrome.tabs.sendMessage(tabId, message, () => {
         if (chrome.runtime.lastError) {
           this.log('タブへの更新通知に失敗:', chrome.runtime.lastError.message);
           this.removeRakutenTab(tabId);
