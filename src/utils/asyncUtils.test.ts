@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withTimeout } from './asyncUtils';
+import { sleep, withTimeout } from './asyncUtils';
+
+describe('sleep', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('指定ミリ秒経過後に解決する', async () => {
+    const promise = sleep(500);
+    vi.advanceTimersByTime(500);
+    await expect(promise).resolves.toBeUndefined();
+  });
+});
 
 describe('withTimeout', () => {
   beforeEach(() => {

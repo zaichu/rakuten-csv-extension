@@ -89,23 +89,6 @@ describe('DomUtils', () => {
     })
   })
 
-  describe('getTextContent', () => {
-    it('要素のテキストをtrimして返す', () => {
-      const div = document.createElement('div')
-      div.textContent = '  テストテキスト  '
-      expect(DomUtils.getTextContent(div)).toBe('テストテキスト')
-    })
-
-    it('nullを渡すと空文字列を返す', () => {
-      expect(DomUtils.getTextContent(null)).toBe('')
-    })
-
-    it('textContentが空の要素は空文字列を返す', () => {
-      const div = document.createElement('div')
-      expect(DomUtils.getTextContent(div)).toBe('')
-    })
-  })
-
   describe('safeClick', () => {
     it('nullを渡すとfalseを返す', () => {
       expect(DomUtils.safeClick(null)).toBe(false)
@@ -142,41 +125,4 @@ describe('DomUtils', () => {
     })
   })
 
-  describe('getAttribute', () => {
-    it('属性値を返す', () => {
-      const div = document.createElement('div')
-      div.setAttribute('data-id', '42')
-      expect(DomUtils.getAttribute(div, 'data-id')).toBe('42')
-    })
-
-    it('属性が存在しない場合はnull', () => {
-      const div = document.createElement('div')
-      expect(DomUtils.getAttribute(div, 'data-nonexistent')).toBeNull()
-    })
-
-    it('nullを渡すとnull', () => {
-      expect(DomUtils.getAttribute(null, 'data-id')).toBeNull()
-    })
-  })
-
-  describe('getComputedStyleProperty', () => {
-    it('スタイルプロパティを返す', () => {
-      const div = document.createElement('div')
-      div.style.color = 'red'
-      document.body.appendChild(div)
-
-      const result = DomUtils.getComputedStyleProperty(div, 'color')
-      expect(result).not.toBeNull()
-    })
-
-    it('nullを渡すとnull', () => {
-      expect(DomUtils.getComputedStyleProperty(null, 'color')).toBeNull()
-    })
-
-    it('HTMLElementでない要素はnull', () => {
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      document.body.appendChild(svg)
-      expect(DomUtils.getComputedStyleProperty(svg, 'color')).toBeNull()
-    })
-  })
 })
