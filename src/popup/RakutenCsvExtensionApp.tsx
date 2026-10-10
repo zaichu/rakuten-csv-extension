@@ -15,7 +15,7 @@ import {
 import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
 import type { CsvDownloadType } from '../types';
-import { ShokenWebUtils } from '../utils/shokenwebUtils';
+import { openShokenWebPage } from './shokenWeb';
 
 /**
  * アプリケーションの設定
@@ -153,7 +153,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
    */
   const handleOpenShokenWebPage = useCallback(async (): Promise<void> => {
     try {
-      await ShokenWebUtils.openShokenWebPage();
+      await openShokenWebPage();
     } catch (error) {
       console.error('証券Webページを開く際にエラーが発生しました:', error);
     }

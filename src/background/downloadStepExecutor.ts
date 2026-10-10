@@ -17,8 +17,7 @@ import type {
   CsvDownloadType,
   CsvDownloadStep
 } from '../types';
-import { RakutenUtils, withTimeout } from '../utils';
-import type { TabStateManager } from './tabStateManager';
+import { RakutenUtils, withTimeout, sleep } from '../utils';
 
 /**
  * 拡張機能の設定
@@ -28,6 +27,14 @@ export interface ExtensionConfig {
   readonly stepTimeout: number;
   readonly retryInterval: number;
   readonly debugMode: boolean;
+}
+
+/**
+ * ダウンロード実行が必要とするタブ状態の読み取り口
+ */
+export interface TabStateReader {
+  hasRakutenTab(tabId: number): boolean;
+  getActiveTabId(): number | undefined;
 }
 
 /**
@@ -74,7 +81,7 @@ export class DownloadStepExecutor {
   /** page-ready通知を待っているtabIdごとのコールバック集合 */
   private readonly pageReadyWaiters: Map<number, Set<() => void>> = new Map();
 
-  constructor(private readonly stateManager: TabStateManager) {}
+  constructor(private readonly tabState: TabStateReader) {}
 
   /**
    * 設定を取得（デバッグ用）
@@ -96,7 +103,7 @@ export class DownloadStepExecutor {
       const targetTabId = await this.determineTargetTab(tabId);
 
       // 楽天証券タブの確認
-      if (!this.stateManager.hasRakutenTab(targetTabId)) {
+      if (!this.tabState.hasRakutenTab(targetTabId)) {
         throw new Error('楽天証券のタブではありません');
       }
 
@@ -259,13 +266,13 @@ export class DownloadStepExecutor {
 
         if (attempt < this.config.maxRetries) {
           this.log(`ステップ ${step} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
-          await this.sleep(this.config.retryInterval);
+          await sleep(this.config.retryInterval);
         }
       } catch (error) {
         lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
 
         if (attempt < this.config.maxRetries) {
-          await this.sleep(this.config.retryInterval);
+          await sleep(this.config.retryInterval);
         }
       }
     }
@@ -334,13 +341,13 @@ export class DownloadStepExecutor {
 
         if (attempt < this.config.maxRetries) {
           this.log(`ステップ群 ${steps.join(', ')} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
-          await this.sleep(this.config.retryInterval);
+          await sleep(this.config.retryInterval);
         }
       } catch (error) {
         lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
 
         if (attempt < this.config.maxRetries) {
-          await this.sleep(this.config.retryInterval);
+          await sleep(this.config.retryInterval);
         }
       }
     }
@@ -394,7 +401,7 @@ export class DownloadStepExecutor {
       return tabId;
     }
 
-    const activeTabId = this.stateManager.getActiveTabId();
+    const activeTabId = this.tabState.getActiveTabId();
     if (activeTabId) {
       return activeTabId;
     }
@@ -407,13 +414,6 @@ export class DownloadStepExecutor {
     }
 
     return activeTab.id;
-  }
-
-  /**
-   * 待機
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**

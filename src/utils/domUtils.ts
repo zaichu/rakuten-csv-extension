@@ -3,8 +3,6 @@
  * 楽天証券サイトでの安全なDOM操作を提供
  */
 export class DomUtils {
-  private static readonly DEFAULT_TIMEOUT = 5000;
-
   /**
    * 要素が操作可能かどうかをチェック
    */
@@ -30,51 +28,6 @@ export class DomUtils {
     // 要素の位置とサイズのチェック
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
-  }
-
-  /**
-   * 要素の読み込み完了を待機（Promise版）
-   */
-  static waitForElement(
-    selector: string,
-    timeout: number = this.DEFAULT_TIMEOUT
-  ): Promise<Element> {
-    return new Promise((resolve, reject) => {
-      // 既存要素をチェック
-      const existingElement = document.querySelector(selector);
-      if (existingElement && this.isElementInteractable(existingElement)) {
-        resolve(existingElement);
-        return;
-      }
-
-      const observer = new MutationObserver(() => {
-        const element = document.querySelector(selector);
-        if (element && this.isElementInteractable(element)) {
-          observer.disconnect();
-          clearTimeout(timeoutId);
-          resolve(element);
-        }
-      });
-
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style', 'class', 'hidden']
-      });
-
-      const timeoutId = window.setTimeout(() => {
-        observer.disconnect();
-        reject(new Error(`要素が見つかりませんでした: ${selector} (${timeout}ms)`));
-      }, timeout);
-    });
-  }
-
-  /**
-   * 要素のテキスト内容を安全に取得
-   */
-  static getTextContent(element: Element | null): string {
-    return element?.textContent?.trim() || '';
   }
 
   /**
@@ -194,38 +147,5 @@ export class DomUtils {
     }
 
     return false;
-  }
-
-  /**
-   * 指定ミリ秒待機
-   */
-  static sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * 要素の属性を安全に取得
-   */
-  static getAttribute(element: Element | null, attributeName: string): string | null {
-    try {
-      return element?.getAttribute(attributeName) || null;
-    } catch (error) {
-      console.warn(`属性取得エラー (${attributeName}):`, error);
-      return null;
-    }
-  }
-
-  /**
-   * 要素のスタイルプロパティを安全に取得
-   */
-  static getComputedStyleProperty(element: Element | null, property: string): string | null {
-    try {
-      if (!element || !(element instanceof HTMLElement)) return null;
-      const style = window.getComputedStyle(element);
-      return style.getPropertyValue(property) || null;
-    } catch (error) {
-      console.warn(`スタイル取得エラー (${property}):`, error);
-      return null;
-    }
   }
 }
