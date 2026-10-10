@@ -5,8 +5,6 @@
 export interface ProgressDisplayProps {
   readonly isDownloading: boolean;
   readonly currentOperation?: string;
-  readonly progress?: number;
-  readonly onCancel: () => void;
 }
 
 /**
@@ -15,38 +13,15 @@ export interface ProgressDisplayProps {
 export const ProgressDisplay = ({
   isDownloading,
   currentOperation,
-  progress,
-  onCancel,
 }: ProgressDisplayProps) => {
   if (!isDownloading) return null;
 
   return (
     <div className="progress-notice">
-      <div className="progress-row">
-        <div className="progress-label">
-          <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
-          <span>{currentOperation || 'ダウンロード中...'}</span>
-        </div>
-        <button
-          type="button"
-          className="tog-off"
-          onClick={onCancel}
-        >
-          キャンセル
-        </button>
+      <div className="progress-label">
+        <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
+        <span>{currentOperation || 'ダウンロード中...'}</span>
       </div>
-      {progress !== undefined && (
-        <div className="progress-track">
-          <div
-            className="progress-fill"
-            role="progressbar"
-            style={{ width: `${progress}%` }}
-            aria-valuenow={progress}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          />
-        </div>
-      )}
     </div>
   );
 };

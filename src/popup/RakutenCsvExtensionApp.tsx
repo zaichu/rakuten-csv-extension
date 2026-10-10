@@ -18,38 +18,22 @@ import type { CsvDownloadType } from '../types';
 import { openShokenWebPage } from './shokenWeb';
 
 /**
- * アプリケーションの設定
- */
-interface AppConfig {
-  readonly version: string;
-  readonly defaultSelectedOptions: readonly CsvDownloadType[];
-  readonly enableBatchOperations: boolean;
-}
-
-/**
  * 楽天証券CSV拡張機能のメインアプリケーション
  * 完全にリファクタリングされたバージョン
  */
 const RakutenCsvExtensionApp: React.FC = () => {
-  const { message, showError, showSuccess, clearMessage } = useApplicationMessage();
+  const { message, showError, showSuccess, clearMessage } = useApplicationMessage({
+    autoCloseDuration: 3000
+  });
   const {
     isDownloading,
     currentOperation,
-    progress,
-    downloadCsv,
-    cancelDownload
+    downloadCsv
   } = useCsvDownload();
-
-  // アプリケーション設定
-  const appConfig: AppConfig = {
-    version: __APP_VERSION__,
-    defaultSelectedOptions: [],
-    enableBatchOperations: true
-  };
 
   // 選択されたオプションの状態管理
   const [selectedOptions, setSelectedOptions] = useState<Set<CsvDownloadType>>(
-    new Set(appConfig.defaultSelectedOptions)
+    new Set()
   );
 
 
@@ -120,26 +104,14 @@ const RakutenCsvExtensionApp: React.FC = () => {
 
       if (result.success) {
         showSuccess(result.message || 'CSVダウンロードが完了しました');
-
-        // 成功時は選択をクリア（オプション）
-        if (appConfig.enableBatchOperations) {
-          setSelectedOptions(new Set());
-        }
+        setSelectedOptions(new Set());
       } else {
         showError(result.error || 'ダウンロードに失敗しました');
       }
     } catch (error) {
       showError(error instanceof Error ? error.message : '予期しないエラーが発生しました');
     }
-  }, [selectedOptions, downloadCsv, clearMessage, showError, showSuccess, appConfig.enableBatchOperations]);
-
-  /**
-   * ダウンロードのキャンセル処理
-   */
-  const handleCancelDownload = useCallback(() => {
-    cancelDownload();
-    showError('ダウンロードがキャンセルされました');
-  }, [cancelDownload, showError]);
+  }, [selectedOptions, downloadCsv, clearMessage, showError, showSuccess]);
 
   /**
    * 楽天証券ページを開く
@@ -178,7 +150,6 @@ const RakutenCsvExtensionApp: React.FC = () => {
         <>
           <span className="spinner-xs" role="status"><span className="sr-only">読み込み中...</span></span>
           <span>{currentOperation || 'ダウンロード中...'}</span>
-          {progress !== undefined && <span>({Math.round(progress)}%)</span>}
         </>
       );
     }
@@ -186,7 +157,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
     const selectedCount = selectedOptions.size;
     const label = selectedCount > 0 ? `CSV ダウンロード (${selectedCount}件)` : 'CSV ダウンロード';
     return <IconLabel icon="💾" label={label} />;
-  }, [isDownloading, currentOperation, progress, selectedOptions.size]);
+  }, [isDownloading, currentOperation, selectedOptions.size]);
 
   return (
     <div className="popup-container">
@@ -223,8 +194,6 @@ const RakutenCsvExtensionApp: React.FC = () => {
         <ProgressDisplay
           isDownloading={isDownloading}
           currentOperation={currentOperation}
-          progress={progress}
-          onCancel={handleCancelDownload}
         />
 
         {/* 選択状況の表示 */}
@@ -275,14 +244,12 @@ const RakutenCsvExtensionApp: React.FC = () => {
               type={message.type}
               content={message.content}
               onClose={clearMessage}
-              autoClose={message.type === 'success'}
-              duration={3000}
             />
           </div>
         )}
       </main>
 
-      <Footer version={appConfig.version} />
+      <Footer version={__APP_VERSION__} />
     </div>
   );
 };

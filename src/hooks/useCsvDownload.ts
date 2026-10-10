@@ -17,7 +17,6 @@ function isWrappedResponse(value: unknown): value is ChromeApiResponse<DownloadR
  */
 interface CsvDownloadState {
   readonly isDownloading: boolean;
-  readonly progress?: number;
   readonly currentOperation?: string;
 }
 
@@ -135,7 +134,6 @@ export const useCsvDownload = () => {
 
     updateState({ 
       isDownloading: true, 
-      progress: 0, 
       currentOperation: 'ダウンロード準備中...' 
     });
 
@@ -167,39 +165,14 @@ export const useCsvDownload = () => {
     } finally {
       updateState({ 
         isDownloading: false, 
-        progress: undefined, 
         currentOperation: undefined 
       });
-    }
-  }, [state.isDownloading, updateState]);
-
-  /**
-   * ダウンロードの進捗を手動で更新（外部から呼び出し可能）
-   */
-  const updateProgress = useCallback((progress: number, operation?: string) => {
-    updateState({ progress, currentOperation: operation });
-  }, [updateState]);
-
-  /**
-   * ダウンロードのキャンセル
-   */
-  const cancelDownload = useCallback(() => {
-    if (state.isDownloading) {
-      updateState({ 
-        isDownloading: false, 
-        progress: undefined, 
-        currentOperation: undefined 
-      });
-      console.log('ダウンロードがキャンセルされました');
     }
   }, [state.isDownloading, updateState]);
 
   return {
     isDownloading: state.isDownloading,
-    progress: state.progress,
     currentOperation: state.currentOperation,
-    downloadCsv,
-    updateProgress,
-    cancelDownload
+    downloadCsv
   };
 };
