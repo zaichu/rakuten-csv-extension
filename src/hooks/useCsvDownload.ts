@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { DownloadResponse, CsvDownloadType, ChromeApiResponse } from '../types';
+import type { DownloadResponse, CsvDownloadType, CsvDownloadMessage, ChromeApiResponse } from '../types';
 
 function isDownloadResponse(value: unknown): value is DownloadResponse {
   if (typeof value !== 'object' || value === null) return false;
@@ -67,13 +67,14 @@ export const useCsvDownload = () => {
     selectedOptions: Set<CsvDownloadType>, 
     tabId: number
   ): Promise<DownloadResponse> => {
-    const rawResponse: unknown = await chrome.runtime.sendMessage({
+    const message: CsvDownloadMessage = {
       action: 'download-csv-request',
       payload: {
         selectedOptions: Array.from(selectedOptions),
         tabId
       }
-    });
+    };
+    const rawResponse: unknown = await chrome.runtime.sendMessage(message);
 
     if (!rawResponse) {
       throw new Error('バックグラウンドサービスから応答がありません');

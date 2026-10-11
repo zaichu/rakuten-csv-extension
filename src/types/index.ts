@@ -16,8 +16,11 @@ export type {
 export type {
   ChromeMessage,
   CsvDownloadMessage,
-  CsvDownloadInstruction,
   CsvDownloadStepsInstruction,
+  ExtensionUpdatedMessage,
+  PingMessage,
+  ContentScriptMessage,
+  BackgroundMessage,
   CsvDownloadStep,
   CsvDownloadConfig,
   CsvSelectors,
@@ -31,7 +34,6 @@ export type {
   ExtensionState,
   ChromeApiResponse,
   ElementSearchConfig,
-  TabRegistrationMessage,
   PageReadyMessage,
   GetExtensionStateMessage
 } from './extension';

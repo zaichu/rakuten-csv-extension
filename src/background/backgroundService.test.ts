@@ -133,17 +133,26 @@ describe('backgroundService characterization', () => {
     }
   }
 
+  /** downloadStepExecutor.pageTransitionSteps と同じ集合 */
+  const PAGE_TRANSITION_STEPS = new Set(['navigate-to-page', 'select-tab', 'display-data'])
+
   /**
    * content script 側の正常応答をスタブする既定の sendMessage 実装。
    * wait 系の待ち受けが登録される前にイベントを発火させないよう、
    * 呼び出し時点で登録済みのリスナーを同期的に発火させて解消する。
    */
-  function stubContentScriptSuccess(tabId: number, action: string, steps: readonly string[]): void {
-    if (action === 'execute-csv-download') {
+  function stubContentScriptSuccess(tabId: number, steps: readonly string[]): void {
+    if (steps.length === 1 && PAGE_TRANSITION_STEPS.has(steps[0])) {
       firePageTransition(tabId)
-    } else if (action === 'execute-csv-download-steps' && steps.includes('download-csv')) {
+    }
+    if (steps.includes('download-csv')) {
       fireDownloadCreated()
     }
+  }
+
+  /** 送信された execute-csv-download-steps メッセージからステップ列を取り出す */
+  function sentSteps(message: { payload?: Record<string, unknown> }): readonly string[] {
+    return (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
   }
 
   function cleanupRegisteredTabs(): void {
@@ -188,11 +197,7 @@ describe('backgroundService characterization', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     setTabsSendMessageImpl((tabId, message, callback) => {
-      stubContentScriptSuccess(
-        tabId,
-        message.action,
-        (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-      )
+      stubContentScriptSuccess(tabId, sentSteps(message))
       callback?.({ success: true })
     })
   })
@@ -281,17 +286,8 @@ describe('backgroundService characterization', () => {
   })
 
   describe('メッセージルーティング', () => {
-    it('register-rakuten-tab は success を返し送信元タブを登録する', async () => {
-      const response = (await sendRuntimeMessage(
-        { action: 'register-rakuten-tab' },
-        senderWithTab(101)
-      )) as { success: boolean }
-      expect(response).toEqual({ success: true })
-      expect(Array.from(getService().getState().rakutenTabs)).toContain(101)
-    })
-
     it('送信元タブ情報が無くても success を返す', async () => {
-      const response = await sendRuntimeMessage({ action: 'register-rakuten-tab' }, {})
+      const response = await sendRuntimeMessage({ action: 'page-ready' }, {})
       expect(response).toEqual({ success: true })
     })
 
@@ -305,7 +301,7 @@ describe('backgroundService characterization', () => {
     })
 
     it('get-extension-state は success と state を返す', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(103))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(103))
       const response = (await sendRuntimeMessage({ action: 'get-extension-state' }, {})) as {
         success: boolean
         state: ExtensionState
@@ -335,7 +331,7 @@ describe('backgroundService characterization', () => {
     })
 
     it('未対応のダウンロードタイプはエラーになる', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(111))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(111))
       const response = await downloadRequest(111, ['unknown-type' as CsvDownloadType])
       expect(response).toEqual({
         success: false,
@@ -344,23 +340,23 @@ describe('backgroundService characterization', () => {
     })
 
     it('各ステップ成功時は完了メッセージを返しグルーピング通りに content script を呼ぶ', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(112))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(112))
       const response = await downloadRequest(112, ['dividend'])
       expect(response).toEqual({ success: true, message: 'すべてのCSVダウンロードが完了しました' })
 
       const calls = vi.mocked(chrome.tabs.sendMessage).mock.calls
       expect(calls).toHaveLength(4)
       expect(calls[0][1]).toMatchObject({
-        action: 'execute-csv-download',
-        payload: { downloadStep: 'navigate-to-page' },
+        action: 'execute-csv-download-steps',
+        payload: { downloadSteps: ['navigate-to-page'] },
       })
       expect(calls[1][1]).toMatchObject({
         action: 'execute-csv-download-steps',
         payload: { downloadSteps: ['select-period'] },
       })
       expect(calls[2][1]).toMatchObject({
-        action: 'execute-csv-download',
-        payload: { downloadStep: 'display-data' },
+        action: 'execute-csv-download-steps',
+        payload: { downloadSteps: ['display-data'] },
       })
       expect(calls[3][1]).toMatchObject({
         action: 'execute-csv-download-steps',
@@ -369,23 +365,14 @@ describe('backgroundService characterization', () => {
     })
 
     it('途中の単一ステップが失敗した場合はそのステップ名とエラーを含めて返す', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(113))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(113))
       setTabsSendMessageImpl((tabId, message, callback) => {
-        if (message.action === 'execute-csv-download') {
-          const step = message.payload?.['downloadStep'] as string | undefined
-          if (step === 'display-data') {
-            callback?.({ success: false, error: '表示ステップ失敗(stub)' })
-            return
-          }
-          firePageTransition(tabId)
-          callback?.({ success: true })
+        const steps = sentSteps(message)
+        if (steps.includes('display-data')) {
+          callback?.({ success: false, error: '表示ステップ失敗(stub)', step: 'display-data' })
           return
         }
-        stubContentScriptSuccess(
-          tabId,
-          message.action,
-          (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-        )
+        stubContentScriptSuccess(tabId, steps)
         callback?.({ success: true })
       })
 
@@ -396,20 +383,14 @@ describe('backgroundService characterization', () => {
     })
 
     it('途中のステップ群が失敗した場合は失敗ステップ名を引き継いで返す', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(114))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(114))
       setTabsSendMessageImpl((tabId, message, callback) => {
-        if (message.action === 'execute-csv-download-steps') {
-          const steps = (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-          if (steps.includes('select-period')) {
-            callback?.({ success: false, error: '期間選択失敗(stub)', step: 'select-period' })
-            return
-          }
+        const steps = sentSteps(message)
+        if (steps.includes('select-period')) {
+          callback?.({ success: false, error: '期間選択失敗(stub)', step: 'select-period' })
+          return
         }
-        stubContentScriptSuccess(
-          tabId,
-          message.action,
-          (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-        )
+        stubContentScriptSuccess(tabId, steps)
         callback?.({ success: true })
       })
 
@@ -420,7 +401,7 @@ describe('backgroundService characterization', () => {
     })
 
     it('ステップ失敗時は maxRetries(2) 回までリトライし試行回数を含むエラーになる', async () => {
-      await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(115))
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(115))
       setTabsSendMessageImpl((_tabId, _message, callback) => {
         callback?.({ success: false, error: '常時失敗(stub)' })
       })
@@ -473,7 +454,7 @@ describe('backgroundService characterization', () => {
     it('ページ遷移・ダウンロード開始イベントが来なくてもタイムアウトで処理が完了する', async () => {
       vi.useFakeTimers()
       try {
-        await sendRuntimeMessage({ action: 'register-rakuten-tab' }, senderWithTab(401))
+        await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(401))
         // イベントを一切発火させない content script スタブ（成功応答のみ）
         setTabsSendMessageImpl((_tabId, _message, callback) => {
           callback?.({ success: true })
