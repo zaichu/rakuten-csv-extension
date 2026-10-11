@@ -23,10 +23,5 @@ export default defineConfig({
   },
   define: {
     global: 'globalThis'
-  },
-  resolve: {
-    alias: {
-      '@': '/src'
-    }
   }
 })

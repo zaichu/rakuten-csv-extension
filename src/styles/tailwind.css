@@ -138,71 +138,25 @@
   }
 
   /* ── Small toggle buttons (全選択 / 全解除) ──────────────── */
-  /* カテゴリ：全選択 */
-  .tog-on {
+  .tog-on, .tog-off, .tog-all-on, .tog-all-off {
     @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
     font-size: 0.8rem;
     line-height: 1.2;
     padding: 0.25rem 0.5rem;
   }
-  .tog-on:hover:not(:disabled) {
+  .tog-on:hover:not(:disabled), .tog-all-on:hover:not(:disabled) {
     @apply border-blue-300 bg-blue-50 text-blue-700;
   }
-  .tog-on:focus-visible {
-    @apply outline-1 outline-blue-400 outline-offset-1;
-  }
-  .tog-on:disabled {
-    @apply opacity-30 cursor-not-allowed;
-  }
-
-  /* カテゴリ：全解除 */
-  .tog-off {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.8rem;
-    line-height: 1.2;
-    padding: 0.25rem 0.5rem;
-  }
-  .tog-off:hover:not(:disabled) {
+  .tog-off:hover:not(:disabled), .tog-all-off:hover:not(:disabled) {
     @apply border-red-200 bg-red-50 text-red-600;
   }
-  .tog-off:focus-visible {
-    @apply outline-1 outline-red-400 outline-offset-1;
-  }
-  .tog-off:disabled {
-    @apply opacity-30 cursor-not-allowed;
-  }
-
-  /* 全体：全選択 */
-  .tog-all-on {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.8rem;
-    line-height: 1.2;
-    padding: 0.25rem 0.5rem;
-  }
-  .tog-all-on:hover:not(:disabled) {
-    @apply border-blue-300 bg-blue-50 text-blue-700;
-  }
-  .tog-all-on:focus-visible {
+  .tog-on:focus-visible, .tog-all-on:focus-visible {
     @apply outline-1 outline-blue-400 outline-offset-1;
   }
-  .tog-all-on:disabled {
-    @apply opacity-30 cursor-not-allowed;
-  }
-
-  /* 全体：全解除 */
-  .tog-all-off {
-    @apply rounded border border-slate-300 bg-white text-slate-600 cursor-pointer;
-    font-size: 0.8rem;
-    line-height: 1.2;
-    padding: 0.25rem 0.5rem;
-  }
-  .tog-all-off:hover:not(:disabled) {
-    @apply border-red-200 bg-red-50 text-red-600;
-  }
-  .tog-all-off:focus-visible {
+  .tog-off:focus-visible, .tog-all-off:focus-visible {
     @apply outline-1 outline-red-400 outline-offset-1;
   }
-  .tog-all-off:disabled {
+  .tog-on:disabled, .tog-off:disabled, .tog-all-on:disabled, .tog-all-off:disabled {
     @apply opacity-30 cursor-not-allowed;
   }
 

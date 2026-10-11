@@ -15,19 +15,6 @@ export interface IconLabelProps {
 }
 
 /**
- * ボタンコンポーネントのプロパティ
- */
-export interface ButtonProps {
-  variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'warning' | 'info';
-  size?: 'small' | 'medium' | 'large';
-  disabled?: boolean;
-  loading?: boolean;
-  icon?: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-}
-
-/**
  * メッセージコンポーネントのプロパティ
  */
 export interface MessageProps {

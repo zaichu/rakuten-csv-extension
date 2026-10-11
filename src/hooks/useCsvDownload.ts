@@ -1,15 +1,9 @@
 import { useState, useCallback } from 'react';
-import type { DownloadResponse, CsvDownloadType, CsvDownloadMessage, ChromeApiResponse } from '../types';
+import type { DownloadResponse, CsvDownloadType, CsvDownloadMessage } from '../types';
 
 function isDownloadResponse(value: unknown): value is DownloadResponse {
   if (typeof value !== 'object' || value === null) return false;
   return typeof (value as Record<string, unknown>).success === 'boolean';
-}
-
-function isWrappedResponse(value: unknown): value is ChromeApiResponse<DownloadResponse> {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return typeof v.success === 'boolean' && 'data' in v;
 }
 
 /**
@@ -78,14 +72,6 @@ export const useCsvDownload = () => {
 
     if (!rawResponse) {
       throw new Error('バックグラウンドサービスから応答がありません');
-    }
-
-    // レスポンスが直接DownloadResponseの場合とChrome APIResponseの場合を処理
-    if (isWrappedResponse(rawResponse)) {
-      if (rawResponse.success && isDownloadResponse(rawResponse.data)) {
-        return rawResponse.data;
-      }
-      return { success: false, error: rawResponse.error || '不明なエラーが発生しました' };
     }
 
     if (isDownloadResponse(rawResponse)) {

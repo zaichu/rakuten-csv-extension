@@ -101,11 +101,6 @@ export interface CsvDownloadConfig {
 export type MessageType = 'success' | 'error' | 'warning' | 'info';
 
 /**
- * 基本ステータス（共通）
- */
-export type BaseStatus = 'success' | 'error';
-
-/**
  * アプリケーションメッセージ
  */
 export interface ApplicationMessage {
@@ -115,60 +110,12 @@ export interface ApplicationMessage {
 }
 
 /**
- * ダウンロード履歴レコード
- */
-export interface DownloadRecord {
-  readonly id: string;
-  readonly timestamp: Date;
-  readonly downloadType: string;
-  readonly status: BaseStatus;
-  readonly fileName?: string;
-}
-
-/**
- * アプリケーションの状態管理用の型
- */
-export interface AppState {
-  readonly isDownloading: boolean;
-  readonly message: ApplicationMessage | null;
-  readonly downloadHistory: readonly DownloadRecord[];
-}
-
-/**
- * 楽天証券タブ情報
- */
-export interface RakutenTabInfo {
-  readonly tabId: number;
-  readonly url: string;
-  readonly timestamp: number;
-}
-
-/**
  * 拡張機能の状態管理
  */
 export interface ExtensionState {
   readonly activeTabId?: number;
   readonly rakutenTabs: ReadonlySet<number>;
   readonly lastActiveTime: number;
-}
-
-/**
- * Chrome拡張機能APIのレスポンス型
- */
-export interface ChromeApiResponse<T = unknown> {
-  readonly success: boolean;
-  readonly data?: T;
-  readonly error?: string;
-}
-
-/**
- * DOM要素検索の設定
- */
-export interface ElementSearchConfig {
-  readonly selectors: readonly string[];
-  readonly timeout?: number;
-  readonly retryInterval?: number;
-  readonly requireVisible?: boolean;
 }
 
 /**

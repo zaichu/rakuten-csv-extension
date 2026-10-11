@@ -50,21 +50,4 @@ describe('useCsvDownload', () => {
 
     expect(response).toMatchObject({ success: false })
   })
-
-  it('ラップレスポンス { success: true, data: { success: true, message } } を成功として扱う', async () => {
-    mockTabsQuery.mockResolvedValue([rakutenTab])
-    mockSendMessage.mockResolvedValue({
-      success: true,
-      data: { success: true, message: 'ダウンロード完了' }
-    })
-
-    const { result } = renderHook(() => useCsvDownload())
-
-    let response
-    await act(async () => {
-      response = await result.current.downloadCsv(new Set(['assetbalance'] as const))
-    })
-
-    expect(response).toMatchObject({ success: true, message: 'ダウンロード完了' })
-  })
 })

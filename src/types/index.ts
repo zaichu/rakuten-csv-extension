@@ -6,7 +6,6 @@
 // UI関連の型
 export type {
   IconLabelProps,
-  ButtonProps,
   MessageProps,
   HeaderProps,
   FooterProps
@@ -26,22 +25,13 @@ export type {
   CsvSelectors,
   DownloadResponse,
   MessageType,
-  BaseStatus,
-  AppState,
-  DownloadRecord,
   ApplicationMessage,
-  RakutenTabInfo,
   ExtensionState,
-  ChromeApiResponse,
-  ElementSearchConfig,
   PageReadyMessage,
   GetExtensionStateMessage
 } from './extension';
 
 // 楽天証券関連の型
 export type {
-  CsvDownloadType,
-  RakutenUrlConfig,
-  DownloadConfig,
-  ExtensionSettings
+  CsvDownloadType
 } from './rakuten';
