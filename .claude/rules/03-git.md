@@ -23,8 +23,8 @@ README や skills の記載と衝突した場合は、本ドキュメントを�
 
 ### worktree 運用
 
-- Claude 実装を委譲するタスクは、原則として専用 `git worktree` を作ってその中で行う
-- Codex は repo ルートの `main` をレビュー/統合用に clean に保つ
+- 実装を委譲するタスクは、原則として専用 `git worktree` を作ってその中で行う
+- 統合エージェントは repo ルートの `main` をレビュー/統合用に clean に保つ
 - worktree の配置先は `/tmp/<repo>-<topic>` のような一時パスを標準とする
 - 1 作業ブランチ = 1 worktree を守る
 
@@ -41,7 +41,7 @@ README や skills の記載と衝突した場合は、本ドキュメントを�
 
 <詳細説明（任意）>
 
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+<実装エージェントの Co-Authored-By トレーラ>
 ```
 
 ### 種別
@@ -56,7 +56,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ## PR とマージ
 
 - PR は作業ブランチから `main` へ作成する
-- PR マージ前に Codex レビュー（`.claude/skills/pr-review/SKILL.md`）を実施する
+- PR マージ前に実装者以外によるレビュー（`.claude/skills/pr-review/SKILL.md`）を実施する
 - タイトルと説明は日本語で、変更内容とテスト結果を明記する
 - マージ方式は `Squash and merge` を標準とする
 - マージ後は `main` を更新して作業ブランチを削除する

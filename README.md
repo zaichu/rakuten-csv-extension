@@ -2,7 +2,7 @@
 
 楽天証券の各種ページから投資データをCSV形式で簡単にダウンロードできるChrome拡張機能です。
 
-[![Version](https://img.shields.io/github/package-json/v/zaichu6/rakuten-csv-extension?filename=package.json)](https://github.com/zaichu6/rakuten-csv-extension)
+[![Version](https://img.shields.io/github/package-json/v/zaichu/rakuten-csv-extension?filename=package.json)](https://github.com/zaichu/rakuten-csv-extension)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)](https://www.typescriptlang.org/)
 
@@ -17,8 +17,8 @@
 ### 拡張機能の特徴
 - **🖱️ ワンクリック操作**: ポップアップから簡単ダウンロード
 - **🎯 カテゴリ別選択**: データ種別ごとの選択的ダウンロード
-- **🔄 自動処理**: 楽天証券サイトでの操作を自動化
-- **⚡ 高速処理**: 効率的なデータ取得とCSV変換
+- **🔄 自動処理**: 楽天証券サイトでのCSV保存操作を自動化
+- **⚡ まとめて実行**: 選択した複数データを連続でダウンロード
 - **🎨 コンパクトUI**: 350×400pxの小さなポップアップ
 - **📱 レスポンシブ**: スクロール不要の最適化されたレイアウト
 
@@ -30,7 +30,7 @@
 ### 手動インストール（開発版）
 1. このリポジトリをクローン
    ```bash
-   git clone https://github.com/zaichu6/rakuten-csv-extension.git
+   git clone https://github.com/zaichu/rakuten-csv-extension.git
    cd rakuten-csv-extension
    ```
 
@@ -74,8 +74,8 @@
 |---------|-----------|------------|
 | ポートフォリオ | 保有銘柄残高 | `rakuten_assetbalance_YYYYMMDD.csv` |
 | 収益情報 | 配当金・分配金 | `rakuten_dividend_YYYYMMDD.csv` |
-| 取引履歴 | 国内株式 | `rakuten_domesticstock_YYYYMMDD.csv` |
-| 取引履歴 | 投資信託 | `rakuten_mutualfund_YYYYMMDD.csv` |
+| 実現損益 | 国内株式 | `rakuten_domesticstock_YYYYMMDD.csv` |
+| 実現損益 | 投資信託 | `rakuten_mutualfund_YYYYMMDD.csv` |
 
 ## 🔧 技術仕様
 
@@ -150,11 +150,18 @@ e2e/
 |-----|------|
 | `activeTab` | 現在のタブでCSVダウンロード機能を提供 |
 | `tabs` | 楽天証券ページの操作と新しいタブでの処理 |
+| `downloads` | CSVダウンロードの開始を検知 |
 | `host_permissions` | 楽天証券ドメインでのみ動作 |
 
 詳細は [プライバシーポリシー](PRIVACY_POLICY.md) をご覧ください。
 
 ## 🔄 自動化される操作フロー
+
+CSVファイルは楽天証券サイト自身の「CSVで保存」機能が生成し、拡張機能はその操作を自動化します。
+
+### 保有銘柄の取得
+1. 保有銘柄ページへ遷移
+2. CSV保存ボタンを押下
 
 ### 配当金・分配金の取得
 1. 配当金・分配金ページへ遷移
@@ -162,14 +169,13 @@ e2e/
 3. 「表示する」ボタンをクリック
 4. CSV保存ボタンを押下
 
-### 国内株式取引履歴の取得
-1. 実現損益ページへ遷移
-2. 「国内株式」タブを選択
-3. 表示期間を「すべて」に設定
-4. 「この条件で表示する」ボタンをクリック
-5. CSV保存ボタンを押下
+### 国内株式の実現損益の取得
+1. 実現損益ページへ遷移（国内株式はデフォルトタブ）
+2. 表示期間を「すべて」に設定
+3. 「この条件で表示する」ボタンをクリック
+4. CSV保存ボタンを押下
 
-### 投資信託取引履歴の取得
+### 投資信託の実現損益の取得
 1. 実現損益ページへ遷移
 2. 「投資信託」タブを選択
 3. 表示期間を「すべて」に設定
@@ -181,7 +187,7 @@ e2e/
 ### 開発環境のセットアップ
 ```bash
 # プロジェクトのクローン
-git clone https://github.com/zaichu6/rakuten-csv-extension.git
+git clone https://github.com/zaichu/rakuten-csv-extension.git
 cd rakuten-csv-extension
 
 # 依存関係のインストール
@@ -279,8 +285,8 @@ npm run test:coverage
 
 ## 📞 サポート
 
-- **バグ報告**: [GitHub Issues](https://github.com/zaichu6/rakuten-csv-extension/issues)
-- **機能要望**: [GitHub Discussions](https://github.com/zaichu6/rakuten-csv-extension/discussions)
+- **バグ報告**: [GitHub Issues](https://github.com/zaichu/rakuten-csv-extension/issues)
+- **機能要望**: [GitHub Discussions](https://github.com/zaichu/rakuten-csv-extension/discussions)
 - **セキュリティ問題**: [security@example.com](mailto:security@example.com)
 
 ---

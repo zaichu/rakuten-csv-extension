@@ -6,7 +6,7 @@
 
 - プロジェクト全体: `./CLAUDE.md`
 - 個人設定: `./CLAUDE.local.md`（gitignore 推奨）
-- サブディレクトリ作業: `backend/CLAUDE.md`, `frontend/CLAUDE.md`
+- サブディレクトリ作業: 該当ディレクトリの `CLAUDE.md`（存在する場合のみ）
 - 全プロジェクト共通の個人設定（任意・存在する場合のみ適用）: `~/.claude/CLAUDE.md`
 
 ## 共通ルール
@@ -29,8 +29,7 @@
 
 ## 設計方針
 
-- API 契約の正本は `docs/openapi.json` とし、backend の API 変更時は `frontend/src/generated/api.ts` まで必ず同期する
-- CSV 取り込みは原則 backend で `parse / validate / import` する。frontend はファイル送信と結果表示を優先する
+- CSV ダウンロードの動作仕様（対象ページ・実行ステップ・セレクター）の正本は `src/config/csvDownloadConfigs.ts`、権限の正本は `manifest.json`。README・PRIVACY_POLICY.md の説明はこれらと同期させる
 - unrelated な修正は同じブランチに混在させない。`1 ブランチ = 1 タスク` を守る
 
 ## Agent Assets
@@ -45,9 +44,3 @@
 2. `.claude/rules/01-testing.md`
 3. `.claude/rules/02-security.md`
 4. `.claude/rules/03-git.md`
-5. UIレビュー時のみ `.claude/rules/04-frontend-ui-review.md`
-
-## サブプロジェクトルール
-
-- バックエンド作業時は `backend/CLAUDE.md` を追加で適用
-- フロントエンド作業時は `frontend/CLAUDE.md` を追加で適用

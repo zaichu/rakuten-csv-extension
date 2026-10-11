@@ -1,17 +1,16 @@
 ---
 name: pr-review
 description: |
-  Claude が実装した差分または PR を Codex がレビューする。
+  実装エージェントが実装した差分または PR を、実装者以外のエージェントがレビューする。
   Use when: 「PRをレビューして」「レビューしてください」と依頼された時。
-  または Claude 実装完了後に Codex が実装レビューする時。
+  または実装完了後に実装レビューする時。
 ---
 
-# PR Review（Codex 実行）
+# PR Review
 
 ## Overview
-Claude が実装した差分または PR を Codex がレビューする。
-全体開発ルール（`.claude/rules/00-general.md`）における標準フローは
-`Codex が設計する → Claude が実装する → Codex がレビューする` とし、本スキルで運用する。
+実装された差分または PR を実装者以外がレビューする。
+役割と現在の担当は `docs/agent-roles.md` を正本とする。
 
 ブランチ運用の基準は `.claude/rules/03-git.md` を参照する。
 
@@ -33,17 +32,10 @@ Claude が実装した差分または PR を Codex がレビューする。
 ### 3. 検証結果を確定する
 変更範囲に応じて実行:
 
-- フロントエンド変更がある場合:
-  - `cd frontend && npm run lint`
-  - `cd frontend && npx tsc --noEmit`
-  - `cd frontend && npm test`
-  - `cd frontend && vp build`
-- バックエンド変更がある場合:
-  - `cd backend && cargo fmt --check`
-  - `cd backend && cargo clippy --all-targets -- -D warnings`
-  - `cd backend && cargo test`
-- API 定義変更がある場合:
-  - `bash scripts/check-openapi.sh`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm run test`
+- `npm run build`
 
 ### 4. レビューを実行する
 findings first で重大度順に出す:
@@ -55,11 +47,10 @@ findings first で重大度順に出す:
 
 ### 5. レビュー結果を記録する
 - task file がある場合は `レビュー指摘` に findings と判定を追記する
-- PR がある場合は必要に応じて `🤖 Codex review` コメントとして投稿する
-- 投稿済みコメントを更新する場合は、先頭が `🤖 Codex review` の最新コメントを更新する
+- PR がある場合は必要に応じてレビュー結果をコメントとして投稿する
 
 ### 6. 修正が必要な場合
-`codex-claude-handoff` スキルを使って Claude に修正を依頼する。依頼文には**以下を必ず含める**:
+`agent-delegation` スキルの手順で実装エージェントに修正を依頼する。依頼文には**以下を必ず含める**:
 
 ```markdown
 ## レビュー指摘への対応
@@ -76,7 +67,6 @@ findings first で重大度順に出す:
 | 1 | [high] | <内容> | path/to/file.ts:42 | <確認方法> |
 ```
 
-依頼は `claude -p --continue "<修正依頼>"` で送る。
 修正後は本スキルで再レビューする（LGTM まで繰り返す）。
 
 ### 7. LGTM 後
