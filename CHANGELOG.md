@@ -4,6 +4,17 @@
 
 バージョン番号は [セマンティックバージョニング](https://semver.org/) に従います。
 
+## [2.0.43] - 2026-10-13
+
+### 変更
+- ダウンロード中の表示を実際の処理に合わせて簡素化
+  - 常に0のままだった数値進捗バーと(表示)%を除去し、処理中スピナーと操作テキストの表示に絞った
+  - 実処理を止めていなかったダウンロード中のキャンセルボタンを削除した
+- 内部の整理・安定性の改善
+  - CSV実行の通信・再試行・タブ登録の経路を1つに統一
+  - 使われていない型・ユーティリティ・互換分岐を削除
+  - 依存パッケージの更新
+
 ## [2.0.3] - 2026-01-03
 
 ### 改善
@@ -95,7 +106,8 @@
 
 ## リンク形式の説明
 
-- [2.0.3]: 現在のバージョン
+- [2.0.43]: 現在のバージョン
+- [2.0.3]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.3
 - [2.0.2]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.2
 - [2.0.1]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.1
 - [2.0.0]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.0
