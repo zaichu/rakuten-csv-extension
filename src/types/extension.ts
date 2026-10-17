@@ -61,19 +61,11 @@ export interface ExtensionUpdatedMessage extends ChromeMessage {
 }
 
 /**
- * 生存確認メッセージ
- */
-export interface PingMessage extends ChromeMessage {
-  readonly action: 'ping';
-}
-
-/**
  * コンテンツスクリプトが受け取るメッセージ
  */
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
-  | ExtensionUpdatedMessage
-  | PingMessage;
+  | ExtensionUpdatedMessage;
 
 /**
  * ダウンロードレスポンス
