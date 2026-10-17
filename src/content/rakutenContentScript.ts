@@ -85,9 +85,6 @@ class RakutenCsvExtension {
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
 
-      case 'ping':
-        return { success: true, message: 'pong' };
-
       default:
         return {
           success: false,

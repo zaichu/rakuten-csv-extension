@@ -17,7 +17,6 @@ export type {
   CsvDownloadMessage,
   CsvDownloadStepsInstruction,
   ExtensionUpdatedMessage,
-  PingMessage,
   ContentScriptMessage,
   BackgroundMessage,
   CsvDownloadStep,
