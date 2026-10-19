@@ -5,4 +5,4 @@
 /**
  * CSVダウンロードタイプ
  */
-export type CsvDownloadType = 'assetbalance' | 'dividend' | 'domesticstock' | 'mutualfund'
+export type CsvDownloadType = 'assetbalance' | 'fundbalance' | 'dividend' | 'domesticstock' | 'mutualfund'
