@@ -35,6 +35,12 @@ export const DOWNLOAD_OPTIONS: readonly DownloadOption[] = [
     category: 'portfolio'
   },
   {
+    id: 'fundbalance',
+    label: '投資信託',
+    icon: '📊',
+    category: 'portfolio'
+  },
+  {
     id: 'dividend',
     label: '配当金・分配金',
     icon: '💰',

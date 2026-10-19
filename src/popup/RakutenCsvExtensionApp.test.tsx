@@ -24,13 +24,14 @@ describe('RakutenCsvExtensionApp characterization', () => {
     expect(screen.getAllByText('📊').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('💰').length).toBeGreaterThanOrEqual(2)
 
-    // 各オプションのチェックボックス (4件)
+    // 各オプションのチェックボックス (5件)
     const checkboxes = screen.getAllByRole('checkbox')
-    expect(checkboxes).toHaveLength(4)
-    // 国内株式ラベルは assetbalance / domesticstock で重複する点も仕様通り
+    expect(checkboxes).toHaveLength(5)
+    // 国内株式ラベルは assetbalance / domesticstock、投資信託ラベルは
+    // fundbalance / mutualfund で重複する点も仕様通り
     expect(screen.getAllByText('国内株式')).toHaveLength(2)
     expect(screen.getByText('配当金・分配金')).toBeInTheDocument()
-    expect(screen.getByText('投資信託')).toBeInTheDocument()
+    expect(screen.getAllByText('投資信託')).toHaveLength(2)
 
     // 初期状態は未選択 (「選択中」テキストは子要素で分割されるため textContent で確認)
     checkboxes.forEach((checkbox) => {
@@ -45,7 +46,7 @@ describe('RakutenCsvExtensionApp characterization', () => {
     const summary = container.querySelector('.selection-summary')
     expect(summary?.textContent).toContain('選択中')
     expect(summary?.textContent).toContain('0')
-    expect(summary?.textContent).toContain('4')
+    expect(summary?.textContent).toContain('5')
 
     const dividend = screen.getByRole('checkbox', { name: /配当金・分配金/ })
     fireEvent.click(dividend)
@@ -106,15 +107,15 @@ describe('RakutenCsvExtensionApp characterization', () => {
 
     fireEvent.click(selectAllButton)
 
-    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(4)
-    expect(container.querySelectorAll('.option-row-selected')).toHaveLength(4)
-    expect(container.querySelector('.selection-summary')?.textContent).toContain('4')
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(5)
+    expect(container.querySelectorAll('.option-row-selected')).toHaveLength(5)
+    expect(container.querySelector('.selection-summary')?.textContent).toContain('5')
     expect(
       within(summary as HTMLElement).getByRole('button', { name: '全解除' }),
     ).toBeInTheDocument()
 
     fireEvent.click(within(summary as HTMLElement).getByRole('button', { name: '全解除' }))
-    expect(screen.getAllByRole('checkbox', { checked: false })).toHaveLength(4)
+    expect(screen.getAllByRole('checkbox', { checked: false })).toHaveLength(5)
     expect(container.querySelectorAll('.option-row-selected')).toHaveLength(0)
     expect(container.querySelector('.selection-summary')?.textContent).toContain('0')
   })

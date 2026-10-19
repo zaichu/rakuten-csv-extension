@@ -9,7 +9,7 @@
 ## 🌟 主な機能
 
 ### データダウンロード対応
-- **🏦 ポートフォリオ**: 保有銘柄情報（残高照会）
+- **🏦 ポートフォリオ**: 保有銘柄・投資信託の保有残高情報（残高照会）
 - **💰 配当金・分配金**: 受取履歴データ
 - **📊 国内株式**: 取引履歴・実現損益
 - **📈 投資信託**: 取引履歴・実現損益
@@ -73,6 +73,7 @@
 | カテゴリ | データ種別 | ファイル名例 |
 |---------|-----------|------------|
 | ポートフォリオ | 保有銘柄残高 | `rakuten_assetbalance_YYYYMMDD.csv` |
+| ポートフォリオ | 投資信託の保有残高 | `rakuten_fundbalance_YYYYMMDD.csv` |
 | 収益情報 | 配当金・分配金 | `rakuten_dividend_YYYYMMDD.csv` |
 | 実現損益 | 国内株式 | `rakuten_domesticstock_YYYYMMDD.csv` |
 | 実現損益 | 投資信託 | `rakuten_mutualfund_YYYYMMDD.csv` |
@@ -134,7 +135,8 @@ src/
 └── tests/
     └── setup.ts            # Vitestセットアップ(chrome APIモック)
 e2e/
-└── smoke.spec.ts           # Playwrightスモークテスト
+├── smoke.spec.ts           # Playwrightスモークテスト
+└── fund-possess.spec.ts    # 投資信託の保有残高オプションのE2Eテスト
 ```
 
 ## 🛡️ セキュリティとプライバシー
@@ -161,6 +163,10 @@ CSVファイルは楽天証券サイト自身の「CSVで保存」機能が生�
 
 ### 保有銘柄の取得
 1. 保有銘柄ページへ遷移
+2. CSV保存ボタンを押下
+
+### 投資信託の保有残高の取得
+1. 投資信託の保有一覧ページへ遷移
 2. CSV保存ボタンを押下
 
 ### 配当金・分配金の取得

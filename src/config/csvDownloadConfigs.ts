@@ -11,9 +11,22 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
     steps: ['navigate-to-page', 'download-csv'],
     selectors: {
       // マイメニューから保有銘柄のページに遷移 - 国内株式のリンクに対応
-      menuLink: "a[onclick*='ass_jp_stk_possess_lst.do'][data-ratid='mem_pc_mymenu_jp-possess-lst'], .pcm-gl-mega-list__link[onclick*='possess']",
+      // 'possess' を広く拾う代替セレクターは投資信託のリンク(ass_fu_possess_lst.do)にも
+      // マッチしてしまうため除外する
+      menuLink: "a[onclick*='ass_jp_stk_possess_lst.do'][data-ratid='mem_pc_mymenu_jp-possess-lst'], .pcm-gl-mega-list__link[onclick*='possess']:not([onclick*='ass_fu_possess_lst.do'])",
       // csvで保存ボタンを押下
       csvButton: "[onclick*='csvOutput'], img[src*='btn-save-csv'], img[alt*='CSV']"
+    }
+  },
+  'fundbalance': {
+    downloadType: 'fundbalance',
+    description: '投資信託の保有残高',
+    steps: ['navigate-to-page', 'download-csv'],
+    selectors: {
+      // マイメニューから投資信託の保有一覧ページに遷移
+      menuLink: "a[onclick*='ass_fu_possess_lst.do'], a[data-ratid='mem_pc_mymenu_fu-possess-lst']",
+      // csvで保存ボタンを押下
+      csvButton: "[onclick*='csvDownLoad()'], input[type='image'][src*='btn-save-csv']"
     }
   },
   'dividend': {
