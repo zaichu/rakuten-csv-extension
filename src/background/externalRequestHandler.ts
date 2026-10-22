@@ -32,6 +32,8 @@ export interface CsvDownloadRunner {
  * ダウンロード開始の待ち受け
  */
 interface DownloadCapture {
+  /** 取得対象のタブID */
+  readonly tabId: number;
   /** 捕捉したダウンロード先URL（捕捉できなければ undefined） */
   readonly url: Promise<string | undefined>;
   /** 待ち受けを開始する */
@@ -246,14 +248,14 @@ export class ExternalRequestHandler {
     tabId: number,
     kind: CsvDownloadType
   ): Promise<{ success: true; csv: FetchedCsv } | { success: false; reason: string }> {
-    const capture = this.createDownloadCapture();
+    const capture = this.createDownloadCapture(tabId);
     this.pendingCapture = capture;
 
     let stepResult: DownloadResponse;
     try {
       stepResult = await this.downloadRunner.executeDownloadRequest({
         action: 'download-csv-request',
-        payload: { selectedOptions: [kind], tabId },
+        payload: { selectedOptions: [kind], tabId, captureDownloadStart: true },
       });
     } finally {
       this.pendingCapture = undefined;
@@ -285,17 +287,23 @@ export class ExternalRequestHandler {
   /**
    * コンテンツスクリプトがCSVダウンロードのクリック直前に知らせる
    *
-   * クリックの直前まで待ち受けを開始しないことで、
-   * 同時に別のダウンロードが始まっても取り違えないようにする
+   * クリックの直前まで待ち受けを開始しないことで、同時に別のダウンロードが
+   * 始まっても取り違えないようにする。対象タブ以外からの通知は受け付けない
    */
-  notifyDownloadWillStart(): void {
-    this.pendingCapture?.arm();
+  notifyDownloadWillStart(tabId: number | undefined): void {
+    if (!this.pendingCapture || tabId === undefined) {
+      return;
+    }
+    if (tabId !== this.pendingCapture.tabId) {
+      return;
+    }
+    this.pendingCapture.arm();
   }
 
   /**
    * ダウンロードの開始を待ち、URLを捕捉する
    */
-  private createDownloadCapture(): DownloadCapture {
+  private createDownloadCapture(tabId: number): DownloadCapture {
     let resolveUrl: (url: string | undefined) => void = () => {};
     const url = new Promise<string | undefined>((resolve) => {
       resolveUrl = resolve;
@@ -321,6 +329,7 @@ export class ExternalRequestHandler {
     };
 
     return {
+      tabId,
       url,
       arm: () => {
         if (armed) {

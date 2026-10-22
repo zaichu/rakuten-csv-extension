@@ -168,7 +168,7 @@ class RakutenCsvExtension {
   private async handleCsvDownloadStepsExecution(
     message: CsvDownloadStepsInstruction
   ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors } = message.payload;
+    const { downloadSteps, selectors, captureDownloadStart } = message.payload;
 
     console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
 
@@ -183,7 +183,7 @@ class RakutenCsvExtension {
 
     for (const step of downloadSteps) {
       try {
-        const result = await this.executeDownloadStep(step, selectors);
+        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
         console.log(`ステップ ${step} 完了:`, result);
 
         if (!result.success) {
@@ -209,8 +209,9 @@ class RakutenCsvExtension {
    * ダウンロードステップを実行
    */
   private async executeDownloadStep(
-    step: CsvDownloadStep, 
-    selectors: CsvSelectors
+    step: CsvDownloadStep,
+    selectors: CsvSelectors,
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     switch (step) {
       case 'navigate-to-page':
@@ -228,7 +229,7 @@ class RakutenCsvExtension {
       case 'download-csv':
         return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
           requireInteractable: true,
-          beforeClick: () => this.notifyDownloadWillStart()
+          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined
         });
 
       default:

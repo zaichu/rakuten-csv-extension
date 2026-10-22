@@ -204,7 +204,7 @@ class RakutenCsvBackgroundService {
           break;
 
         case 'csv-download-will-start':
-          this.externalRequestHandler.notifyDownloadWillStart();
+          this.externalRequestHandler.notifyDownloadWillStart(sender.tab?.id);
           response = { success: true };
           break;
 
@@ -347,6 +347,13 @@ class RakutenCsvBackgroundService {
    */
   getConfig(): ExtensionConfig {
     return this.downloadStepExecutor.getConfig();
+  }
+
+  /**
+   * 外部リクエストハンドラを取得（テスト・デバッグ用）
+   */
+  getExternalRequestHandler(): ExternalRequestHandler {
+    return this.externalRequestHandler;
   }
 }
 

@@ -25,6 +25,8 @@ const LOCAL_ORIGIN = 'http://localhost:5173'
 const OTHER_ORIGIN = 'https://example.com'
 const RAKUTEN_URL = 'https://www.rakuten-sec.co.jp/web/dividend/'
 const ALLOWED_PATTERNS = ['https://shoken-webapp.pages.dev/*']
+const TARGET_TAB_ID = 42
+const OTHER_TAB_ID = 99
 
 type PostedMessage = FetchLatestCsvProgress | FetchLatestCsvResult | ExternalErrorResponse
 
@@ -75,7 +77,7 @@ function createHandler(
       async (message: { payload: { selectedOptions: readonly CsvDownloadType[] } }) => {
         const kind = message.payload.selectedOptions[0]
         executed.push(kind)
-        handler.notifyDownloadWillStart()
+        handler.notifyDownloadWillStart(TARGET_TAB_ID)
         fireDownloadCreated({ url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv` })
         return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
       }
@@ -161,7 +163,7 @@ describe('externalRequestHandler', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(chrome.tabs.query).mockResolvedValue([
-      { id: 42, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
+      { id: TARGET_TAB_ID, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
     ])
     setTabsUpdateImpl()
     setTabsSendMessageImpl((_tabId, message, callback) => {
@@ -411,7 +413,7 @@ describe('externalRequestHandler', () => {
       const runner = {
         executeDownloadRequest: vi.fn(async () => {
           fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
-          handler.notifyDownloadWillStart()
+          handler.notifyDownloadWillStart(TARGET_TAB_ID)
           fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv' })
           return { success: true, message: '取得完了' }
         }),
@@ -431,6 +433,31 @@ describe('externalRequestHandler', () => {
       expect(result.csvs[0].content).toBe(
         '本文:https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
       )
+    })
+
+    it('対象タブ以外からの通知では待ち受けを開始しない', async () => {
+      const runner = {
+        executeDownloadRequest: vi.fn(async () => {
+          handler.notifyDownloadWillStart(OTHER_TAB_ID)
+          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+          return { success: true, message: '取得完了' }
+        }),
+      }
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ALLOWED_PATTERNS,
+        downloadStartTimeoutMs: 30,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.failures).toEqual([
+        { kind: 'assetbalance', reason: 'CSVのダウンロード先URLを取得できませんでした' },
+      ])
+      expect(result.csvs).toEqual([])
     })
 
     it('通知が無い場合はダウンロードを取り逃がす', async () => {
