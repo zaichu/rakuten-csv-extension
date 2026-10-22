@@ -84,6 +84,17 @@
 接続を許すオリジンは `https://shoken-webapp.pages.dev` と `http://localhost`(ローカル確認用)だけで、
 background 側でも送信元のオリジンを検査します。
 
+CSVはURLを再取得しても取得できないため、ブラウザが保存したCSVファイルを拡張機能が直接読み取り、
+読み終えたらそのファイルを削除します(ダウンロードフォルダにCSVを残しません)。
+この読み取りには「ファイルの URL へのアクセス」が必要です。設定が OFF のまま依頼すると、
+失敗として `code: 'file-access-disabled'` を返します。
+
+**設定手順**
+
+1. `chrome://extensions/` を開く
+2. この拡張機能の「詳細」をクリックする
+3. 「ファイルの URL へのアクセスを許可する」を ON にする
+
 画面のコンソールから依頼する例です(拡張機能IDは `chrome://extensions/` で確認できます)。
 
 ```js
@@ -96,13 +107,14 @@ port.postMessage({ type: 'fetchLatestCsv', kinds: ['assetbalance', 'dividend'] }
 |------|------------|
 | 画面 → 拡張機能 | `{ type: 'fetchLatestCsv', kinds: ['assetbalance', ...] }` |
 | 拡張機能 → 画面 | `{ type: 'progress', state: 'login-wait' \| 'fetching' \| 'completed' \| 'failed', kind, reason }` |
-| 拡張機能 → 画面 | `{ type: 'result', csvs: [{ kind, content, fetchedAt }], failures: [{ kind, reason }] }` |
+| 拡張機能 → 画面 | `{ type: 'result', csvs: [{ kind, content, fetchedAt, fileRemoved }], failures: [{ kind, reason, code }] }` |
 | 拡張機能 → 画面 | `{ type: 'error', error }`（受け付けない依頼の場合） |
 
 - 未ログインならログイン画面を開き、ログインの完了を待ちます（`state: 'login-wait'`）
 - 返るのはCSVの本文だけです。氏名・口座番号などの個人情報を含んだログやエラーは出しません
 - 文字コードはUTF-8として解釈し、解釈できない場合のみShift_JISとして解釈します
 - CSVの本文は「CSVで保存」のクリック直前に待ち受けを開始して取得するため、同時に別のダウンロードが始まっても取り違えません(ポップアップからのダウンロードなど、対象タブ以外の操作では待ち受けを開始しません)
+- 読み込んだファイルは削除します。削除に失敗した場合も取得は成功として扱い、`fileRemoved: false` を返します
 
 ## 🔧 技術仕様
 
@@ -146,6 +158,7 @@ src/
 ├── background/              # バックグラウンドサービス
 │   ├── backgroundService.ts # イベント配線・メッセージルーティング・タブ状態
 │   ├── downloadStepExecutor.ts # ダウンロードステップ実行
+│   ├── downloadedFile.ts    # ダウンロードされたファイルの捕捉・検査・読み取り
 │   └── externalRequestHandler.ts # 外部ページ(shoken-webapp)からの取得依頼
 ├── config/                  # 設定
 │   └── csvDownloadConfigs.ts # CSVダウンロード設定
@@ -182,8 +195,8 @@ e2e/
 |-----|------|
 | `activeTab` | 現在のタブでCSVダウンロード機能を提供 |
 | `tabs` | 楽天証券ページの操作と新しいタブでの処理 |
-| `downloads` | CSVダウンロードの開始を検知 |
-| `host_permissions` | 楽天証券ドメインでのみ動作 |
+| `downloads` | CSVダウンロードの開始を検知し、完了したファイルを読み取る・削除する |
+| `host_permissions` | 楽天証券ドメインでのみ動作。`file:///*` は画面(shoken-webapp)からの取得時に、拡張機能がダウンロードしたCSVファイルを読むためだけに使います(「ファイルの URL へのアクセスを許可する」がONの場合に限り有効) |
 | `externally_connectable` | 指定したWebページ(shoken-webapp・localhost)からの取得依頼にのみ応答 |
 
 詳細は [プライバシーポリシー](PRIVACY_POLICY.md) をご覧ください。
