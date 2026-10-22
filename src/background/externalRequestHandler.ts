@@ -125,6 +125,9 @@ export class ExternalRequestHandler {
   private readonly downloadStartTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
 
+  /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
+  private running = false;
+
   constructor(config: ExternalRequestHandlerConfig) {
     this.downloadRunner = config.downloadRunner;
     this.allowedOrigins = config.allowedOrigins;
@@ -160,6 +163,12 @@ export class ExternalRequestHandler {
       return;
     }
 
+    if (this.running) {
+      port.postMessage(errorResponse('別の取得が実行中のため受け付けません'));
+      return;
+    }
+
+    this.running = true;
     try {
       const result = await this.fetchLatestCsv(request.kinds, (progress) => {
         port.postMessage(progress);
@@ -167,6 +176,8 @@ export class ExternalRequestHandler {
       port.postMessage(result);
     } catch {
       port.postMessage(errorResponse('CSVの取得中に予期しないエラーが発生しました'));
+    } finally {
+      this.running = false;
     }
   }
 
@@ -301,35 +312,43 @@ export class ExternalRequestHandler {
 
   /**
    * ログイン完了を待つ
+   *
+   * コンテンツスクリプトが準備できていない状態と未ログインを区別し、
+   * 判定できない間はログイン画面を開かずに待ち続ける
    */
   private async waitForLogin(
     tabId: number,
     notify: (progress: FetchLatestCsvProgress) => void
   ): Promise<boolean> {
-    if (await this.isLoggedIn(tabId)) {
-      return true;
-    }
-
-    notify({ type: 'progress', state: 'login-wait' });
-    await this.openRakutenPage(tabId);
-
     const deadline = Date.now() + this.loginWaitTimeoutMs;
+    let loginPageOpened = false;
+
     while (Date.now() < deadline) {
-      await sleep(this.loginPollIntervalMs);
-      if (await this.isLoggedIn(tabId)) {
+      const loggedIn = await this.getLoginState(tabId);
+      if (loggedIn === true) {
         return true;
       }
+
+      if (loggedIn === false && !loginPageOpened) {
+        notify({ type: 'progress', state: 'login-wait' });
+        await this.openRakutenPage(tabId);
+        loginPageOpened = true;
+      }
+
+      await sleep(this.loginPollIntervalMs);
     }
     return false;
   }
 
   /**
    * ログイン状態の確認
+   *
+   * コンテンツスクリプトが応答しない場合は判定できないものとして undefined を返す
    */
-  private async isLoggedIn(tabId: number): Promise<boolean> {
+  private async getLoginState(tabId: number): Promise<boolean | undefined> {
     const response = await this.sendToContentScript(tabId, { action: 'check-login-state' });
     if (!isLoginStateResponse(response)) {
-      return false;
+      return undefined;
     }
     return response.loggedIn === true;
   }
@@ -445,7 +464,7 @@ export class ExternalRequestHandler {
  *
  * 楽天証券のドメインと、ページ内で生成されるblob/data URLを受け付ける
  */
-function isCapturableDownloadUrl(url: string): boolean {
+export function isCapturableDownloadUrl(url: string): boolean {
   if (url.startsWith('blob:') || url.startsWith('data:')) {
     return true;
   }

@@ -10,6 +10,7 @@ import type {
 import {
   ExternalRequestHandler,
   isAllowedOrigin,
+  isCapturableDownloadUrl,
   parseFetchLatestCsvRequest,
   readAllowedOrigins,
 } from './externalRequestHandler'
@@ -113,6 +114,16 @@ async function waitForMessage<T extends PostedMessage>(
   throw new Error('メッセージが届きませんでした')
 }
 
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (predicate()) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('条件が成立しませんでした')
+}
+
 function isResult(message: PostedMessage): message is FetchLatestCsvResult {
   return message.type === 'result'
 }
@@ -179,6 +190,16 @@ describe('externalRequestHandler', () => {
         'https://shoken-webapp.pages.dev/*',
         'http://localhost/*',
       ])
+    })
+
+    it('捕捉するダウンロードURLは楽天証券のドメインとblob/dataに限る', () => {
+      expect(isCapturableDownloadUrl('https://www.rakuten-sec.co.jp/csv/a.csv')).toBe(true)
+      expect(isCapturableDownloadUrl('https://member.rakuten-sec.co.jp/csv/a.csv')).toBe(true)
+      expect(isCapturableDownloadUrl('blob:https://www.rakuten-sec.co.jp/1234')).toBe(true)
+      expect(isCapturableDownloadUrl('data:text/csv;base64,aaaa')).toBe(true)
+      expect(isCapturableDownloadUrl('https://example.com/a.csv')).toBe(false)
+      expect(isCapturableDownloadUrl('https://rakuten-sec.co.jp.example.com/a.csv')).toBe(false)
+      expect(isCapturableDownloadUrl('not a url')).toBe(false)
     })
 
     it('許可されないオリジンの接続は受け付けない', async () => {
@@ -354,6 +375,37 @@ describe('externalRequestHandler', () => {
         { kind: 'assetbalance', reason: 'CSVの取得に失敗しました（HTTP 403）' },
       ])
       expect(result.csvs).toEqual([])
+    })
+
+    it('取得中は別の依頼を受け付けない', async () => {
+      let release: (() => void) | undefined
+      const runner = {
+        executeDownloadRequest: vi.fn(async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+          return { success: true, message: '取得完了' }
+        }),
+      }
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+        downloadStartTimeoutMs: 50,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+      await waitUntil(() => runner.executeDownloadRequest.mock.calls.length > 0)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['dividend'] })
+
+      const error = await waitForMessage<ExternalErrorResponse>(
+        posted,
+        (message) => message.type === 'error'
+      )
+      expect(error).toEqual({ type: 'error', error: '別の取得が実行中のため受け付けません' })
+
+      release?.()
     })
   })
 
