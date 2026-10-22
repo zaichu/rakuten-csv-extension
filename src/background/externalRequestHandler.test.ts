@@ -24,6 +24,7 @@ const ALLOWED_ORIGIN = 'https://shoken-webapp.pages.dev'
 const LOCAL_ORIGIN = 'http://localhost:5173'
 const OTHER_ORIGIN = 'https://example.com'
 const RAKUTEN_URL = 'https://www.rakuten-sec.co.jp/web/dividend/'
+const ALLOWED_PATTERNS = ['https://shoken-webapp.pages.dev/*']
 
 type PostedMessage = FetchLatestCsvProgress | FetchLatestCsvResult | ExternalErrorResponse
 
@@ -53,28 +54,50 @@ function createPort(origin: string) {
   return { port, posted, listeners }
 }
 
-function createRunner(responses: Partial<Record<CsvDownloadType, DownloadResponse>> = {}) {
+/**
+ * ハンドラと、ダウンロード手順を実行するランナーを用意する
+ *
+ * ランナーは実際のコンテンツスクリプトと同じく、クリック直前にバックグラウンドへ
+ * 通知してからダウンロードを発生させる
+ */
+function createHandler(
+  responses: Partial<Record<CsvDownloadType, DownloadResponse>> = {},
+  config: {
+    readonly downloadStartTimeoutMs?: number
+    readonly loginWaitTimeoutMs?: number
+    readonly loginPollIntervalMs?: number
+  } = {}
+) {
   const executed: CsvDownloadType[] = []
+
   const runner = {
     executeDownloadRequest: vi.fn(
       async (message: { payload: { selectedOptions: readonly CsvDownloadType[] } }) => {
         const kind = message.payload.selectedOptions[0]
         executed.push(kind)
-        fireDownloadCreated(`https://www.rakuten-sec.co.jp/csv/${kind}.csv`)
+        handler.notifyDownloadWillStart()
+        fireDownloadCreated({ url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv` })
         return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
       }
     ),
   }
-  return { runner, executed }
+
+  const handler = new ExternalRequestHandler({
+    downloadRunner: runner,
+    allowedOrigins: ALLOWED_PATTERNS,
+    ...config,
+  })
+
+  return { handler, runner, executed }
 }
 
-function fireDownloadCreated(url: string): void {
+function fireDownloadCreated(item: { url: string }): void {
   const addListener = chrome.downloads.onCreated.addListener as unknown as {
     mock: { calls: unknown[][] }
   }
   for (const call of addListener.mock.calls) {
-    const listener = call[0] as (item: chrome.downloads.DownloadItem) => void
-    listener({ url } as chrome.downloads.DownloadItem)
+    const listener = call[0] as (created: chrome.downloads.DownloadItem) => void
+    listener(item as unknown as chrome.downloads.DownloadItem)
   }
 }
 
@@ -203,10 +226,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('許可されないオリジンの接続は受け付けない', async () => {
-      const handler = new ExternalRequestHandler({
-        downloadRunner: createRunner().runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler } = createHandler()
       const { port, posted, listeners } = createPort(OTHER_ORIGIN)
 
       handler.handleConnection(port)
@@ -240,10 +260,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('不正な依頼にはエラーを返す', async () => {
-      const handler = new ExternalRequestHandler({
-        downloadRunner: createRunner().runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       handler.handleConnection(port)
@@ -260,11 +277,7 @@ describe('externalRequestHandler', () => {
 
   describe('取得の実行', () => {
     it('5種類を要求された順に取得する', async () => {
-      const { runner, executed } = createRunner()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler, executed } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       handler.handleConnection(port)
@@ -292,11 +305,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('取得したCSVの本文と取得時刻を返す', async () => {
-      const { runner } = createRunner()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       handler.handleConnection(port)
@@ -311,11 +320,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('進行状況を種類ごとに返す', async () => {
-      const { runner } = createRunner()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       handler.handleConnection(port)
@@ -332,12 +337,8 @@ describe('externalRequestHandler', () => {
     })
 
     it('取得に失敗した種類は理由を記録して次へ進む', async () => {
-      const { runner, executed } = createRunner({
+      const { handler, executed } = createHandler({
         dividend: { success: false, error: '表示ステップで失敗: 要素が見つかりませんでした' },
-      })
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -353,11 +354,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('CSV本文の取得に失敗した場合は理由を記録する', async () => {
-      const { runner } = createRunner()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
-      })
+      const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
@@ -389,7 +386,7 @@ describe('externalRequestHandler', () => {
       }
       const handler = new ExternalRequestHandler({
         downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+        allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 50,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -409,9 +406,59 @@ describe('externalRequestHandler', () => {
     })
   })
 
+  describe('ダウンロード開始の待ち受け', () => {
+    it('クリック直前の通知より前のダウンロードは捕捉しない', async () => {
+      const runner = {
+        executeDownloadRequest: vi.fn(async () => {
+          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+          handler.notifyDownloadWillStart()
+          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv' })
+          return { success: true, message: '取得完了' }
+        }),
+      }
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ALLOWED_PATTERNS,
+        downloadStartTimeoutMs: 50,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.failures).toEqual([])
+      expect(result.csvs[0].content).toBe(
+        '本文:https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
+      )
+    })
+
+    it('通知が無い場合はダウンロードを取り逃がす', async () => {
+      const runner = {
+        executeDownloadRequest: vi.fn(async () => {
+          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv' })
+          return { success: true, message: '取得完了' }
+        }),
+      }
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ALLOWED_PATTERNS,
+        downloadStartTimeoutMs: 30,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.failures).toEqual([
+        { kind: 'assetbalance', reason: 'CSVのダウンロード先URLを取得できませんでした' },
+      ])
+    })
+  })
+
   describe('ログイン待ち', () => {
     it('未ログインならログイン待ちを返して取得を続ける', async () => {
-      const { runner, executed } = createRunner()
       let loginChecks = 0
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
@@ -422,9 +469,7 @@ describe('externalRequestHandler', () => {
         callback?.({ success: true, content: '本文' })
       })
 
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+      const { handler, executed } = createHandler({}, {
         loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 500,
       })
@@ -440,7 +485,6 @@ describe('externalRequestHandler', () => {
     })
 
     it('ログインが完了しなければ全種類を失敗として返す', async () => {
-      const { runner, executed } = createRunner()
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: false })
@@ -449,9 +493,7 @@ describe('externalRequestHandler', () => {
         callback?.({ success: true, content: '本文' })
       })
 
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+      const { handler, executed } = createHandler({}, {
         loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 30,
       })
@@ -469,7 +511,6 @@ describe('externalRequestHandler', () => {
     })
 
     it('ログイン状態を判定できない場合はログイン画面を開いて読み込み直す', async () => {
-      const { runner, executed } = createRunner()
       let loginChecks = 0
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
@@ -480,9 +521,7 @@ describe('externalRequestHandler', () => {
         callback?.({ success: true, content: '本文' })
       })
 
-      const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
-        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+      const { handler, executed } = createHandler({}, {
         loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 500,
       })

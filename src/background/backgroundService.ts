@@ -203,6 +203,11 @@ class RakutenCsvBackgroundService {
           response = this.handleGetExtensionState();
           break;
 
+        case 'csv-download-will-start':
+          this.externalRequestHandler.notifyDownloadWillStart();
+          response = { success: true };
+          break;
+
         default:
           response = { success: false, error: '未対応のアクション' };
       }

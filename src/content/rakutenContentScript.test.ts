@@ -244,8 +244,26 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
-  describe('ログイン状態の確認', () => {
-    it('パスワード入力欄があれば未ログインと判定する', async () => {
+  describe('ダウンロード開始の通知', () => {
+    it('CSVダウンロードのクリック前にバックグラウンドへ通知する', async () => {
+      const sendMessageMock = chrome.runtime.sendMessage as unknown as {
+        mockImplementation: (fn: (message: unknown) => unknown) => void
+        mock: { calls: unknown[][] }
+      }
+      sendMessageMock.mockImplementation(() => Promise.resolve({ success: true }))
+
+      const el = document.createElement('button')
+      el.id = 'csv'
+      document.body.appendChild(el)
+      makeInteractable(el)
+
+      const res = await singleStep('download-csv', { csvButton: '#csv' })
+      expect(res.success).toBe(true)
+      expect(sendMessageMock.mock.calls[0][0]).toEqual({ action: 'csv-download-will-start' })
+    })
+  })
+
+  describe('ログイン状態の確認', () => {    it('パスワード入力欄があれば未ログインと判定する', async () => {
       document.body.innerHTML = '<input type="password" />'
       const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
       expect(res).toEqual({ success: true, loggedIn: false })
@@ -299,6 +317,33 @@ describe('rakutenContentScript ステップ実行', () => {
         payload: { url: CSV_URL },
       } as unknown as ChromeMessage)
       expect(res).toEqual({ success: false, error: 'CSVの取得に失敗しました（HTTP 403）' })
+    })
+
+    it('HTMLが返された場合はCSVとして扱わない', async () => {
+      stubFetch(new Response('<html><body>ログイン</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({
+        success: false,
+        error: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）',
+      })
+    })
+
+    it('本文がCSVならContent-Typeがtext/htmlでも扱う', async () => {
+      stubFetch(new Response(shiftJisBytes, {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, content: '銘柄コード,数量\n' })
     })
 
     it('取得に失敗した場合はURLを含まない理由を返す', async () => {

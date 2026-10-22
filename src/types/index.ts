@@ -39,7 +39,8 @@ export type {
   ApplicationMessage,
   ExtensionState,
   PageReadyMessage,
-  GetExtensionStateMessage
+  GetExtensionStateMessage,
+  CsvDownloadWillStartMessage
 } from './extension';
 
 // 楽天証券関連の型

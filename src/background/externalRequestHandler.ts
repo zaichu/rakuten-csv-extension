@@ -1,8 +1,7 @@
 /**
  * 外部ページ(shoken-webapp)からのCSV取得依頼を処理する
  *
- * 接続元のオリジン検査、依頼の検証、ログイン待ち、
- * 種類ごとの取得と進捗通知を担う。
+ * 画面へ返すのはCSVの本文だけで、氏名や口座番号などの個人情報は含めない
  */
 
 import type {
@@ -27,6 +26,18 @@ import { RakutenUtils, sleep } from '../utils';
  */
 export interface CsvDownloadRunner {
   executeDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse>;
+}
+
+/**
+ * ダウンロード開始の待ち受け
+ */
+interface DownloadCapture {
+  /** 捕捉したダウンロード先URL（捕捉できなければ undefined） */
+  readonly url: Promise<string | undefined>;
+  /** 待ち受けを開始する */
+  readonly arm: () => void;
+  /** 待ちを中断する */
+  readonly cancel: () => void;
 }
 
 export interface ExternalRequestHandlerConfig {
@@ -127,6 +138,9 @@ export class ExternalRequestHandler {
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
   private running = false;
+
+  /** ダウンロード開始を待っている取得処理 */
+  private pendingCapture?: DownloadCapture;
 
   constructor(config: ExternalRequestHandlerConfig) {
     this.downloadRunner = config.downloadRunner;
@@ -232,19 +246,26 @@ export class ExternalRequestHandler {
     tabId: number,
     kind: CsvDownloadType
   ): Promise<{ success: true; csv: FetchedCsv } | { success: false; reason: string }> {
-    // クリックで発生するダウンロードのURLを捕捉するため、実行前に待ち受けを準備する
-    const capture = this.captureDownloadUrl();
+    const capture = this.createDownloadCapture();
+    this.pendingCapture = capture;
 
-    const stepResult = await this.downloadRunner.executeDownloadRequest({
-      action: 'download-csv-request',
-      payload: { selectedOptions: [kind], tabId },
-    });
+    let stepResult: DownloadResponse;
+    try {
+      stepResult = await this.downloadRunner.executeDownloadRequest({
+        action: 'download-csv-request',
+        payload: { selectedOptions: [kind], tabId },
+      });
+    } finally {
+      this.pendingCapture = undefined;
+    }
 
     if (!stepResult.success) {
       capture.cancel();
       return { success: false, reason: stepResult.error ?? 'CSVの取得に失敗しました' };
     }
 
+    // クリック直前の通知が届かなかった場合に備えて、待ちを開始する
+    capture.arm();
     const downloadUrl = await capture.url;
     if (!downloadUrl) {
       return { success: false, reason: 'CSVのダウンロード先URLを取得できませんでした' };
@@ -262,17 +283,33 @@ export class ExternalRequestHandler {
   }
 
   /**
+   * コンテンツスクリプトがCSVダウンロードのクリック直前に知らせる
+   *
+   * クリックの直前まで待ち受けを開始しないことで、
+   * 同時に別のダウンロードが始まっても取り違えないようにする
+   */
+  notifyDownloadWillStart(): void {
+    this.pendingCapture?.arm();
+  }
+
+  /**
    * ダウンロードの開始を待ち、URLを捕捉する
    */
-  private captureDownloadUrl(): { readonly url: Promise<string | undefined>; readonly cancel: () => void } {
+  private createDownloadCapture(): DownloadCapture {
     let resolveUrl: (url: string | undefined) => void = () => {};
     const url = new Promise<string | undefined>((resolve) => {
       resolveUrl = resolve;
     });
+    let armed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const finish = (value: string | undefined): void => {
-      chrome.downloads.onCreated.removeListener(listener);
-      clearTimeout(timer);
+      if (armed) {
+        chrome.downloads.onCreated.removeListener(listener);
+      }
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
       resolveUrl(value);
     };
 
@@ -283,10 +320,18 @@ export class ExternalRequestHandler {
       finish(item.url);
     };
 
-    const timer = setTimeout(() => finish(undefined), this.downloadStartTimeoutMs);
-    chrome.downloads.onCreated.addListener(listener);
-
-    return { url, cancel: () => finish(undefined) };
+    return {
+      url,
+      arm: () => {
+        if (armed) {
+          return;
+        }
+        armed = true;
+        chrome.downloads.onCreated.addListener(listener);
+        timer = setTimeout(() => finish(undefined), this.downloadStartTimeoutMs);
+      },
+      cancel: () => finish(undefined),
+    };
   }
 
   /**
@@ -473,6 +518,10 @@ export function isCapturableDownloadUrl(url: string): boolean {
   if (url.startsWith('blob:') || url.startsWith('data:')) {
     return true;
   }
+  return isRakutenDomainUrl(url);
+}
+
+function isRakutenDomainUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);
     const host = hostname.toLowerCase();

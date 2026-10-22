@@ -227,9 +227,17 @@ export interface GetExtensionStateMessage extends ChromeMessage {
 }
 
 /**
+ * CSVダウンロードのクリック直前 知らせるメッセージ
+ */
+export interface CsvDownloadWillStartMessage extends ChromeMessage {
+  readonly action: 'csv-download-will-start';
+}
+
+/**
  * バックグラウンドが受け取るメッセージ
  */
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | GetExtensionStateMessage;
+  | GetExtensionStateMessage
+  | CsvDownloadWillStartMessage;

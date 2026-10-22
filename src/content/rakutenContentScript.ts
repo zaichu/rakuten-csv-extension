@@ -10,7 +10,7 @@ import type {
   CsvDownloadStep,
   CsvSelectors
 } from '../types';
-import { RakutenUtils, DomUtils, decodeCsvBytes } from '../utils';
+import { RakutenUtils, DomUtils, decodeCsvBytes, withTimeout } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -19,6 +19,7 @@ import { RakutenUtils, DomUtils, decodeCsvBytes } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private readonly elementTimeout = 5000;
+  private readonly notifyTimeout = 2000;
 
   private constructor() {
     this.initialize();
@@ -132,7 +133,14 @@ class RakutenCsvExtension {
       }
 
       const buffer = await response.arrayBuffer();
-      return { success: true, content: decodeCsvBytes(new Uint8Array(buffer)) };
+      const content = decodeCsvBytes(new Uint8Array(buffer));
+
+      // 期限切れのURLはログイン画面(HTML)を返すため、CSV以外を失敗として扱う
+      if (isHtmlContent(response.headers.get('content-type'), content)) {
+        return { success: false, error: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）' };
+      }
+
+      return { success: true, content };
     } catch {
       // URLやURIが混ざらないようエラーの詳細は返さない
       return { success: false, error: 'CSVの取得に失敗しました' };
@@ -218,7 +226,10 @@ class RakutenCsvExtension {
         return this.runClickStep(selectors.displayButton, 'データ表示', { requireInteractable: true });
 
       case 'download-csv':
-        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', { requireInteractable: true });
+        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
+          requireInteractable: true,
+          beforeClick: () => this.notifyDownloadWillStart()
+        });
 
       default:
         return { 
@@ -238,7 +249,7 @@ class RakutenCsvExtension {
   private async runClickStep(
     selector: string | undefined,
     actionName: string,
-    options?: { requireInteractable?: boolean }
+    options?: { requireInteractable?: boolean; beforeClick?: () => Promise<void> }
   ): Promise<DownloadResponse> {
     if (!selector) {
       return { success: false, error: `${actionName}のセレクターが指定されていません` };
@@ -247,7 +258,30 @@ class RakutenCsvExtension {
     const element = options?.requireInteractable
       ? await this.findElement(selector, this.elementTimeout, true)
       : await this.findElement(selector);
+
+    if (options?.beforeClick) {
+      await options.beforeClick();
+    }
+
     return this.clickElementSafely(element, actionName);
+  }
+
+  /**
+   * CSVダウンロードのクリック直前にバックグラウンドへ知らせる
+   *
+   * バックグラウンドが待ち受けを準備してからクリックすることで、
+   * 同時に別のダウンロードが始まっても取り違えないようにする
+   */
+  private async notifyDownloadWillStart(): Promise<void> {
+    try {
+      await withTimeout(
+        Promise.resolve(chrome.runtime.sendMessage({ action: 'csv-download-will-start' })),
+        this.notifyTimeout,
+        'ダウンロード開始の通知がタイムアウトしました'
+      );
+    } catch {
+      // 通知できなくてもクリックは続行する（取得は失敗する）
+    }
   }
 
   /**
@@ -351,6 +385,19 @@ class RakutenCsvExtension {
       console.warn('ページ準備完了通知でエラー:', error);
     }
   }
+}
+
+/**
+ * 応答がCSVではなくHTMLかどうか
+ *
+ * ログイン画面のHTMLをCSVとして返すと誤ったデータを取り込むため、判別する
+ */
+function isHtmlContent(contentType: string | null, content: string): boolean {
+  if (content.trimStart().startsWith('<')) {
+    return true;
+  }
+  // 本文が空なのにHTML扱いならCSVとして扱わない
+  return content.trim() === '' && contentType?.toLowerCase().includes('text/html') === true;
 }
 
 /**
