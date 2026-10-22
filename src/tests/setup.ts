@@ -25,6 +25,10 @@ const mockChrome = {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },
+    onConnectExternal: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
     onInstalled: {
       addListener: vi.fn(),
       removeListener: vi.fn(),
@@ -34,11 +38,17 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
     sendMessage: vi.fn(),
+    getManifest: vi.fn(() => ({
+      externally_connectable: {
+        matches: ['https://shoken-webapp.pages.dev/*', 'http://localhost/*'],
+      },
+    })),
   },
   tabs: {
     query: vi.fn(),
     sendMessage: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     get: vi.fn(),
     onUpdated: {
       addListener: vi.fn(),
@@ -59,11 +69,21 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
   },
+  extension: {
+    isAllowedFileSchemeAccess: vi.fn(async () => true),
+  },
   downloads: {
     onCreated: {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },
+    onChanged: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    search: vi.fn(async () => []),
+    removeFile: vi.fn(async () => undefined),
+    erase: vi.fn(async () => []),
   },
 } as unknown as typeof chrome
 

@@ -95,7 +95,7 @@ export class DownloadStepExecutor {
    * CSVダウンロードリクエスト処理
    */
   async executeDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse> {
-    const { selectedOptions, tabId } = message.payload;
+    const { selectedOptions, tabId, captureDownloadStart } = message.payload;
 
     this.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
 
@@ -110,7 +110,7 @@ export class DownloadStepExecutor {
 
       // ダウンロード処理を順次実行
       for (const downloadType of selectedOptions) {
-        const result = await this.processCsvDownload(targetTabId, downloadType);
+        const result = await this.processCsvDownload(targetTabId, downloadType, captureDownloadStart);
 
         if (!result.success) {
           return result;
@@ -136,7 +136,8 @@ export class DownloadStepExecutor {
    */
   private async processCsvDownload(
     tabId: number,
-    downloadType: CsvDownloadType
+    downloadType: CsvDownloadType,
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     const config = RakutenUtils.getCsvDownloadConfig(downloadType);
 
@@ -149,7 +150,7 @@ export class DownloadStepExecutor {
 
     this.log('ダウンロード設定:', config);
 
-    return this.executeDownloadSequence(tabId, config);
+    return this.executeDownloadSequence(tabId, config, captureDownloadStart);
   }
 
   /**
@@ -187,7 +188,8 @@ export class DownloadStepExecutor {
    */
   private async executeDownloadSequence(
     tabId: number,
-    config: CsvDownloadConfig
+    config: CsvDownloadConfig,
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
     const groups = this.groupSteps(steps);
@@ -208,7 +210,7 @@ export class DownloadStepExecutor {
         ? this.waitForDownloadStart(this.downloadStartTimeout)
         : null;
 
-      const result = await this.executeStepsWithRetry(tabId, steps, selectors);
+      const result = await this.executeStepsWithRetry(tabId, steps, selectors, captureDownloadStart);
 
       if (!result.success) {
         const failedStep = result.step ?? steps[steps.length - 1];
@@ -234,14 +236,15 @@ export class DownloadStepExecutor {
   private async executeStepsWithRetry(
     tabId: number,
     steps: readonly CsvDownloadStep[],
-    selectors: CsvDownloadConfig['selectors']
+    selectors: CsvDownloadConfig['selectors'],
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     let lastError: string = '';
     let lastStep: CsvDownloadStep | undefined;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const result = await this.executeSteps(tabId, steps, selectors);
+        const result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
 
         if (result.success) {
           return result;
@@ -276,13 +279,15 @@ export class DownloadStepExecutor {
   private executeSteps(
     tabId: number,
     steps: readonly CsvDownloadStep[],
-    selectors: CsvDownloadConfig['selectors']
+    selectors: CsvDownloadConfig['selectors'],
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     const instruction: CsvDownloadStepsInstruction = {
       action: 'execute-csv-download-steps',
       payload: {
         downloadSteps: steps,
-        selectors: selectors
+        selectors: selectors,
+        captureDownloadStart: captureDownloadStart
       }
     };
 

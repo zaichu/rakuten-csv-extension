@@ -1,13 +1,15 @@
 import type {
   CsvDownloadStepsInstruction,
   ContentScriptMessage,
+  ContentScriptResponse,
   DownloadResponse,
+  LoginStateResponse,
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
   CsvSelectors
 } from '../types';
-import { RakutenUtils, DomUtils } from '../utils';
+import { RakutenUtils, DomUtils, withTimeout } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -16,6 +18,7 @@ import { RakutenUtils, DomUtils } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private readonly elementTimeout = 5000;
+  private readonly notifyTimeout = 2000;
 
   private constructor() {
     this.initialize();
@@ -52,7 +55,8 @@ class RakutenCsvExtension {
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
       (message: ContentScriptMessage, _sender, sendResponse) => {
-        console.log('コンテンツスクリプトでメッセージを受信:', message);
+        // 取得URLなどが記録されないよう action のみログに残す
+        console.log('コンテンツスクリプトでメッセージを受信:', message.action);
 
         // 非同期処理を適切に処理
         this.handleMessage(message)
@@ -76,10 +80,13 @@ class RakutenCsvExtension {
   /**
    * メッセージを処理
    */
-  private async handleMessage(message: ContentScriptMessage): Promise<DownloadResponse> {
+  private async handleMessage(message: ContentScriptMessage): Promise<ContentScriptResponse> {
     switch (message.action) {
       case 'execute-csv-download-steps':
         return this.handleCsvDownloadStepsExecution(message);
+
+      case 'check-login-state':
+        return this.handleCheckLoginState();
 
       case 'extension-updated':
         this.handleExtensionUpdate();
@@ -91,6 +98,22 @@ class RakutenCsvExtension {
           error: `未対応のアクション: ${(message as ChromeMessage).action}`
         };
     }
+  }
+
+  /**
+   * ログイン状態の確認
+   *
+   * 氏名や口座番号などの個人情報は読まず、ログイン画面かどうかだけを見る
+   */
+  private handleCheckLoginState(): LoginStateResponse {
+    return { success: true, loggedIn: !this.isLoginScreen() };
+  }
+
+  private isLoginScreen(): boolean {
+    if (document.querySelector('input[type="password"]')) {
+      return true;
+    }
+    return /\/login/i.test(window.location.pathname);
   }
 
   /**
@@ -114,7 +137,7 @@ class RakutenCsvExtension {
   private async handleCsvDownloadStepsExecution(
     message: CsvDownloadStepsInstruction
   ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors } = message.payload;
+    const { downloadSteps, selectors, captureDownloadStart } = message.payload;
 
     console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
 
@@ -129,7 +152,7 @@ class RakutenCsvExtension {
 
     for (const step of downloadSteps) {
       try {
-        const result = await this.executeDownloadStep(step, selectors);
+        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
         console.log(`ステップ ${step} 完了:`, result);
 
         if (!result.success) {
@@ -155,8 +178,9 @@ class RakutenCsvExtension {
    * ダウンロードステップを実行
    */
   private async executeDownloadStep(
-    step: CsvDownloadStep, 
-    selectors: CsvSelectors
+    step: CsvDownloadStep,
+    selectors: CsvSelectors,
+    captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
     switch (step) {
       case 'navigate-to-page':
@@ -172,7 +196,10 @@ class RakutenCsvExtension {
         return this.runClickStep(selectors.displayButton, 'データ表示', { requireInteractable: true });
 
       case 'download-csv':
-        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', { requireInteractable: true });
+        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
+          requireInteractable: true,
+          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined
+        });
 
       default:
         return { 
@@ -192,7 +219,7 @@ class RakutenCsvExtension {
   private async runClickStep(
     selector: string | undefined,
     actionName: string,
-    options?: { requireInteractable?: boolean }
+    options?: { requireInteractable?: boolean; beforeClick?: () => Promise<void> }
   ): Promise<DownloadResponse> {
     if (!selector) {
       return { success: false, error: `${actionName}のセレクターが指定されていません` };
@@ -201,7 +228,30 @@ class RakutenCsvExtension {
     const element = options?.requireInteractable
       ? await this.findElement(selector, this.elementTimeout, true)
       : await this.findElement(selector);
+
+    if (options?.beforeClick) {
+      await options.beforeClick();
+    }
+
     return this.clickElementSafely(element, actionName);
+  }
+
+  /**
+   * CSVダウンロードのクリック直前にバックグラウンドへ知らせる
+   *
+   * バックグラウンドが待ち受けを準備してからクリックすることで、
+   * 同時に別のダウンロードが始まっても取り違えないようにする
+   */
+  private async notifyDownloadWillStart(): Promise<void> {
+    try {
+      await withTimeout(
+        Promise.resolve(chrome.runtime.sendMessage({ action: 'csv-download-will-start' })),
+        this.notifyTimeout,
+        'ダウンロード開始の通知がタイムアウトしました'
+      );
+    } catch {
+      // 通知できなくてもクリックは続行する（取得は失敗する）
+    }
   }
 
   /**

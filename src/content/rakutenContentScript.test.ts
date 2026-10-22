@@ -243,4 +243,61 @@ describe('rakutenContentScript ステップ実行', () => {
       })
     })
   })
+
+  describe('ダウンロード開始の通知', () => {
+    function stubRuntimeSendMessage() {
+      const sendMessageMock = chrome.runtime.sendMessage as unknown as {
+        mockImplementation: (fn: (message: unknown) => unknown) => void
+        mock: { calls: unknown[][] }
+      }
+      sendMessageMock.mockImplementation(() => Promise.resolve({ success: true }))
+      return sendMessageMock
+    }
+
+    async function clickCsvButton(captureDownloadStart?: boolean) {
+      const el = document.createElement('button')
+      el.id = 'csv'
+      document.body.appendChild(el)
+      makeInteractable(el)
+
+      return sendMessage({
+        action: 'execute-csv-download-steps',
+        payload: {
+          downloadSteps: ['download-csv'],
+          selectors: { csvButton: '#csv' },
+          captureDownloadStart,
+        },
+      } as unknown as ChromeMessage)
+    }
+
+    it('取得待ちの依頼ではクリック前にバックグラウンドへ通知する', async () => {
+      const sendMessageMock = stubRuntimeSendMessage()
+
+      const res = await clickCsvButton(true)
+      expect(res.success).toBe(true)
+      expect(sendMessageMock.mock.calls[0][0]).toEqual({ action: 'csv-download-will-start' })
+    })
+
+    it('通常のダウンロードでは通知しない', async () => {
+      const sendMessageMock = stubRuntimeSendMessage()
+
+      const res = await clickCsvButton()
+      expect(res.success).toBe(true)
+      expect(sendMessageMock.mock.calls).toHaveLength(0)
+    })
+  })
+
+  describe('ログイン状態の確認', () => {
+    it('パスワード入力欄があれば未ログインと判定する', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: false })
+    })
+
+    it('パスワード入力欄が無ければログイン済みと判定する', async () => {
+      document.body.innerHTML = '<div>保有銘柄</div>'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: true })
+    })
+  })
 })

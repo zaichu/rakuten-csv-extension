@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>保有銘柄（モック）</title>
+  </head>
+  <body>
+    <h1>保有銘柄</h1>
+    <table>
+      <tbody>
+        <tr>
+          <td>1234</td>
+          <td>10</td>
+          <td>2500.5</td>
+        </tr>
+      </tbody>
+    </table>
+    <a id="csv-button" download="rakuten_assetbalance.csv" onclick="csvOutput();">CSVで保存</a>
+    <script>
+      // 実際の楽天証券と同じく Shift_JIS のCSVを返す
+      function csvOutput() {}
+
+      var csvBytes = new Uint8Array([
+        150, 193, 149, 191, 131, 82, 129, 91, 131, 104, 44, 144, 148, 151, 202, 44, 142, 230, 147, 190,
+        146, 80, 137, 191, 10, 49, 50, 51, 52, 44, 49, 48, 44, 50, 53, 48, 48, 46, 53, 10,
+      ]);
+      var csvUrl = URL.createObjectURL(new Blob([csvBytes], { type: 'text/csv' }));
+      document.getElementById('csv-button').href = csvUrl;
+    </script>
+  </body>
+</html>

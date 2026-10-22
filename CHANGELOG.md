@@ -4,6 +4,17 @@
 
 バージョン番号は [セマンティックバージョニング](https://semver.org/) に従います。
 
+## [2.0.44] - 2026-10-20
+
+### 追加
+- ダウンロードできるデータに「投資信託の保有残高」を追加（ポートフォリオに2種類目の選択肢）
+
+### 変更
+- MIT LICENSE を追加
+- 内部の整理・安定性の改善
+  - 検証済みのデッドコードを削除し、ドキュメントを実装に同期
+  - 開発依存の脆弱性を解消、依存パッケージの更新
+
 ## [2.0.43] - 2026-10-13
 
 ### 変更
@@ -106,7 +117,8 @@
 
 ## リンク形式の説明
 
-- [2.0.43]: 現在のバージョン
+- [2.0.44]: 現在のバージョン
+- [2.0.43]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.43
 - [2.0.3]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.3
 - [2.0.2]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.2
 - [2.0.1]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.1
