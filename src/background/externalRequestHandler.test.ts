@@ -467,5 +467,34 @@ describe('externalRequestHandler', () => {
         { kind: 'dividend', reason: 'ログインが完了しませんでした' },
       ])
     })
+
+    it('ログイン状態を判定できない場合はログイン画面を開いて読み込み直す', async () => {
+      const { runner, executed } = createRunner()
+      let loginChecks = 0
+      setTabsSendMessageImpl((_tabId, message, callback) => {
+        if (message.action === 'check-login-state') {
+          loginChecks += 1
+          callback?.(loginChecks === 1 ? undefined : { success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true, content: '本文' })
+      })
+
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ['https://shoken-webapp.pages.dev/*'],
+        loginPollIntervalMs: 5,
+        loginWaitTimeoutMs: 500,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(vi.mocked(chrome.tabs.update).mock.calls.length).toBeGreaterThan(0)
+      expect(executed).toEqual(['assetbalance'])
+      expect(result.csvs).toHaveLength(1)
+    })
   })
 })

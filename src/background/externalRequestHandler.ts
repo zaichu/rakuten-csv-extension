@@ -313,8 +313,8 @@ export class ExternalRequestHandler {
   /**
    * ログイン完了を待つ
    *
-   * コンテンツスクリプトが準備できていない状態と未ログインを区別し、
-   * 判定できない間はログイン画面を開かずに待ち続ける
+   * コンテンツスクリプトが応答しない場合は判断できないものとして扱い、
+   * ログイン画面を開いて読み込み直してから判定し直す
    */
   private async waitForLogin(
     tabId: number,
@@ -322,6 +322,7 @@ export class ExternalRequestHandler {
   ): Promise<boolean> {
     const deadline = Date.now() + this.loginWaitTimeoutMs;
     let loginPageOpened = false;
+    let notified = false;
 
     while (Date.now() < deadline) {
       const loggedIn = await this.getLoginState(tabId);
@@ -329,8 +330,12 @@ export class ExternalRequestHandler {
         return true;
       }
 
-      if (loggedIn === false && !loginPageOpened) {
+      if (loggedIn === false && !notified) {
         notify({ type: 'progress', state: 'login-wait' });
+        notified = true;
+      }
+
+      if (!loginPageOpened) {
         await this.openRakutenPage(tabId);
         loginPageOpened = true;
       }
