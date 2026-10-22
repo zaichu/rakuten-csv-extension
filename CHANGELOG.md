@@ -4,6 +4,20 @@
 
 バージョン番号は [セマンティックバージョニング](https://semver.org/) に従います。
 
+## [2.0.45] - 2026-10-23
+
+### 追加
+- ダウンロードされたCSVファイルを直接読み取るようにし、URL再取得を廃止（`file:///*` ホスト権限が必要）
+- 画面(shoken-webapp / localhost)からCSV本文を取得できるようにする（`externally_connectable` を追加）
+
+### 変更
+- 依存パッケージの更新（React 19.3.1、Playwright 1.64.1、Vitest 5.0.5、ESLint 10.13.0 ほか）
+- TypeScript を 7.0.2 に更新（@typescript/native 採用）
+
+### 内部の整理・安定性の改善
+- ダウンロード完了ファイルの捕捉・検査・読み取り・削除を実装
+- 外部ページからの取得依頼に対する送信元検査・同時実行制御・ログイン判定の区別を強化
+
 ## [2.0.44] - 2026-10-20
 
 ### 追加
@@ -117,7 +131,8 @@
 
 ## リンク形式の説明
 
-- [2.0.44]: 現在のバージョン
+- [2.0.45]: 現在のバージョン
+- [2.0.44]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.44
 - [2.0.43]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.43
 - [2.0.3]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.3
 - [2.0.2]: https://github.com/zaichu6/rakuten-csv-extension/releases/tag/v2.0.2
