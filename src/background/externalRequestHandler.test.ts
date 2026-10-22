@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { readFileSync } from 'fs'
+import manifestRaw from '../../manifest.json?raw'
 import type {
   CsvDownloadType,
   DownloadResponse,
@@ -167,7 +167,7 @@ describe('externalRequestHandler', () => {
     })
 
     it('manifest の externally_connectable は許可された2つだけ', () => {
-      const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'))
+      const manifest = JSON.parse(manifestRaw)
       expect(manifest.externally_connectable.matches).toEqual([
         'https://shoken-webapp.pages.dev/*',
         'http://localhost/*',
