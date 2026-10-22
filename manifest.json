@@ -36,6 +36,12 @@
     "host_permissions": [
         "https://*.rakuten-sec.co.jp/*"
     ],
+    "externally_connectable": {
+        "matches": [
+            "https://shoken-webapp.pages.dev/*",
+            "http://localhost/*"
+        ]
+    },
     "icons": {
         "16": "assets/chrome-web-store/store-icon-128.png",
         "48": "assets/chrome-web-store/store-icon-128.png",

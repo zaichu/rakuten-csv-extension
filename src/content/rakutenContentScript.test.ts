@@ -243,4 +243,141 @@ describe('rakutenContentScript ステップ実行', () => {
       })
     })
   })
+
+  describe('ダウンロード開始の通知', () => {
+    function stubRuntimeSendMessage() {
+      const sendMessageMock = chrome.runtime.sendMessage as unknown as {
+        mockImplementation: (fn: (message: unknown) => unknown) => void
+        mock: { calls: unknown[][] }
+      }
+      sendMessageMock.mockImplementation(() => Promise.resolve({ success: true }))
+      return sendMessageMock
+    }
+
+    async function clickCsvButton(captureDownloadStart?: boolean) {
+      const el = document.createElement('button')
+      el.id = 'csv'
+      document.body.appendChild(el)
+      makeInteractable(el)
+
+      return sendMessage({
+        action: 'execute-csv-download-steps',
+        payload: {
+          downloadSteps: ['download-csv'],
+          selectors: { csvButton: '#csv' },
+          captureDownloadStart,
+        },
+      } as unknown as ChromeMessage)
+    }
+
+    it('取得待ちの依頼ではクリック前にバックグラウンドへ通知する', async () => {
+      const sendMessageMock = stubRuntimeSendMessage()
+
+      const res = await clickCsvButton(true)
+      expect(res.success).toBe(true)
+      expect(sendMessageMock.mock.calls[0][0]).toEqual({ action: 'csv-download-will-start' })
+    })
+
+    it('通常のダウンロードでは通知しない', async () => {
+      const sendMessageMock = stubRuntimeSendMessage()
+
+      const res = await clickCsvButton()
+      expect(res.success).toBe(true)
+      expect(sendMessageMock.mock.calls).toHaveLength(0)
+    })
+  })
+
+  describe('ログイン状態の確認', () => {
+    it('パスワード入力欄があれば未ログインと判定する', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: false })
+    })
+
+    it('パスワード入力欄が無ければログイン済みと判定する', async () => {
+      document.body.innerHTML = '<div>保有銘柄</div>'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: true })
+    })
+  })
+
+  describe('CSV本文の取得', () => {
+    const CSV_URL = 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
+
+    // "銘柄コード,数量\n" の Shift_JIS 表現
+    const shiftJisBytes = new Uint8Array([
+      0x96, 0xc1, 0x95, 0xbf, 0x83, 0x52, 0x81, 0x5b, 0x83, 0x68, 0x2c, 0x90, 0x94, 0x97, 0xca,
+      0x0a,
+    ])
+
+    function stubFetch(response: Response | Error): void {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          if (response instanceof Error) {
+            throw response
+          }
+          return response
+        })
+      )
+    }
+
+    it('Cookie 付きで取得して本文を返す', async () => {
+      const fetchMock = vi.fn(async () => new Response(shiftJisBytes, { status: 200 }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+
+      expect(res).toEqual({ success: true, content: '銘柄コード,数量\n' })
+      expect(fetchMock).toHaveBeenCalledWith(CSV_URL, { credentials: 'include' })
+    })
+
+    it('HTTP エラーの場合は理由を返す', async () => {
+      stubFetch(new Response('', { status: 403 }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: false, error: 'CSVの取得に失敗しました（HTTP 403）' })
+    })
+
+    it('HTMLが返された場合はCSVとして扱わない', async () => {
+      stubFetch(new Response('<html><body>ログイン</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({
+        success: false,
+        error: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）',
+      })
+    })
+
+    it('本文がCSVならContent-Typeがtext/htmlでも扱う', async () => {
+      stubFetch(new Response(shiftJisBytes, {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, content: '銘柄コード,数量\n' })
+    })
+
+    it('取得に失敗した場合はURLを含まない理由を返す', async () => {
+      stubFetch(new Error('network error'))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: false, error: 'CSVの取得に失敗しました' })
+    })
+  })
 })

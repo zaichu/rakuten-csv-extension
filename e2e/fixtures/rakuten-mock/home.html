@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>楽天証券 ホーム（モック）</title>
+  </head>
+  <body>
+    <h1>楽天証券 ホーム（モック）</h1>
+    <ul>
+      <li>
+        <a
+          data-ratid="mem_pc_mymenu_jp-possess-lst"
+          href="https://www.rakuten-sec.co.jp/web/jp/stock/possess/list.html"
+          onclick="ass_jp_stk_possess_lst.do();"
+          >保有銘柄</a
+        >
+      </li>
+    </ul>
+    <script>
+      window.ass_jp_stk_possess_lst = {
+        do: function () {
+          location.href = 'https://www.rakuten-sec.co.jp/web/jp/stock/possess/list.html';
+        },
+      };
+    </script>
+  </body>
+</html>

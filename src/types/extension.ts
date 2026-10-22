@@ -37,6 +37,12 @@ export interface CsvDownloadMessage extends ChromeMessage {
   readonly payload: {
     readonly selectedOptions: ReadonlyArray<CsvDownloadType>;
     readonly tabId?: number;
+    /**
+     * CSVダウンロードのクリック直前にバックグラウンドへ通知するか
+     *
+     * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
+     */
+    readonly captureDownloadStart?: boolean;
   };
 }
 
@@ -50,6 +56,7 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
   readonly payload: {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
+    readonly captureDownloadStart?: boolean;
   };
 }
 
@@ -61,11 +68,30 @@ export interface ExtensionUpdatedMessage extends ChromeMessage {
 }
 
 /**
+ * ログイン状態の確認指示
+ */
+export interface CheckLoginStateInstruction extends ChromeMessage {
+  readonly action: 'check-login-state';
+}
+
+/**
+ * CSV本文の取得指示
+ */
+export interface FetchCsvContentInstruction extends ChromeMessage {
+  readonly action: 'fetch-csv-content';
+  readonly payload: {
+    readonly url: string;
+  };
+}
+
+/**
  * コンテンツスクリプトが受け取るメッセージ
  */
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
-  | ExtensionUpdatedMessage;
+  | ExtensionUpdatedMessage
+  | CheckLoginStateInstruction
+  | FetchCsvContentInstruction;
 
 /**
  * ダウンロードレスポンス
@@ -75,6 +101,86 @@ export interface DownloadResponse {
   readonly message?: string;
   readonly error?: string;
   readonly step?: CsvDownloadStep;
+}
+
+/**
+ * ログイン状態の確認結果
+ */
+export interface LoginStateResponse {
+  readonly success: boolean;
+  readonly loggedIn?: boolean;
+  readonly error?: string;
+}
+
+/**
+ * CSV本文の取得結果
+ */
+export interface CsvContentResponse {
+  readonly success: boolean;
+  readonly content?: string;
+  readonly error?: string;
+}
+
+/**
+ * コンテンツスクリプトの応答
+ */
+export type ContentScriptResponse = DownloadResponse | LoginStateResponse | CsvContentResponse;
+
+/**
+ * 画面(shoken-webapp)から届くCSV取得依頼
+ */
+export interface FetchLatestCsvRequest {
+  readonly type: 'fetchLatestCsv';
+  readonly kinds: readonly CsvDownloadType[];
+}
+
+/**
+ * 取得の進行状況
+ */
+export type FetchLatestCsvProgressState = 'login-wait' | 'fetching' | 'completed' | 'failed';
+
+/**
+ * 画面へ返す進行状況
+ */
+export interface FetchLatestCsvProgress {
+  readonly type: 'progress';
+  readonly state: FetchLatestCsvProgressState;
+  readonly kind?: CsvDownloadType;
+  readonly reason?: string;
+}
+
+/**
+ * 取得できたCSV
+ */
+export interface FetchedCsv {
+  readonly kind: CsvDownloadType;
+  readonly content: string;
+  readonly fetchedAt: string;
+}
+
+/**
+ * 取得に失敗した種類と理由
+ */
+export interface FetchLatestCsvFailure {
+  readonly kind: CsvDownloadType;
+  readonly reason: string;
+}
+
+/**
+ * 取得結果
+ */
+export interface FetchLatestCsvResult {
+  readonly type: 'result';
+  readonly csvs: readonly FetchedCsv[];
+  readonly failures: readonly FetchLatestCsvFailure[];
+}
+
+/**
+ * 受け付けなかった依頼に対する応答
+ */
+export interface ExternalErrorResponse {
+  readonly type: 'error';
+  readonly error: string;
 }
 
 /**
@@ -128,9 +234,17 @@ export interface GetExtensionStateMessage extends ChromeMessage {
 }
 
 /**
+ * CSVダウンロードのクリック直前 知らせるメッセージ
+ */
+export interface CsvDownloadWillStartMessage extends ChromeMessage {
+  readonly action: 'csv-download-will-start';
+}
+
+/**
  * バックグラウンドが受け取るメッセージ
  */
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | GetExtensionStateMessage;
+  | GetExtensionStateMessage
+  | CsvDownloadWillStartMessage;

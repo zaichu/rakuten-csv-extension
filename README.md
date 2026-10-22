@@ -78,6 +78,32 @@
 | 実現損益 | 国内株式 | `rakuten_domesticstock_YYYYMMDD.csv` |
 | 実現損益 | 投資信託 | `rakuten_mutualfund_YYYYMMDD.csv` |
 
+### 画面(shoken-webapp)からの取得
+
+拡張機能は、指定したWebページからの依頼を受け付けてCSVの本文(ファイルではなく中身)を返します。
+接続を許すオリジンは `https://shoken-webapp.pages.dev` と `http://localhost`(ローカル確認用)だけで、
+background 側でも送信元のオリジンを検査します。
+
+画面のコンソールから依頼する例です(拡張機能IDは `chrome://extensions/` で確認できます)。
+
+```js
+const port = chrome.runtime.connect('<拡張機能ID>');
+port.onMessage.addListener((message) => console.log(message));
+port.postMessage({ type: 'fetchLatestCsv', kinds: ['assetbalance', 'dividend'] });
+```
+
+| 方向 | メッセージ |
+|------|------------|
+| 画面 → 拡張機能 | `{ type: 'fetchLatestCsv', kinds: ['assetbalance', ...] }` |
+| 拡張機能 → 画面 | `{ type: 'progress', state: 'login-wait' \| 'fetching' \| 'completed' \| 'failed', kind, reason }` |
+| 拡張機能 → 画面 | `{ type: 'result', csvs: [{ kind, content, fetchedAt }], failures: [{ kind, reason }] }` |
+| 拡張機能 → 画面 | `{ type: 'error', error }`（受け付けない依頼の場合） |
+
+- 未ログインならログイン画面を開き、ログインの完了を待ちます（`state: 'login-wait'`）
+- 返るのはCSVの本文だけです。氏名・口座番号などの個人情報を含んだログやエラーは出しません
+- 文字コードはUTF-8として解釈し、解釈できない場合のみShift_JISとして解釈します
+- CSVの本文は「CSVで保存」のクリック直前に待ち受けを開始して取得するため、同時に別のダウンロードが始まっても取り違えません(ポップアップからのダウンロードなど、対象タブ以外の操作では待ち受けを開始しません)
+
 ## 🔧 技術仕様
 
 ### アーキテクチャ
@@ -119,7 +145,8 @@ src/
 │   └── rakutenContentScript.ts # 楽天証券サイト操作
 ├── background/              # バックグラウンドサービス
 │   ├── backgroundService.ts # イベント配線・メッセージルーティング・タブ状態
-│   └── downloadStepExecutor.ts # ダウンロードステップ実行
+│   ├── downloadStepExecutor.ts # ダウンロードステップ実行
+│   └── externalRequestHandler.ts # 外部ページ(shoken-webapp)からの取得依頼
 ├── config/                  # 設定
 │   └── csvDownloadConfigs.ts # CSVダウンロード設定
 ├── types/                   # TypeScript型定義
@@ -129,14 +156,17 @@ src/
 ├── utils/                   # ユーティリティ
 │   ├── rakutenUtils.ts     # 楽天証券固有処理
 │   ├── domUtils.ts         # DOM操作ヘルパー
-│   └── asyncUtils.ts       # 非同期ヘルパー
+│   ├── asyncUtils.ts       # 非同期ヘルパー
+│   └── csvDecoder.ts       # CSVの文字コード判定
 ├── styles/
 │   └── tailwind.css        # Tailwind CSS
 └── tests/
     └── setup.ts            # Vitestセットアップ(chrome APIモック)
 e2e/
 ├── smoke.spec.ts           # Playwrightスモークテスト
-└── fund-possess.spec.ts    # 投資信託の保有残高オプションのE2Eテスト
+├── fund-possess.spec.ts    # 投資信託の保有残高オプションのE2Eテスト
+├── fetch-latest-csv.spec.ts # 画面からのCSV本文取得のE2Eテスト
+└── fixtures/rakuten-mock/  # 楽天証券の疑似ページ(E2E用)
 ```
 
 ## 🛡️ セキュリティとプライバシー
@@ -154,6 +184,7 @@ e2e/
 | `tabs` | 楽天証券ページの操作と新しいタブでの処理 |
 | `downloads` | CSVダウンロードの開始を検知 |
 | `host_permissions` | 楽天証券ドメインでのみ動作 |
+| `externally_connectable` | 指定したWebページ(shoken-webapp・localhost)からの取得依頼にのみ応答 |
 
 詳細は [プライバシーポリシー](PRIVACY_POLICY.md) をご覧ください。
 

@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import { RakutenUtils } from '../utils';
 import { DownloadStepExecutor, type ExtensionConfig, type StepGroup } from './downloadStepExecutor';
+import { ExternalRequestHandler } from './externalRequestHandler';
 
 /**
  * 拡張機能の主要クラス
@@ -30,6 +31,10 @@ class RakutenCsvBackgroundService {
   private readonly downloadStepExecutor = new DownloadStepExecutor({
     hasRakutenTab: (tabId) => this.rakutenTabs.has(tabId),
     getActiveTabId: () => this.activeTabId
+  });
+
+  private readonly externalRequestHandler = new ExternalRequestHandler({
+    downloadRunner: this.downloadStepExecutor
   });
 
   private constructor() {
@@ -93,6 +98,11 @@ class RakutenCsvBackgroundService {
     chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
       this.handleMessage(message, sender, sendResponse);
       return true; // 非同期レスポンス
+    });
+
+    // 外部ページ(shoken-webapp)からの接続
+    chrome.runtime.onConnectExternal.addListener((port) => {
+      this.externalRequestHandler.handleConnection(port);
     });
   }
 
@@ -191,6 +201,11 @@ class RakutenCsvBackgroundService {
 
         case 'get-extension-state':
           response = this.handleGetExtensionState();
+          break;
+
+        case 'csv-download-will-start':
+          this.externalRequestHandler.notifyDownloadWillStart(sender.tab?.id);
+          response = { success: true };
           break;
 
         default:
@@ -332,6 +347,13 @@ class RakutenCsvBackgroundService {
    */
   getConfig(): ExtensionConfig {
     return this.downloadStepExecutor.getConfig();
+  }
+
+  /**
+   * 外部リクエストハンドラを取得（テスト・デバッグ用）
+   */
+  getExternalRequestHandler(): ExternalRequestHandler {
+    return this.externalRequestHandler;
   }
 }
 

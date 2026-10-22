@@ -29,6 +29,9 @@ type ExtensionConfigShape = {
 type BackgroundServiceApi = {
   getState(): ExtensionState
   getConfig(): ExtensionConfigShape
+  getExternalRequestHandler(): {
+    notifyDownloadWillStart(tabId: number | undefined): void
+  }
   groupSteps: (
     steps: readonly CsvDownloadStep[]
   ) => readonly (
@@ -314,6 +317,33 @@ describe('backgroundService characterization', () => {
     it('未対応の action はエラーを返す', async () => {
       const response = await sendRuntimeMessage({ action: 'unknown-action' }, {})
       expect(response).toEqual({ success: false, error: '未対応のアクション' })
+    })
+
+    it('csv-download-will-start は送信元タブのIDで通知する', async () => {
+      const notifySpy = vi.spyOn(
+        getService().getExternalRequestHandler(),
+        'notifyDownloadWillStart'
+      )
+
+      const response = await sendRuntimeMessage(
+        { action: 'csv-download-will-start' },
+        senderWithTab(321)
+      )
+
+      expect(response).toEqual({ success: true })
+      expect(notifySpy).toHaveBeenCalledWith(321)
+    })
+
+    it('csv-download-will-start は送信元タブが無くても通知する', async () => {
+      const notifySpy = vi.spyOn(
+        getService().getExternalRequestHandler(),
+        'notifyDownloadWillStart'
+      )
+
+      const response = await sendRuntimeMessage({ action: 'csv-download-will-start' }, {})
+
+      expect(response).toEqual({ success: true })
+      expect(notifySpy).toHaveBeenCalledWith(undefined)
     })
   })
 
