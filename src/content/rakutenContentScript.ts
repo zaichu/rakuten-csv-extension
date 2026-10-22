@@ -3,14 +3,13 @@ import type {
   ContentScriptMessage,
   ContentScriptResponse,
   DownloadResponse,
-  FetchCsvContentInstruction,
   LoginStateResponse,
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
   CsvSelectors
 } from '../types';
-import { RakutenUtils, DomUtils, decodeCsvBytes, withTimeout } from '../utils';
+import { RakutenUtils, DomUtils, withTimeout } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -89,9 +88,6 @@ class RakutenCsvExtension {
       case 'check-login-state':
         return this.handleCheckLoginState();
 
-      case 'fetch-csv-content':
-        return this.handleFetchCsvContent(message);
-
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -118,33 +114,6 @@ class RakutenCsvExtension {
       return true;
     }
     return /\/login/i.test(window.location.pathname);
-  }
-
-  /**
-   * ダウンロードされたCSVの本文を取得する
-   *
-   * 楽天証券のページと同じ文脈でfetchするためCookieが送られる
-   */
-  private async handleFetchCsvContent(message: FetchCsvContentInstruction): Promise<ContentScriptResponse> {
-    try {
-      const response = await fetch(message.payload.url, { credentials: 'include' });
-      if (!response.ok) {
-        return { success: false, error: `CSVの取得に失敗しました（HTTP ${response.status}）` };
-      }
-
-      const buffer = await response.arrayBuffer();
-      const content = decodeCsvBytes(new Uint8Array(buffer));
-
-      // 期限切れのURLはログイン画面(HTML)を返すため、CSV以外を失敗として扱う
-      if (isHtmlContent(response.headers.get('content-type'), content)) {
-        return { success: false, error: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）' };
-      }
-
-      return { success: true, content };
-    } catch {
-      // URLやURIが混ざらないようエラーの詳細は返さない
-      return { success: false, error: 'CSVの取得に失敗しました' };
-    }
   }
 
   /**
@@ -386,19 +355,6 @@ class RakutenCsvExtension {
       console.warn('ページ準備完了通知でエラー:', error);
     }
   }
-}
-
-/**
- * 応答がCSVではなくHTMLかどうか
- *
- * ログイン画面のHTMLをCSVとして返すと誤ったデータを取り込むため、判別する
- */
-function isHtmlContent(contentType: string | null, content: string): boolean {
-  if (content.trimStart().startsWith('<')) {
-    return true;
-  }
-  // 本文が空なのにHTML扱いならCSVとして扱わない
-  return content.trim() === '' && contentType?.toLowerCase().includes('text/html') === true;
 }
 
 /**

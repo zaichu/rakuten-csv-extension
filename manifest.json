@@ -34,7 +34,8 @@
         "downloads"
     ],
     "host_permissions": [
-        "https://*.rakuten-sec.co.jp/*"
+        "https://*.rakuten-sec.co.jp/*",
+        "file:///*"
     ],
     "externally_connectable": {
         "matches": [

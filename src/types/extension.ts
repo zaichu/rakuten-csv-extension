@@ -75,23 +75,12 @@ export interface CheckLoginStateInstruction extends ChromeMessage {
 }
 
 /**
- * CSV本文の取得指示
- */
-export interface FetchCsvContentInstruction extends ChromeMessage {
-  readonly action: 'fetch-csv-content';
-  readonly payload: {
-    readonly url: string;
-  };
-}
-
-/**
  * コンテンツスクリプトが受け取るメッセージ
  */
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
   | ExtensionUpdatedMessage
-  | CheckLoginStateInstruction
-  | FetchCsvContentInstruction;
+  | CheckLoginStateInstruction;
 
 /**
  * ダウンロードレスポンス
@@ -113,18 +102,9 @@ export interface LoginStateResponse {
 }
 
 /**
- * CSV本文の取得結果
- */
-export interface CsvContentResponse {
-  readonly success: boolean;
-  readonly content?: string;
-  readonly error?: string;
-}
-
-/**
  * コンテンツスクリプトの応答
  */
-export type ContentScriptResponse = DownloadResponse | LoginStateResponse | CsvContentResponse;
+export type ContentScriptResponse = DownloadResponse | LoginStateResponse;
 
 /**
  * 画面(shoken-webapp)から届くCSV取得依頼
@@ -156,6 +136,8 @@ export interface FetchedCsv {
   readonly kind: CsvDownloadType;
   readonly content: string;
   readonly fetchedAt: string;
+  /** ダウンロードされたファイルを削除できたか */
+  readonly fileRemoved?: boolean;
 }
 
 /**
@@ -164,6 +146,8 @@ export interface FetchedCsv {
 export interface FetchLatestCsvFailure {
   readonly kind: CsvDownloadType;
   readonly reason: string;
+  /** 失敗を区別するコード（画面が案内可以用） */
+  readonly code?: string;
 }
 
 /**
