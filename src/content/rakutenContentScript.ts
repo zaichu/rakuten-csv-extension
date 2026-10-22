@@ -1,13 +1,16 @@
 import type {
   CsvDownloadStepsInstruction,
   ContentScriptMessage,
+  ContentScriptResponse,
   DownloadResponse,
+  FetchCsvContentInstruction,
+  LoginStateResponse,
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
   CsvSelectors
 } from '../types';
-import { RakutenUtils, DomUtils } from '../utils';
+import { RakutenUtils, DomUtils, decodeCsvBytes } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -52,7 +55,8 @@ class RakutenCsvExtension {
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
       (message: ContentScriptMessage, _sender, sendResponse) => {
-        console.log('コンテンツスクリプトでメッセージを受信:', message);
+        // 取得URLなどが記録されないよう action のみログに残す
+        console.log('コンテンツスクリプトでメッセージを受信:', message.action);
 
         // 非同期処理を適切に処理
         this.handleMessage(message)
@@ -76,10 +80,16 @@ class RakutenCsvExtension {
   /**
    * メッセージを処理
    */
-  private async handleMessage(message: ContentScriptMessage): Promise<DownloadResponse> {
+  private async handleMessage(message: ContentScriptMessage): Promise<ContentScriptResponse> {
     switch (message.action) {
       case 'execute-csv-download-steps':
         return this.handleCsvDownloadStepsExecution(message);
+
+      case 'check-login-state':
+        return this.handleCheckLoginState();
+
+      case 'fetch-csv-content':
+        return this.handleFetchCsvContent(message);
 
       case 'extension-updated':
         this.handleExtensionUpdate();
@@ -90,6 +100,42 @@ class RakutenCsvExtension {
           success: false,
           error: `未対応のアクション: ${(message as ChromeMessage).action}`
         };
+    }
+  }
+
+  /**
+   * ログイン状態の確認
+   *
+   * 氏名や口座番号などの個人情報は読まず、ログイン画面かどうかだけを見る
+   */
+  private handleCheckLoginState(): LoginStateResponse {
+    return { success: true, loggedIn: !this.isLoginScreen() };
+  }
+
+  private isLoginScreen(): boolean {
+    if (document.querySelector('input[type="password"]')) {
+      return true;
+    }
+    return /\/login/i.test(window.location.pathname);
+  }
+
+  /**
+   * ダウンロードされたCSVの本文を取得する
+   *
+   * 楽天証券のページと同じ文脈でfetchするためCookieが送られる
+   */
+  private async handleFetchCsvContent(message: FetchCsvContentInstruction): Promise<ContentScriptResponse> {
+    try {
+      const response = await fetch(message.payload.url, { credentials: 'include' });
+      if (!response.ok) {
+        return { success: false, error: `CSVの取得に失敗しました（HTTP ${response.status}）` };
+      }
+
+      const buffer = await response.arrayBuffer();
+      return { success: true, content: decodeCsvBytes(new Uint8Array(buffer)) };
+    } catch {
+      // URLやURIが混ざらないようエラーの詳細は返さない
+      return { success: false, error: 'CSVの取得に失敗しました' };
     }
   }
 

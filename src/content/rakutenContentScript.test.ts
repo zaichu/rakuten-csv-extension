@@ -243,4 +243,71 @@ describe('rakutenContentScript ステップ実行', () => {
       })
     })
   })
+
+  describe('ログイン状態の確認', () => {
+    it('パスワード入力欄があれば未ログインと判定する', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: false })
+    })
+
+    it('パスワード入力欄が無ければログイン済みと判定する', async () => {
+      document.body.innerHTML = '<div>保有銘柄</div>'
+      const res = await sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: true, loggedIn: true })
+    })
+  })
+
+  describe('CSV本文の取得', () => {
+    const CSV_URL = 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
+
+    // "銘柄コード,数量\n" の Shift_JIS 表現
+    const shiftJisBytes = new Uint8Array([
+      0x96, 0xc1, 0x95, 0xbf, 0x83, 0x52, 0x81, 0x5b, 0x83, 0x68, 0x2c, 0x90, 0x94, 0x97, 0xca,
+      0x0a,
+    ])
+
+    function stubFetch(response: Response | Error): void {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          if (response instanceof Error) {
+            throw response
+          }
+          return response
+        })
+      )
+    }
+
+    it('Cookie 付きで取得して本文を返す', async () => {
+      const fetchMock = vi.fn(async () => new Response(shiftJisBytes, { status: 200 }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+
+      expect(res).toEqual({ success: true, content: '銘柄コード,数量\n' })
+      expect(fetchMock).toHaveBeenCalledWith(CSV_URL, { credentials: 'include' })
+    })
+
+    it('HTTP エラーの場合は理由を返す', async () => {
+      stubFetch(new Response('', { status: 403 }))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: false, error: 'CSVの取得に失敗しました（HTTP 403）' })
+    })
+
+    it('取得に失敗した場合はURLを含まない理由を返す', async () => {
+      stubFetch(new Error('network error'))
+      const res = await sendMessage({
+        action: 'fetch-csv-content',
+        payload: { url: CSV_URL },
+      } as unknown as ChromeMessage)
+      expect(res).toEqual({ success: false, error: 'CSVの取得に失敗しました' })
+    })
+  })
 })

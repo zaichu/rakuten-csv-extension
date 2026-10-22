@@ -25,6 +25,10 @@ const mockChrome = {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },
+    onConnectExternal: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
     onInstalled: {
       addListener: vi.fn(),
       removeListener: vi.fn(),
@@ -34,11 +38,17 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
     sendMessage: vi.fn(),
+    getManifest: vi.fn(() => ({
+      externally_connectable: {
+        matches: ['https://shoken-webapp.pages.dev/*', 'http://localhost/*'],
+      },
+    })),
   },
   tabs: {
     query: vi.fn(),
     sendMessage: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
     get: vi.fn(),
     onUpdated: {
       addListener: vi.fn(),

@@ -6,7 +6,8 @@ import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
  * サイト固有の機能とCSVダウンロード設定を提供
  */
 export class RakutenUtils {
-  private static readonly BASE_URL = 'https://www.rakuten-sec.co.jp';
+  /** 楽天証券のトップページ（未ログイン時はログイン画面へ遷移する） */
+  static readonly BASE_URL = 'https://www.rakuten-sec.co.jp';
 
   private static readonly DOMAIN_PATTERN = 'rakuten-sec.co.jp';
 
