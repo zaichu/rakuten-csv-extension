@@ -10,10 +10,10 @@ import type {
 import {
   ExternalRequestHandler,
   isAllowedOrigin,
-  isCapturableDownloadUrl,
   parseFetchLatestCsvRequest,
   readAllowedOrigins,
 } from './externalRequestHandler'
+import type { DownloadedFileReader } from './downloadedFile'
 
 /**
  * 外部ページ(shoken-webapp)からの取得依頼の挙動を固定する。
@@ -27,6 +27,8 @@ const RAKUTEN_URL = 'https://www.rakuten-sec.co.jp/web/dividend/'
 const ALLOWED_PATTERNS = ['https://shoken-webapp.pages.dev/*']
 const TARGET_TAB_ID = 42
 const OTHER_TAB_ID = 99
+const DOWNLOAD_ID = 11
+const CSV_CONTENT = '銘柄コード,数量\n'
 
 type PostedMessage = FetchLatestCsvProgress | FetchLatestCsvResult | ExternalErrorResponse
 
@@ -57,6 +59,41 @@ function createPort(origin: string) {
 }
 
 /**
+ * ダウンロード済みファイルの情報
+ */
+const downloadedItems = new Map<number, chrome.downloads.DownloadItem>()
+
+function createDownloadItem(id: number, kind: CsvDownloadType): chrome.downloads.DownloadItem {
+  return {
+    id,
+    url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
+    finalUrl: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
+    filename: `/home/user/Downloads/rakuten_${kind}.csv`,
+    fileSize: 128,
+    state: 'complete',
+  } as chrome.downloads.DownloadItem
+}
+
+/**
+ * ファイルを読み取る口
+ */
+function createFileReader(
+  options: { readonly fileAccessAllowed?: boolean; readonly readError?: Error } = {}
+): DownloadedFileReader {
+  return {
+    isFileAccessAllowed: vi.fn(async () => options.fileAccessAllowed ?? true),
+    read: vi.fn(async () => {
+      if (options.readError) {
+        throw options.readError
+      }
+      return new TextEncoder().encode(CSV_CONTENT)
+    }),
+    removeFile: vi.fn(async () => true),
+    eraseHistory: vi.fn(async () => undefined),
+  }
+}
+
+/**
  * ハンドラと、ダウンロード手順を実行するランナーを用意する
  *
  * ランナーは実際のコンテンツスクリプトと同じく、クリック直前にバックグラウンドへ
@@ -68,6 +105,7 @@ function createHandler(
     readonly downloadStartTimeoutMs?: number
     readonly loginWaitTimeoutMs?: number
     readonly loginPollIntervalMs?: number
+    readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
   const executed: CsvDownloadType[] = []
@@ -78,7 +116,11 @@ function createHandler(
         const kind = message.payload.selectedOptions[0]
         executed.push(kind)
         handler.notifyDownloadWillStart(TARGET_TAB_ID)
-        fireDownloadCreated({ url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv` })
+        downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, kind))
+        fireDownloadCreated({
+          id: DOWNLOAD_ID,
+          url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
+        })
         return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
       }
     ),
@@ -87,13 +129,14 @@ function createHandler(
   const handler = new ExternalRequestHandler({
     downloadRunner: runner,
     allowedOrigins: ALLOWED_PATTERNS,
+    fileReader: config.fileReader ?? createFileReader(),
     ...config,
   })
 
   return { handler, runner, executed }
 }
 
-function fireDownloadCreated(item: { url: string }): void {
+function fireDownloadCreated(item: { id: number; url: string }): void {
   const addListener = chrome.downloads.onCreated.addListener as unknown as {
     mock: { calls: unknown[][] }
   }
@@ -122,6 +165,18 @@ function setTabsUpdateImpl(): void {
   }
   mock.mockImplementation((_tabId, _properties, callback) => {
     callback?.({ id: 42 } as chrome.tabs.Tab)
+  })
+}
+
+type DownloadsSearchImpl = (query: { id?: number }) => Promise<chrome.downloads.DownloadItem[]>
+
+function setDownloadsSearchImpl(): void {
+  const mock = chrome.downloads.search as unknown as {
+    mockImplementation: (fn: DownloadsSearchImpl) => void
+  }
+  mock.mockImplementation(async (query) => {
+    const item = query.id === undefined ? undefined : downloadedItems.get(query.id)
+    return item ? [item] : []
   })
 }
 
@@ -165,14 +220,12 @@ describe('externalRequestHandler', () => {
     vi.mocked(chrome.tabs.query).mockResolvedValue([
       { id: TARGET_TAB_ID, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
     ])
+    downloadedItems.clear()
+    setDownloadsSearchImpl()
     setTabsUpdateImpl()
     setTabsSendMessageImpl((_tabId, message, callback) => {
       if (message.action === 'check-login-state') {
         callback?.({ success: true, loggedIn: true })
-        return
-      }
-      if (message.action === 'fetch-csv-content') {
-        callback?.({ success: true, content: `本文:${message.payload?.['url']}` })
         return
       }
       callback?.({ success: true })
@@ -215,16 +268,6 @@ describe('externalRequestHandler', () => {
         'https://shoken-webapp.pages.dev/*',
         'http://localhost/*',
       ])
-    })
-
-    it('捕捉するダウンロードURLは楽天証券のドメインとblob/dataに限る', () => {
-      expect(isCapturableDownloadUrl('https://www.rakuten-sec.co.jp/csv/a.csv')).toBe(true)
-      expect(isCapturableDownloadUrl('https://member.rakuten-sec.co.jp/csv/a.csv')).toBe(true)
-      expect(isCapturableDownloadUrl('blob:https://www.rakuten-sec.co.jp/1234')).toBe(true)
-      expect(isCapturableDownloadUrl('data:text/csv;base64,aaaa')).toBe(true)
-      expect(isCapturableDownloadUrl('https://example.com/a.csv')).toBe(false)
-      expect(isCapturableDownloadUrl('https://rakuten-sec.co.jp.example.com/a.csv')).toBe(false)
-      expect(isCapturableDownloadUrl('not a url')).toBe(false)
     })
 
     it('許可されないオリジンの接続は受け付けない', async () => {
@@ -315,9 +358,7 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.csvs).toHaveLength(1)
-      expect(result.csvs[0].content).toBe(
-        '本文:https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
-      )
+      expect(result.csvs[0].content).toBe(CSV_CONTENT)
       expect(new Date(result.csvs[0].fetchedAt).toISOString()).toBe(result.csvs[0].fetchedAt)
     })
 
@@ -355,23 +396,40 @@ describe('externalRequestHandler', () => {
       expect(result.csvs.map((csv) => csv.kind)).toEqual(['assetbalance'])
     })
 
-    it('CSV本文の取得に失敗した場合は理由を記録する', async () => {
-      const { handler } = createHandler()
+    it('ファイルを読み取れなかった場合は理由を記録する', async () => {
+      const { handler } = createHandler(
+        {},
+        { fileReader: createFileReader({ readError: new Error('read failed') }) }
+      )
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-      setTabsSendMessageImpl((_tabId, message, callback) => {
-        if (message.action === 'check-login-state') {
-          callback?.({ success: true, loggedIn: true })
-          return
-        }
-        callback?.({ success: false, error: 'CSVの取得に失敗しました（HTTP 403）' })
-      })
 
       handler.handleConnection(port)
       listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVの取得に失敗しました（HTTP 403）' },
+        { kind: 'assetbalance', reason: 'CSVファイルの読み取りに失敗しました' },
+      ])
+      expect(result.csvs).toEqual([])
+    })
+
+    it('ファイルのURLへのアクセスが許可されていない場合は理由とコードを返す', async () => {
+      const { handler } = createHandler(
+        {},
+        { fileReader: createFileReader({ fileAccessAllowed: false }) }
+      )
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.failures).toEqual([
+        {
+          kind: 'assetbalance',
+          reason: 'ファイルの URL へのアクセスが許可されていません',
+          code: 'file-access-disabled',
+        },
       ])
       expect(result.csvs).toEqual([])
     })
@@ -412,9 +470,13 @@ describe('externalRequestHandler', () => {
     it('クリック直前の通知より前のダウンロードは捕捉しない', async () => {
       const runner = {
         executeDownloadRequest: vi.fn(async () => {
-          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+          fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
           handler.notifyDownloadWillStart(TARGET_TAB_ID)
-          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv' })
+          downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, 'assetbalance'))
+          fireDownloadCreated({
+            id: DOWNLOAD_ID,
+            url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
+          })
           return { success: true, message: '取得完了' }
         }),
       }
@@ -422,6 +484,7 @@ describe('externalRequestHandler', () => {
         downloadRunner: runner,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 50,
+        fileReader: createFileReader(),
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -430,16 +493,14 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.failures).toEqual([])
-      expect(result.csvs[0].content).toBe(
-        '本文:https://www.rakuten-sec.co.jp/csv/assetbalance.csv'
-      )
+      expect(result.csvs[0].content).toBe(CSV_CONTENT)
     })
 
     it('対象タブ以外からの通知では待ち受けを開始しない', async () => {
       const runner = {
         executeDownloadRequest: vi.fn(async () => {
           handler.notifyDownloadWillStart(OTHER_TAB_ID)
-          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+          fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
           return { success: true, message: '取得完了' }
         }),
       }
@@ -447,6 +508,7 @@ describe('externalRequestHandler', () => {
         downloadRunner: runner,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 30,
+        fileReader: createFileReader(),
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -455,7 +517,7 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVのダウンロード先URLを取得できませんでした' },
+        { kind: 'assetbalance', reason: 'CSVのダウンロードを開始できませんでした' },
       ])
       expect(result.csvs).toEqual([])
     })
@@ -463,7 +525,10 @@ describe('externalRequestHandler', () => {
     it('通知が無い場合はダウンロードを取り逃がす', async () => {
       const runner = {
         executeDownloadRequest: vi.fn(async () => {
-          fireDownloadCreated({ url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv' })
+          fireDownloadCreated({
+            id: DOWNLOAD_ID,
+            url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
+          })
           return { success: true, message: '取得完了' }
         }),
       }
@@ -471,6 +536,7 @@ describe('externalRequestHandler', () => {
         downloadRunner: runner,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 30,
+        fileReader: createFileReader(),
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -479,7 +545,7 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVのダウンロード先URLを取得できませんでした' },
+        { kind: 'assetbalance', reason: 'CSVのダウンロードを開始できませんでした' },
       ])
     })
   })

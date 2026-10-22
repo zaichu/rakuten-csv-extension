@@ -8,7 +8,6 @@ import type {
   ChromeMessage,
   CsvDownloadMessage,
   CsvDownloadType,
-  CsvContentResponse,
   DownloadResponse,
   ExternalErrorResponse,
   FetchLatestCsvFailure,
@@ -20,26 +19,20 @@ import type {
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
 import { RakutenUtils, sleep } from '../utils';
+import {
+  createDownloadCapture,
+  createDownloadedFileReader,
+  readDownloadedCsv,
+  waitForCompletedDownload,
+  type DownloadCapture,
+  type DownloadedFileReader,
+} from './downloadedFile';
 
 /**
  * CSVダウンロード手順の実行口
  */
 export interface CsvDownloadRunner {
   executeDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse>;
-}
-
-/**
- * ダウンロード開始の待ち受け
- */
-interface DownloadCapture {
-  /** 取得対象のタブID */
-  readonly tabId: number;
-  /** 捕捉したダウンロード先URL（捕捉できなければ undefined） */
-  readonly url: Promise<string | undefined>;
-  /** 待ち受けを開始する */
-  readonly arm: () => void;
-  /** 待ちを中断する */
-  readonly cancel: () => void;
 }
 
 export interface ExternalRequestHandlerConfig {
@@ -53,13 +46,18 @@ export interface ExternalRequestHandlerConfig {
   readonly loginPollIntervalMs?: number;
   /** ダウンロード開始を待つ最大時間(ms) */
   readonly downloadStartTimeoutMs?: number;
+  /** ダウンロードの完了を待つ最大時間(ms) */
+  readonly downloadCompleteTimeoutMs?: number;
   /** タブの読み込み完了を待つ最大時間(ms) */
   readonly tabLoadTimeoutMs?: number;
+  /** ダウンロードされたファイルの読み取り */
+  readonly fileReader?: DownloadedFileReader;
 }
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
+const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
 
 /**
@@ -136,7 +134,9 @@ export class ExternalRequestHandler {
   private readonly loginWaitTimeoutMs: number;
   private readonly loginPollIntervalMs: number;
   private readonly downloadStartTimeoutMs: number;
+  private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
+  private readonly fileReader: DownloadedFileReader;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
   private running = false;
@@ -150,7 +150,9 @@ export class ExternalRequestHandler {
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
     this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
+    this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
+    this.fileReader = config.fileReader ?? createDownloadedFileReader();
   }
 
   /**
@@ -233,7 +235,7 @@ export class ExternalRequestHandler {
         csvs.push(outcome.csv);
         notify({ type: 'progress', state: 'completed', kind });
       } else {
-        failures.push({ kind, reason: outcome.reason });
+        failures.push({ kind, reason: outcome.reason, code: outcome.code });
         notify({ type: 'progress', state: 'failed', kind, reason: outcome.reason });
       }
     }
@@ -247,8 +249,10 @@ export class ExternalRequestHandler {
   private async fetchKind(
     tabId: number,
     kind: CsvDownloadType
-  ): Promise<{ success: true; csv: FetchedCsv } | { success: false; reason: string }> {
-    const capture = this.createDownloadCapture(tabId);
+  ): Promise<
+    { success: true; csv: FetchedCsv } | { success: false; reason: string; code?: string }
+  > {
+    const capture = createDownloadCapture(tabId, this.downloadStartTimeoutMs);
     this.pendingCapture = capture;
 
     let stepResult: DownloadResponse;
@@ -268,19 +272,29 @@ export class ExternalRequestHandler {
 
     // クリック直前の通知が届かなかった場合に備えて、待ちを開始する
     capture.arm();
-    const downloadUrl = await capture.url;
-    if (!downloadUrl) {
-      return { success: false, reason: 'CSVのダウンロード先URLを取得できませんでした' };
+    const downloadId = await capture.downloadId;
+    if (downloadId === undefined) {
+      return { success: false, reason: 'CSVのダウンロードを開始できませんでした' };
     }
 
-    const content = await this.fetchCsvContent(tabId, downloadUrl);
-    if (!content.success) {
-      return { success: false, reason: content.reason };
+    const item = await waitForCompletedDownload(downloadId, this.downloadCompleteTimeoutMs);
+    if (!item) {
+      return { success: false, reason: 'CSVのダウンロードが完了しませんでした' };
+    }
+
+    const result = await readDownloadedCsv(this.fileReader, item);
+    if (!result.success) {
+      return { success: false, reason: result.reason, code: result.code };
     }
 
     return {
       success: true,
-      csv: { kind, content: content.content, fetchedAt: new Date().toISOString() },
+      csv: {
+        kind,
+        content: result.content,
+        fetchedAt: new Date().toISOString(),
+        fileRemoved: result.fileRemoved,
+      },
     };
   }
 
@@ -298,70 +312,6 @@ export class ExternalRequestHandler {
       return;
     }
     this.pendingCapture.arm();
-  }
-
-  /**
-   * ダウンロードの開始を待ち、URLを捕捉する
-   */
-  private createDownloadCapture(tabId: number): DownloadCapture {
-    let resolveUrl: (url: string | undefined) => void = () => {};
-    const url = new Promise<string | undefined>((resolve) => {
-      resolveUrl = resolve;
-    });
-    let armed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const finish = (value: string | undefined): void => {
-      if (armed) {
-        chrome.downloads.onCreated.removeListener(listener);
-      }
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
-      resolveUrl(value);
-    };
-
-    const listener = (item: chrome.downloads.DownloadItem): void => {
-      if (!isCapturableDownloadUrl(item.url)) {
-        return;
-      }
-      finish(item.url);
-    };
-
-    return {
-      tabId,
-      url,
-      arm: () => {
-        if (armed) {
-          return;
-        }
-        armed = true;
-        chrome.downloads.onCreated.addListener(listener);
-        timer = setTimeout(() => finish(undefined), this.downloadStartTimeoutMs);
-      },
-      cancel: () => finish(undefined),
-    };
-  }
-
-  /**
-   * ダウンロードされたCSVの本文をページ文脈で取得する
-   */
-  private async fetchCsvContent(
-    tabId: number,
-    url: string
-  ): Promise<{ success: true; content: string } | { success: false; reason: string }> {
-    const response = await this.sendToContentScript(tabId, {
-      action: 'fetch-csv-content',
-      payload: { url },
-    });
-
-    if (!isCsvContentResponse(response)) {
-      return { success: false, reason: 'CSV本文の取得に失敗しました' };
-    }
-    if (!response.success || response.content === undefined) {
-      return { success: false, reason: response.error ?? 'CSV本文の取得に失敗しました' };
-    }
-    return { success: true, content: response.content };
   }
 
   /**
@@ -518,41 +468,11 @@ export class ExternalRequestHandler {
   }
 }
 
-/**
- * 取得対象とするダウンロードURLか
- *
- * 楽天証券のドメインと、ページ内で生成されるblob/data URLを受け付ける
- */
-export function isCapturableDownloadUrl(url: string): boolean {
-  if (url.startsWith('blob:') || url.startsWith('data:')) {
-    return true;
-  }
-  return isRakutenDomainUrl(url);
-}
-
-function isRakutenDomainUrl(url: string): boolean {
-  try {
-    const { hostname } = new URL(url);
-    const host = hostname.toLowerCase();
-    return host === 'rakuten-sec.co.jp' || host.endsWith('.rakuten-sec.co.jp');
-  } catch {
-    return false;
-  }
-}
-
 function isLoginStateResponse(response: unknown): response is LoginStateResponse {
   return (
     typeof response === 'object' &&
     response !== null &&
     typeof (response as LoginStateResponse).success === 'boolean'
-  );
-}
-
-function isCsvContentResponse(response: unknown): response is CsvContentResponse {
-  return (
-    typeof response === 'object' &&
-    response !== null &&
-    typeof (response as CsvContentResponse).success === 'boolean'
   );
 }
 
