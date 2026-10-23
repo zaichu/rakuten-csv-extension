@@ -49,6 +49,7 @@ const mockChrome = {
     sendMessage: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    remove: vi.fn(async () => undefined),
     get: vi.fn(),
     onUpdated: {
       addListener: vi.fn(),
@@ -62,6 +63,9 @@ const mockChrome = {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },
+  },
+  windows: {
+    update: vi.fn(async () => undefined),
   },
   action: {
     onClicked: {

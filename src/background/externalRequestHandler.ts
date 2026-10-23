@@ -187,15 +187,27 @@ export class ExternalRequestHandler {
     }
 
     this.running = true;
+    let createdTabId: number | undefined;
     try {
       const result = await this.fetchLatestCsv(request.kinds, (progress) => {
         port.postMessage(progress);
+      }, (tabId) => {
+        createdTabId = tabId;
       });
       port.postMessage(result);
     } catch {
       port.postMessage(errorResponse('CSVの取得中に予期しないエラーが発生しました'));
     } finally {
-      this.running = false;
+      try {
+        if (createdTabId !== undefined) {
+          await chrome.tabs.remove(createdTabId).catch(() => undefined);
+        }
+        if (port.sender?.tab?.id !== undefined) {
+          await this.focusTab(port.sender.tab).catch(() => undefined);
+        }
+      } finally {
+        this.running = false;
+      }
     }
   }
 
@@ -204,12 +216,13 @@ export class ExternalRequestHandler {
    */
   private async fetchLatestCsv(
     kinds: readonly CsvDownloadType[],
-    notify: (progress: FetchLatestCsvProgress) => void
+    notify: (progress: FetchLatestCsvProgress) => void,
+    onTabCreated: (tabId: number) => void
   ): Promise<FetchLatestCsvResult> {
     const csvs: FetchedCsv[] = [];
     const failures: FetchLatestCsvFailure[] = [];
 
-    const tabId = await this.ensureRakutenTab();
+    const tabId = await this.ensureRakutenTab(onTabCreated);
     if (tabId === undefined) {
       return {
         type: 'result',
@@ -365,10 +378,11 @@ export class ExternalRequestHandler {
   /**
    * 楽天証券のタブを用意する
    */
-  private async ensureRakutenTab(): Promise<number | undefined> {
+  private async ensureRakutenTab(onTabCreated: (tabId: number) => void): Promise<number | undefined> {
     const existing = await this.findRakutenTab();
-    if (existing !== undefined) {
-      return existing;
+    if (existing?.id !== undefined) {
+      await this.focusTab(existing);
+      return existing.id;
     }
 
     const tab = await this.createRakutenTab();
@@ -376,14 +390,27 @@ export class ExternalRequestHandler {
       return undefined;
     }
 
+    onTabCreated(tab.id);
     await this.waitForTabLoad(tab.id);
     return tab.id;
   }
 
-  private async findRakutenTab(): Promise<number | undefined> {
+  private async findRakutenTab(): Promise<chrome.tabs.Tab | undefined> {
     const tabs = await chrome.tabs.query({ url: '*://*.rakuten-sec.co.jp/*' });
     const tab = tabs.find((candidate) => candidate.active) ?? tabs[0];
-    return tab?.id;
+    return tab;
+  }
+
+  private async focusTab(tab: chrome.tabs.Tab): Promise<void> {
+    try {
+      if (tab.id !== undefined) {
+        await chrome.tabs.update(tab.id, { active: true });
+      }
+    } finally {
+      if (tab.windowId !== undefined) {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
+    }
   }
 
   private createRakutenTab(): Promise<chrome.tabs.Tab | undefined> {
