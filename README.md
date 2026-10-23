@@ -34,9 +34,11 @@
    cd rakuten-csv-extension
    ```
 
-2. 依存関係をインストール
+2. Node.js 24.22.1（`.nvmrc`）を選択して依存関係をインストール（nvm が必要）
    ```bash
-   npm install
+   nvm install
+   nvm use
+   npm ci
    ```
 
 3. 拡張機能をビルド
@@ -234,13 +236,20 @@ CSVファイルは楽天証券サイト自身の「CSVで保存」機能が生�
 ## 💻 開発
 
 ### 開発環境のセットアップ
+Node.js は `.nvmrc` に固定した 24.22.1 を使用します。`package.json` の `engines.node` と CI も同じ版を使用します。
+undici 8.12.2 が要求する Node.js 22.19.0 以上を満たし、Zstandard API がない旧版でのテスト起動失敗を防ぐためです。
+
 ```bash
 # プロジェクトのクローン
 git clone https://github.com/zaichu/rakuten-csv-extension.git
 cd rakuten-csv-extension
 
-# 依存関係のインストール
-npm install
+# Node.js のインストール・選択（nvm）
+nvm install
+nvm use
+
+# lockfile に沿った依存関係のインストール
+npm ci
 
 # 開発サーバーの起動
 npm run dev
