@@ -55,13 +55,13 @@ function firePageTransition(tabId: number): void {
 }
 
 /** ダウンロード開始イベントを発火させ、waitForDownloadStart の待ちを解消する */
-function fireDownloadCreated(): void {
+function fireDownloadCreated(url = 'https://www.rakuten-sec.co.jp/download.csv'): void {
   const addListener = chrome.downloads.onCreated.addListener as unknown as {
     mock: { calls: unknown[][] }
   }
   for (const call of addListener.mock.calls) {
-    const listener = call[0] as () => void
-    listener()
+    const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
+    listener({ url })
   }
 }
 
@@ -85,6 +85,85 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.useRealTimers()
+  })
+
+  it('成功応答でもダウンロード開始を観測できなければ失敗を返す', async () => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let downloadAttempts = 0
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+      } else {
+        firePageTransition(tabId)
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(30000)
+    const response = await pending
+
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+    expect(downloadAttempts).toBe(3)
+  })
+
+  it.each(['success', 'channel-closed'])('無関係なURLだけでは開始を観測しない（%s）', async (responseType) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let downloadAttempts = 0
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+        fireDownloadCreated('https://example.com/unrelated.zip')
+        if (responseType === 'channel-closed') {
+          failWithChannelClosed(callback)
+        } else {
+          callback?.({ success: true })
+        }
+        return
+      }
+      firePageTransition(tabId)
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(30000)
+    expect((await pending).success).toBe(false)
+    expect(downloadAttempts).toBe(3)
+  })
+
+  it.each([
+    'https://www.rakuten-sec.co.jp/download.csv',
+    'blob:https://www.rakuten-sec.co.jp/csv',
+    'data:text/csv,test',
+  ])('無関係なダウンロードの後も対象URLの開始を待ち続ける（%s）', async (url) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      if (sentSteps(message).includes('download-csv')) {
+        fireDownloadCreated('https://example.com/unrelated.zip')
+        callback?.({ success: true })
+        setTimeout(() => fireDownloadCreated(url), 1000)
+        return
+      }
+      firePageTransition(tabId)
+      callback?.({ success: true })
+    })
+
+    let settled = false
+    const pending = executor.executeDownloadRequest(downloadRequest()).then((response) => {
+      settled = true
+      return response
+    })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(settled).toBe(false)
+    expect(chrome.downloads.onCreated.removeListener).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await pending).success).toBe(true)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2)
   })
 
   it('通信に失敗してもダウンロード開始を観測していれば成功になる', async () => {

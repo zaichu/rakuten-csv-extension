@@ -19,6 +19,7 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { RakutenUtils, withTimeout, sleep } from '../utils';
+import { isCapturableDownloadUrl } from './downloadedFile';
 
 /**
  * 拡張機能の設定
@@ -263,10 +264,17 @@ export class DownloadStepExecutor {
         : undefined;
 
       try {
-        const result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
+        let result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
 
         if (result.success) {
-          return { response: result, downloadStart };
+          if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
+            return { response: result, downloadStart };
+          }
+          result = {
+            success: false,
+            error: 'ダウンロード開始を確認できませんでした',
+            step: 'download-csv'
+          };
         }
 
         // クリック後のページ破棄で応答だけが失われても、ダウンロードが始まっていれば
@@ -449,7 +457,10 @@ export class DownloadStepExecutor {
         resolve(started);
       };
 
-      const listener = (): void => {
+      const listener = (item: chrome.downloads.DownloadItem): void => {
+        if (!isCapturableDownloadUrl(item.url)) {
+          return;
+        }
         finish(true);
       };
 
