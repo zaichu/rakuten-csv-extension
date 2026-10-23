@@ -185,8 +185,6 @@ describe('backgroundService characterization', () => {
         .length > 0,
       tabsOnActivated: (chrome.tabs.onActivated.addListener as ReturnType<typeof vi.fn>).mock.calls
         .length > 0,
-      actionOnClicked: (chrome.action.onClicked.addListener as ReturnType<typeof vi.fn>).mock.calls
-        .length > 0,
       runtimeOnMessage: (chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>).mock
         .calls.length > 0,
     }
@@ -219,7 +217,6 @@ describe('backgroundService characterization', () => {
         tabsOnUpdated: true,
         tabsOnRemoved: true,
         tabsOnActivated: true,
-        actionOnClicked: true,
         runtimeOnMessage: true,
       })
     })
@@ -301,17 +298,6 @@ describe('backgroundService characterization', () => {
       )) as { success: boolean }
       expect(response).toEqual({ success: true })
       expect(Array.from(getService().getState().rakutenTabs)).toContain(102)
-    })
-
-    it('get-extension-state は success と state を返す', async () => {
-      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(103))
-      const response = (await sendRuntimeMessage({ action: 'get-extension-state' }, {})) as {
-        success: boolean
-        state: ExtensionState
-      }
-      expect(response.success).toBe(true)
-      expect(Array.from(response.state.rakutenTabs)).toContain(103)
-      expect(response.state).toHaveProperty('lastActiveTime')
     })
 
     it('未対応の action はエラーを返す', async () => {
@@ -445,14 +431,9 @@ describe('backgroundService characterization', () => {
   })
 
   describe('タブ状態管理', () => {
-    it("status complete かつ楽天証券URLでタブが登録される", async () => {
+    it("status complete かつ楽天証券URLでタブが登録される", () => {
       tabUpdatedListener(301, { status: 'complete' }, { url: RAKUTEN_URL })
-      const response = (await sendRuntimeMessage({ action: 'get-extension-state' }, {})) as {
-        success: boolean
-        state: ExtensionState
-      }
-      expect(response.success).toBe(true)
-      expect(Array.from(response.state.rakutenTabs)).toContain(301)
+      expect(Array.from(getService().getState().rakutenTabs)).toContain(301)
     })
 
     it('非楽天証券URLでは登録されない', () => {

@@ -26,7 +26,6 @@ class RakutenCsvBackgroundService {
 
   private readonly rakutenTabs = new Set<number>();
   private activeTabId: number | undefined;
-  private lastActiveTime = Date.now();
 
   private readonly downloadStepExecutor = new DownloadStepExecutor({
     hasRakutenTab: (tabId) => this.rakutenTabs.has(tabId),
@@ -87,11 +86,6 @@ class RakutenCsvBackgroundService {
     // タブアクティブ化時
     chrome.tabs.onActivated.addListener((activeInfo) => {
       this.handleTabActivation(activeInfo);
-    });
-
-    // アイコンクリック時
-    chrome.action.onClicked.addListener((tab) => {
-      this.handleActionClick(tab);
     });
 
     // メッセージ処理
@@ -167,17 +161,6 @@ class RakutenCsvBackgroundService {
   }
 
   /**
-   * アクションクリック処理
-   */
-  private handleActionClick(tab: chrome.tabs.Tab): void {
-    this.log('拡張機能アイコンがクリックされました:', tab);
-
-    if (tab.url && this.isRakutenSecurities(tab.url) && tab.id) {
-      this.setActiveTab(tab.id);
-    }
-  }
-
-  /**
    * メッセージ処理
    */
   private async handleMessage(
@@ -197,10 +180,6 @@ class RakutenCsvBackgroundService {
 
         case 'download-csv-request':
           response = await this.handleCsvDownloadRequest(message);
-          break;
-
-        case 'get-extension-state':
-          response = this.handleGetExtensionState();
           break;
 
         case 'csv-download-will-start':
@@ -240,16 +219,6 @@ class RakutenCsvBackgroundService {
    */
   private handleCsvDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse> {
     return this.downloadStepExecutor.executeDownloadRequest(message);
-  }
-
-  /**
-   * 拡張機能状態取得処理
-   */
-  private handleGetExtensionState(): { success: boolean; state: ExtensionState } {
-    return {
-      success: true,
-      state: this.getState()
-    };
   }
 
   /**
@@ -319,14 +288,12 @@ class RakutenCsvBackgroundService {
   getState(): ExtensionState {
     return {
       rakutenTabs: new Set(this.rakutenTabs),
-      activeTabId: this.activeTabId,
-      lastActiveTime: this.lastActiveTime
+      activeTabId: this.activeTabId
     };
   }
 
   private addRakutenTab(tabId: number): void {
     this.rakutenTabs.add(tabId);
-    this.lastActiveTime = Date.now();
   }
 
   private removeRakutenTab(tabId: number): void {
@@ -334,12 +301,10 @@ class RakutenCsvBackgroundService {
     if (this.activeTabId === tabId) {
       this.activeTabId = undefined;
     }
-    this.lastActiveTime = Date.now();
   }
 
   private setActiveTab(tabId: number): void {
     this.activeTabId = tabId;
-    this.lastActiveTime = Date.now();
   }
 
   /**

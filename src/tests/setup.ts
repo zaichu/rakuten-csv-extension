@@ -67,12 +67,6 @@ const mockChrome = {
   windows: {
     update: vi.fn(async () => undefined),
   },
-  action: {
-    onClicked: {
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-    },
-  },
   extension: {
     isAllowedFileSchemeAccess: vi.fn(async () => true),
   },

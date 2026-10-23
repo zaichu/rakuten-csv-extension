@@ -37,7 +37,6 @@ export type {
   ApplicationMessage,
   ExtensionState,
   PageReadyMessage,
-  GetExtensionStateMessage,
   CsvDownloadWillStartMessage
 } from './extension';
 

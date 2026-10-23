@@ -197,7 +197,6 @@ export interface ApplicationMessage {
 export interface ExtensionState {
   readonly activeTabId?: number;
   readonly rakutenTabs: ReadonlySet<number>;
-  readonly lastActiveTime: number;
 }
 
 /**
@@ -208,13 +207,6 @@ export interface ExtensionState {
 export interface PageReadyMessage extends ChromeMessage {
   readonly action: 'page-ready';
   readonly url: string;
-}
-
-/**
- * 拡張機能状態取得メッセージ
- */
-export interface GetExtensionStateMessage extends ChromeMessage {
-  readonly action: 'get-extension-state';
 }
 
 /**
@@ -230,5 +222,4 @@ export interface CsvDownloadWillStartMessage extends ChromeMessage {
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | GetExtensionStateMessage
   | CsvDownloadWillStartMessage;
