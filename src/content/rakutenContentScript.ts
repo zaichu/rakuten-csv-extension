@@ -20,6 +20,11 @@ class RakutenCsvExtension {
   private readonly elementTimeout = 5000;
   private readonly notifyTimeout = 2000;
 
+  /** このページでログイン画面を検出済みか */
+  private loginScreenDetected = false;
+  /** パスキーボタンを押下済みか */
+  private passkeyLoginClicked = false;
+
   private constructor() {
     this.initialize();
   }
@@ -106,7 +111,39 @@ class RakutenCsvExtension {
    * 氏名や口座番号などの個人情報は読まず、ログイン画面かどうかだけを見る
    */
   private handleCheckLoginState(): LoginStateResponse {
-    return { success: true, loggedIn: !this.isLoginScreen() };
+    const loggedIn = !this.isLoginScreen();
+
+    // 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
+    // 読み込み直し前のページで押すとクリックが無駄になる。
+    // 同じページで2回検出してから押すことで、開き直した側だけに絞る
+    if (!loggedIn) {
+      if (this.loginScreenDetected) {
+        this.clickPasskeyLoginButtonOnce();
+      }
+      this.loginScreenDetected = true;
+    }
+
+    return { success: true, loggedIn };
+  }
+
+  /**
+   * ログイン画面のパスキーボタンを1回だけクリックする
+   *
+   * 認証ダイアログをユーザーがキャンセルしてもボタンは残るため、
+   * 同一ページ内で繰り返し押さないよう押下済みフラグを持つ
+   */
+  private clickPasskeyLoginButtonOnce(): void {
+    if (this.passkeyLoginClicked) {
+      return;
+    }
+
+    const button = document.querySelector('button#login-passkey');
+    if (!button) {
+      return;
+    }
+
+    this.passkeyLoginClicked = true;
+    this.clickElementSafely(button, 'パスキーログイン');
   }
 
   private isLoginScreen(): boolean {

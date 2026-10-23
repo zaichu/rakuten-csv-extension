@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>ログイン（モック）</title>
+    <script>
+      // パスキーでのログイン済みなら、この画面に戻ってきてもホームへ進む
+      if (sessionStorage.getItem('rakutenMockLoggedIn') === '1') {
+        location.replace('https://www.rakuten-sec.co.jp/home');
+      }
+    </script>
+  </head>
+  <body>
+    <h1>ログイン（モック）</h1>
+    <form>
+      <input type="text" name="loginId" />
+      <input type="password" name="password" />
+      <button id="login-passkey" type="button" class="s3-form-login__btn-passkey">
+        パスキーでログイン
+      </button>
+    </form>
+    <script>
+      // パスキーボタン押下 = ログイン成功としてホームへ進む。
+      // 押された回数はテストが sessionStorage から読み取る
+      document.getElementById('login-passkey').addEventListener('click', function () {
+        var count = Number(sessionStorage.getItem('passkeyClickCount') || '0');
+        sessionStorage.setItem('passkeyClickCount', String(count + 1));
+        sessionStorage.setItem('rakutenMockLoggedIn', '1');
+        location.href = 'https://www.rakuten-sec.co.jp/home';
+      });
+    </script>
+  </body>
+</html>

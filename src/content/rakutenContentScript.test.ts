@@ -331,4 +331,56 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(res).toEqual({ success: true, loggedIn: true })
     })
   })
+
+  describe('ログイン画面のパスキーボタン', () => {
+    function sendCheckLoginState() {
+      return sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
+    }
+
+    function addPasskeyButton() {
+      const button = document.createElement('button')
+      button.id = 'login-passkey'
+      document.body.appendChild(button)
+      return button
+    }
+
+    it('ボタンが無ければクリックしない', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+
+      await sendCheckLoginState()
+      await sendCheckLoginState()
+
+      expect(safeClick).not.toHaveBeenCalled()
+    })
+
+    it('ログイン済みならボタンがあってもクリックしない', async () => {
+      document.body.innerHTML = '<div>保有銘柄</div>'
+      addPasskeyButton()
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+
+      const res = await sendCheckLoginState()
+
+      expect(res).toEqual({ success: true, loggedIn: true })
+      expect(safeClick).not.toHaveBeenCalled()
+    })
+
+    it('ボタンがあれば1回だけクリックする', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const button = addPasskeyButton()
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+
+      // 同じページで2回検出してから押す仕様のため2回送る。
+      // 前のテストで検出済みフラグが立っていると最初の1回で押される
+      await sendCheckLoginState()
+      await sendCheckLoginState()
+      expect(safeClick).toHaveBeenCalledTimes(1)
+      expect(safeClick).toHaveBeenCalledWith(button)
+
+      // ダイアログをキャンセルしてボタンが残っていても再クリックしない
+      await sendCheckLoginState()
+      await sendCheckLoginState()
+      expect(safeClick).toHaveBeenCalledTimes(1)
+    })
+  })
 })
