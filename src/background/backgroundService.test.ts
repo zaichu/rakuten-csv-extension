@@ -131,8 +131,8 @@ describe('backgroundService characterization', () => {
       mock: { calls: unknown[][] }
     }
     for (const call of addListener.mock.calls) {
-      const listener = call[0] as () => void
-      listener()
+      const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
+      listener({ url: RAKUTEN_URL })
     }
   }
 
@@ -481,7 +481,7 @@ describe('backgroundService characterization', () => {
   })
 
   describe('タイムアウトフォールバック', () => {
-    it('ページ遷移・ダウンロード開始イベントが来なくてもタイムアウトで処理が完了する', async () => {
+    it('ページ遷移・ダウンロード開始イベントが来なければタイムアウト後に失敗する', async () => {
       vi.useFakeTimers()
       try {
         await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(401))
@@ -491,13 +491,11 @@ describe('backgroundService characterization', () => {
         })
 
         const pending = downloadRequest(401, ['dividend'])
-        // page-transition タイムアウト 3000ms ×2 + download 開始タイムアウト 5000ms を進める
-        await vi.advanceTimersByTimeAsync(20000)
+        await vi.advanceTimersByTimeAsync(30000)
         const response = (await pending) as DownloadResponse
-        expect(response).toEqual({
-          success: true,
-          message: 'すべてのCSVダウンロードが完了しました',
-        })
+        expect(response.success).toBe(false)
+        expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+        expect(response.error).toContain('3回試行')
       } finally {
         vi.useRealTimers()
       }

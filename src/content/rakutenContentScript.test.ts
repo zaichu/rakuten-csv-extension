@@ -142,14 +142,16 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(res).toEqual({ success: false, error: 'ページ遷移のクリックに失敗しました', step: 'navigate-to-page' })
     })
 
-    it('download-csv はクリック失敗エラーを返す', async () => {
+    it('download-csv はクリックが失敗しても応答を失敗にしない', async () => {
+      // クリックは応答送信後に走るため、クリックの成否は応答に反映できない。
+      // ダウンロードが始まったかはバックグラウンドが判定する
       const el = document.createElement('button')
       el.id = 'csv'
       document.body.appendChild(el)
       makeInteractable(el)
       vi.spyOn(DomUtils, 'safeClick').mockReturnValue(false)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: false, error: 'CSVダウンロードのクリックに失敗しました', step: 'download-csv' })
+      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
   })
 
@@ -284,6 +286,35 @@ describe('rakutenContentScript ステップ実行', () => {
       const res = await clickCsvButton()
       expect(res.success).toBe(true)
       expect(sendMessageMock.mock.calls).toHaveLength(0)
+    })
+  })
+
+  describe('応答とクリックの順序', () => {
+    it('download-csv は応答を返してからクリックする', async () => {
+      // 前のテストが予約した応答後のクリックを先に処理しておく
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      const el = document.createElement('button')
+      el.id = 'csv'
+      document.body.appendChild(el)
+      makeInteractable(el)
+
+      const order: string[] = []
+      const safeClickSpy = vi.spyOn(DomUtils, 'safeClick').mockImplementation(() => {
+        order.push('click')
+        return true
+      })
+
+      await sendMessage({
+        action: 'execute-csv-download-steps',
+        payload: { downloadSteps: ['download-csv'], selectors: { csvButton: '#csv' } },
+      } as unknown as ChromeMessage).then(() => {
+        order.push('response')
+      })
+
+      expect(safeClickSpy).not.toHaveBeenCalled()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(order).toEqual(['response', 'click'])
     })
   })
 
