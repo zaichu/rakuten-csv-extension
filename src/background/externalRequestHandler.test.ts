@@ -44,7 +44,7 @@ function createPort(origin: string) {
   const posted: PostedMessage[] = []
   const listeners: PortListener[] = []
   const port = {
-    sender: { origin, url: `${origin}/` },
+    sender: { origin, url: `${origin}/`, tab: { id: 7, windowId: 8 } },
     postMessage: vi.fn((message: PostedMessage) => {
       posted.push(message)
     }),
@@ -218,7 +218,7 @@ describe('externalRequestHandler', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(chrome.tabs.query).mockResolvedValue([
-      { id: TARGET_TAB_ID, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
+      { id: TARGET_TAB_ID, windowId: 3, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
     ])
     downloadedItems.clear()
     setDownloadsSearchImpl()
@@ -318,6 +318,56 @@ describe('externalRequestHandler', () => {
       expect(error).toEqual({ type: 'error', error: '取得依頼の形式が正しくありません' })
       expect(posted.some(isResult)).toBe(false)
     })
+  })
+
+  describe('タブの後片付け', () => {
+    it.each([true, false])('既存タブを前面に出し、取得成功=%sでも閉じずに依頼元へ戻る', async (success) => {
+      const { handler } = createHandler({ assetbalance: { success, error: success ? undefined : '取得失敗' } })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+      handler.handleConnection(port)
+      listeners[0]({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      await waitForMessage(posted, isResult)
+      await waitUntil(() => vi.mocked(chrome.windows.update).mock.calls.length === 2)
+      expect(chrome.tabs.update).toHaveBeenCalledWith(TARGET_TAB_ID, { active: true })
+      expect(chrome.windows.update).toHaveBeenNthCalledWith(1, 3, { focused: true })
+      expect(chrome.tabs.remove).not.toHaveBeenCalled()
+      expect(chrome.tabs.update).toHaveBeenLastCalledWith(7, { active: true })
+      expect(chrome.windows.update).toHaveBeenLastCalledWith(8, { focused: true })
+    })
+
+    it.each(['成功', '一部失敗', '例外', 'ログイン時間切れ', 'タブ削除失敗'])(
+      '%sでも新規タブだけを閉じて依頼元のウィンドウへ戻る', async (outcome) => {
+        vi.mocked(chrome.tabs.query).mockResolvedValue([])
+        vi.mocked(chrome.tabs.create).mockImplementation((_properties, callback) => {
+          callback?.({ id: TARGET_TAB_ID, windowId: 3 } as chrome.tabs.Tab)
+          return undefined as never
+        })
+        vi.mocked(chrome.tabs.onUpdated.addListener).mockImplementationOnce((listener) => {
+          queueMicrotask(() => listener(TARGET_TAB_ID, { status: 'complete' }, {} as chrome.tabs.Tab))
+        })
+        const { handler, runner } = createHandler(
+          outcome === '一部失敗' ? { dividend: { success: false, error: '取得失敗' } } : {},
+          { loginWaitTimeoutMs: outcome === 'ログイン時間切れ' ? 0 : 500 }
+        )
+        if (outcome === '例外') runner.executeDownloadRequest.mockRejectedValueOnce(new Error('失敗'))
+        if (outcome === 'タブ削除失敗') {
+          vi.mocked(chrome.tabs.remove).mockRejectedValueOnce(new Error('閉じたタブ'))
+        }
+        const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+        handler.handleConnection(port)
+        listeners[0]({ type: 'fetchLatestCsv', kinds: ['dividend', 'assetbalance'] })
+
+        await waitForMessage(posted, (message) => isResult(message) || message.type === 'error')
+        await waitUntil(() => vi.mocked(chrome.windows.update).mock.calls.length > 0)
+        expect(chrome.tabs.create).toHaveBeenCalledWith(
+          expect.objectContaining({ active: true }), expect.any(Function)
+        )
+        expect(chrome.tabs.remove).toHaveBeenCalledExactlyOnceWith(TARGET_TAB_ID)
+        expect(chrome.tabs.update).toHaveBeenLastCalledWith(7, { active: true })
+        expect(chrome.windows.update).toHaveBeenLastCalledWith(8, { focused: true })
+      }
+    )
   })
 
   describe('取得の実行', () => {
