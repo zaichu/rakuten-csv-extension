@@ -13,6 +13,7 @@ import { join, resolve } from 'path';
 
 const distPath = resolve(process.cwd(), 'dist');
 const homeHtml = readFileSync(join(process.cwd(), 'e2e/fixtures/rakuten-mock/home.html'), 'utf8');
+const loginHtml = readFileSync(join(process.cwd(), 'e2e/fixtures/rakuten-mock/login.html'), 'utf8');
 const possessHtml = readFileSync(
   join(process.cwd(), 'e2e/fixtures/rakuten-mock/possess.html'),
   'utf8'
@@ -48,7 +49,7 @@ async function launchExtension(): Promise<{ context: BrowserContext; extensionId
   return { context, extensionId: new URL(serviceWorker.url()).host };
 }
 
-async function openRakutenMock(context: BrowserContext): Promise<Page> {
+async function newMockPage(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
 
   // Playwright 既定のダウンロード保存ではファイル名が UUID になるため、
@@ -59,6 +60,11 @@ async function openRakutenMock(context: BrowserContext): Promise<Page> {
     downloadPath: mkdtempSync(join(tmpdir(), 'rakuten-csv-extension-download-')),
     eventsEnabled: true,
   });
+  return page;
+}
+
+async function openRakutenMock(context: BrowserContext): Promise<Page> {
+  const page = await newMockPage(context);
 
   await page.route('https://www.rakuten-sec.co.jp/**', async (route) => {
     const url = route.request().url();
@@ -128,6 +134,60 @@ test('画面から依頼するとCSV本文と取得時刻が返る', async () =>
       { type: 'progress', state: 'fetching', kind: 'assetbalance' },
       { type: 'progress', state: 'completed', kind: 'assetbalance' },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('未ログインならパスキーボタンを1回だけ押してから取得を続ける', async () => {
+  const { context, extensionId } = await launchExtension();
+  try {
+    const rakutenPage = await newMockPage(context);
+    await rakutenPage.route('https://www.rakuten-sec.co.jp/**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === '/web/jp/stock/possess/list.html') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          body: possessHtml,
+        });
+        return;
+      }
+      if (url.pathname === '/home') {
+        await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: homeHtml });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: loginHtml });
+    });
+    await rakutenPage.goto('https://www.rakuten-sec.co.jp/');
+
+    const appPage = await context.newPage();
+    await appPage.route('http://localhost:4173/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<html></html>' });
+    });
+    await requestFromApp(appPage, extensionId, ['assetbalance']);
+
+    await appPage.waitForFunction(
+      () => {
+        const messages = (window as unknown as { __messages?: AppMessage[] }).__messages ?? [];
+        return messages.some((message) => message.type === 'result');
+      },
+      undefined,
+      { timeout: 30_000 }
+    );
+
+    // パスキーボタンの押下はページをまたいでも1回だけ
+    const clickCount = await rakutenPage.evaluate(() =>
+      sessionStorage.getItem('passkeyClickCount')
+    );
+    expect(clickCount).toBe('1');
+
+    const messages = await appPage.evaluate(
+      () => (window as unknown as { __messages: AppMessage[] }).__messages
+    );
+    const result = messages.find((message) => message.type === 'result');
+    expect(result?.failures).toEqual([]);
+    expect(result?.csvs?.[0].kind).toBe('assetbalance');
   } finally {
     await context.close();
   }
