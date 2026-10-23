@@ -198,7 +198,8 @@ class RakutenCsvExtension {
       case 'download-csv':
         return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
           requireInteractable: true,
-          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined
+          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
+          clickAfterResponse: true
         });
 
       default:
@@ -219,7 +220,11 @@ class RakutenCsvExtension {
   private async runClickStep(
     selector: string | undefined,
     actionName: string,
-    options?: { requireInteractable?: boolean; beforeClick?: () => Promise<void> }
+    options?: {
+      requireInteractable?: boolean;
+      beforeClick?: () => Promise<void>;
+      clickAfterResponse?: boolean;
+    }
   ): Promise<DownloadResponse> {
     if (!selector) {
       return { success: false, error: `${actionName}のセレクターが指定されていません` };
@@ -231,6 +236,19 @@ class RakutenCsvExtension {
 
     if (options?.beforeClick) {
       await options.beforeClick();
+    }
+
+    if (options?.clickAfterResponse) {
+      // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
+      // クリックできたかはバックグラウンドが chrome.downloads.onCreated で判定する
+      window.setTimeout(() => {
+        const result = this.clickElementSafely(element, actionName);
+        if (!result.success) {
+          console.warn(result.error);
+        }
+      }, 0);
+
+      return { success: true, message: `${actionName}のクリックを開始しました` };
     }
 
     return this.clickElementSafely(element, actionName);

@@ -55,6 +55,15 @@ export type StepGroup =
   | { readonly kind: 'page-transition'; readonly step: CsvDownloadStep }
   | { readonly kind: 'batch'; readonly steps: readonly CsvDownloadStep[] };
 
+/** コンテンツスクリプトとの通信が切れて応答を受け取れなかった失敗 */
+type StepExecutionResponse = DownloadResponse & { readonly communicationFailed?: boolean };
+
+/** ステップ群の実行結果と、クリック前に待ち受けたダウンロード開始の待ち受け */
+interface StepExecutionOutcome {
+  readonly response: DownloadResponse;
+  readonly downloadStart?: Promise<boolean>;
+}
+
 export class DownloadStepExecutor {
   private readonly config: ExtensionConfig = {
     maxRetries: 2,
@@ -200,17 +209,20 @@ export class DownloadStepExecutor {
 
       this.log(`ステップ: ${steps.join(', ')} を実行中...`);
 
-      // クリック直後に発火するページ遷移完了・ダウンロード開始イベントを
-      // 取りこぼさないよう、executeSteps呼び出し前（クリック前）に
-      // 待ち受けを準備しておく。
+      // クリック直後に発火するページ遷移完了イベントを取りこぼさないよう、
+      // executeSteps呼び出し前（クリック前）に待ち受けを準備しておく。
       const pageTransitionPromise = group.kind === 'page-transition'
         ? this.waitForPageTransition(tabId, this.pageTransitionTimeout)
         : null;
-      const downloadStartPromise = group.kind === 'batch' && group.steps.includes('download-csv')
-        ? this.waitForDownloadStart(this.downloadStartTimeout)
-        : null;
 
-      const result = await this.executeStepsWithRetry(tabId, steps, selectors, captureDownloadStart);
+      const outcome = await this.executeStepsWithRetry(
+        tabId,
+        steps,
+        selectors,
+        captureDownloadStart,
+        group.kind === 'batch' && group.steps.includes('download-csv')
+      );
+      const result = outcome.response;
 
       if (!result.success) {
         const failedStep = result.step ?? steps[steps.length - 1];
@@ -221,7 +233,7 @@ export class DownloadStepExecutor {
       }
 
       await pageTransitionPromise;
-      await downloadStartPromise;
+      await outcome.downloadStart;
     }
 
     return {
@@ -237,17 +249,32 @@ export class DownloadStepExecutor {
     tabId: number,
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
-    captureDownloadStart?: boolean
-  ): Promise<DownloadResponse> {
+    captureDownloadStart: boolean | undefined,
+    waitForDownloadStart: boolean
+  ): Promise<StepExecutionOutcome> {
     let lastError: string = '';
     let lastStep: CsvDownloadStep | undefined;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
+      // ダウンロード開始はクリック前から待ち受ける必要があるため、
+      // リトライのたびにクリック前に待ち受けを張り直す
+      const downloadStart = waitForDownloadStart
+        ? this.waitForDownloadStart(this.downloadStartTimeout)
+        : undefined;
+
       try {
         const result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
 
         if (result.success) {
-          return result;
+          return { response: result, downloadStart };
+        }
+
+        // クリック後のページ破棄で応答だけが失われても、ダウンロードが始まっていれば
+        // 取得は成立している。再クリックすると二重ダウンロードになるため打ち切る。
+        // コンテンツスクリプトが返した失敗（要素未検出など）は成功にしない
+        if (result.communicationFailed && (await this.isDownloadStarted(downloadStart))) {
+          this.log(`ステップ群 ${steps.join(', ')} は通信が切れたが、ダウンロード開始を確認しました`);
+          return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
         }
 
         lastError = result.error || 'ステップの実行に失敗しました';
@@ -258,6 +285,11 @@ export class DownloadStepExecutor {
           await sleep(this.config.retryInterval);
         }
       } catch (error) {
+        if (await this.isDownloadStarted(downloadStart)) {
+          this.log(`ステップ群 ${steps.join(', ')} は応答を受け取れなかったが、ダウンロード開始を確認しました`);
+          return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+        }
+
         lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
 
         if (attempt < this.config.maxRetries) {
@@ -267,10 +299,21 @@ export class DownloadStepExecutor {
     }
 
     return {
-      success: false,
-      error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`,
-      step: lastStep
+      response: {
+        success: false,
+        error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`,
+        step: lastStep
+      }
     };
+  }
+
+  /**
+   * ダウンロード開始を観測できたか
+   *
+   * 待ち受けが無い場合や、観測できなかった場合（タイムアウト）は false
+   */
+  private async isDownloadStarted(downloadStart: Promise<boolean> | undefined): Promise<boolean> {
+    return downloadStart ? await downloadStart : false;
   }
 
   /**
@@ -281,7 +324,7 @@ export class DownloadStepExecutor {
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
     captureDownloadStart?: boolean
-  ): Promise<DownloadResponse> {
+  ): Promise<StepExecutionResponse> {
     const instruction: CsvDownloadStepsInstruction = {
       action: 'execute-csv-download-steps',
       payload: {
@@ -291,12 +334,13 @@ export class DownloadStepExecutor {
       }
     };
 
-    const sendMessagePromise = new Promise<DownloadResponse>((resolve) => {
+    const sendMessagePromise = new Promise<StepExecutionResponse>((resolve) => {
       chrome.tabs.sendMessage(tabId, instruction, (response) => {
         if (chrome.runtime.lastError) {
           resolve({
             success: false,
-            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`
+            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`,
+            communicationFailed: true
           });
         } else {
           resolve(response || { success: false, error: 'レスポンスがありません' });
@@ -383,34 +427,34 @@ export class DownloadStepExecutor {
    * chrome.downloads.onCreated を取りこぼさずに捕捉する。これにより、
    * ブラウザ側でダウンロードが開始として確定する前に次のdownloadTypeの
    * navigate-to-pageへ進んでページ遷移し、直前のダウンロードがキャンセルされる
-   * 事象を防ぐ。downloads APIが使えない場合や、イベントを取りこぼした場合に
-   * 備えて timeoutMs 経過時にも resolve する（ハング防止）。
+   * 事象を防ぐ。開始を観測できたら true、downloads APIが使えない場合や
+   * イベントを取りこぼした場合は timeoutMs 経過後に false を返す（ハング防止）。
    */
-  private waitForDownloadStart(timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
+  private waitForDownloadStart(timeoutMs: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
       if (!chrome.downloads?.onCreated) {
-        resolve();
+        resolve(false);
         return;
       }
 
       let settled = false;
 
-      const finish = () => {
+      const finish = (started: boolean) => {
         if (settled) {
           return;
         }
         settled = true;
         chrome.downloads.onCreated.removeListener(listener);
         clearTimeout(timer);
-        resolve();
+        resolve(started);
       };
 
       const listener = (): void => {
-        finish();
+        finish(true);
       };
 
       chrome.downloads.onCreated.addListener(listener);
-      const timer = setTimeout(finish, timeoutMs);
+      const timer = setTimeout(() => finish(false), timeoutMs);
     });
   }
 
