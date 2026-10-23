@@ -117,6 +117,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       if (sentSteps(message).includes('download-csv')) {
         downloadAttempts += 1
         fireDownloadCreated('https://example.com/unrelated.zip')
+        fireDownloadCreated('blob:https://example.com/unrelated')
+        fireDownloadCreated('data:text/csv,test')
         if (responseType === 'channel-closed') {
           failWithChannelClosed(callback)
         } else {
@@ -137,7 +139,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   it.each([
     'https://www.rakuten-sec.co.jp/download.csv',
     'blob:https://www.rakuten-sec.co.jp/csv',
-    'data:text/csv,test',
   ])('無関係なダウンロードの後も対象URLの開始を待ち続ける（%s）', async (url) => {
     vi.useFakeTimers()
     const executor = createExecutor()

@@ -19,7 +19,7 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { RakutenUtils, withTimeout, sleep } from '../utils';
-import { isCapturableDownloadUrl } from './downloadedFile';
+import { isRakutenDownloadSource } from './downloadedFile';
 
 /**
  * 拡張機能の設定
@@ -458,7 +458,9 @@ export class DownloadStepExecutor {
       };
 
       const listener = (item: chrome.downloads.DownloadItem): void => {
-        if (!isCapturableDownloadUrl(item.url)) {
+        // blob: は内側のオリジンまで見る判定を使い、別タブの無関係な
+        // blob/data ダウンロードを開始済みと誤認しない
+        if (!isRakutenDownloadSource(item.url) && !isRakutenDownloadSource(item.finalUrl)) {
           return;
         }
         finish(true);
