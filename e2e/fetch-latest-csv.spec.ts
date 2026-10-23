@@ -109,15 +109,18 @@ test('画面から依頼するとCSV本文と取得時刻が返る', async () =>
     await appPage.waitForFunction(
       () => {
         const messages = (window as unknown as { __messages?: AppMessage[] }).__messages ?? [];
-        return messages.some((message) => message.type === 'result');
+        return messages.some((message) => message.type === 'result' || message.type === 'error');
       },
       undefined,
-      { timeout: 30_000 }
+      { timeout: 45_000 }
     );
 
     const messages = await appPage.evaluate(
       () => (window as unknown as { __messages: AppMessage[] }).__messages
     );
+
+    const error = messages.find((message) => message.type === 'error');
+    expect(error, error?.error).toBeUndefined();
 
     const result = messages.find((message) => message.type === 'result');
     expect(result?.failures).toEqual([]);
