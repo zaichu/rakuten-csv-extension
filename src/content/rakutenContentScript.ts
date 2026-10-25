@@ -20,8 +20,6 @@ class RakutenCsvExtension {
   private readonly elementTimeout = 5000;
   private readonly notifyTimeout = 2000;
 
-  /** このページでログイン画面を検出済みか */
-  private loginScreenDetected = false;
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
   /** パスキーボタンの出現を監視するMutationObserver */
@@ -181,17 +179,6 @@ class RakutenCsvExtension {
    */
   private handleCheckLoginState(): LoginStateResponse {
     const loggedIn = !this.isLoginScreen();
-
-    // 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
-    // 読み込み直し前のページで押すとクリックが無駄になる。
-    // 同じページで2回検出してから押すことで、開き直した側だけに絞る
-    if (!loggedIn) {
-      if (this.loginScreenDetected) {
-        // ここではクリックしない（fetch-started 通知後の MutationObserver で行う）
-      }
-      this.loginScreenDetected = true;
-    }
-
     return { success: true, loggedIn };
   }
 
