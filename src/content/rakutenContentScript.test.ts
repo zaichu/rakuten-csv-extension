@@ -191,6 +191,44 @@ describe('rakutenContentScript ステップ実行', () => {
       const res = await pending
       expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
     })
+
+    it('DOMの変化が無くても押せるようになった要素で成功する', async () => {
+      vi.useFakeTimers()
+      try {
+        const el = document.createElement('button')
+        el.id = 'late-csv'
+        document.body.appendChild(el)
+
+        let size = { width: 0, height: 0 }
+        vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
+          () => ({
+            width: size.width,
+            height: size.height,
+            top: 0,
+            left: 0,
+            bottom: size.height,
+            right: size.width,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          }) as DOMRect
+        )
+
+        const pending = singleStep('display-data', { displayButton: '#late-csv' })
+        await vi.advanceTimersByTimeAsync(500)
+
+        // 属性は変えずに押せる状態にする（DOMの変化を待つ方式では気づけない）
+        size = { width: 100, height: 30 }
+        await vi.advanceTimersByTimeAsync(500)
+
+        expect(await pending).toEqual({
+          success: true,
+          message: 'ステップ群の実行が完了しました',
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('ステップ群実行', () => {
