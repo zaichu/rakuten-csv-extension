@@ -90,6 +90,7 @@ export interface DownloadResponse {
   readonly message?: string;
   readonly error?: string;
   readonly step?: CsvDownloadStep;
+  readonly code?: string;
 }
 
 /**

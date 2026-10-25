@@ -21,6 +21,17 @@ import type {
 import { RakutenUtils, withTimeout, sleep } from '../utils';
 import { isRakutenDownloadSource } from './downloadedFile';
 
+/** コンテンツスクリプト不在エラーの判定用 */
+const CONTENT_SCRIPT_MISSING_ERRORS = [
+  'Receiving end does not exist',
+  'Could not establish connection. Receiving end does not exist'
+] as const;
+
+/** コンテンツスクリプト不在エラーかどうか判定 */
+function isContentScriptMissingError(message: string): boolean {
+  return CONTENT_SCRIPT_MISSING_ERRORS.some(e => message.includes(e));
+}
+
 /**
  * 拡張機能の設定
  */
@@ -116,6 +127,23 @@ export class DownloadStepExecutor {
       // 楽天証券タブの確認
       if (!this.tabState.hasRakutenTab(targetTabId)) {
         throw new Error('楽天証券のタブではありません');
+      }
+
+      // コンテンツスクリプトへの疎通確認
+      const connected = await this.checkContentScriptConnection(targetTabId);
+      if (!connected) {
+        this.log('コンテンツスクリプトが見つからないためタブを再読み込みします:', targetTabId);
+        await this.reloadTabAndWait(targetTabId);
+        // 再読み込み後、再度疎通確認
+        const reconnected = await this.checkContentScriptConnection(targetTabId);
+        if (!reconnected) {
+          return {
+            success: false,
+            error: '楽天証券のタブを再読み込みしてください',
+            code: 'content-script-missing'
+          };
+        }
+        this.log('タブ再読み込み後、コンテンツスクリプトとの疎通を確認しました:', targetTabId);
       }
 
       // ダウンロード処理を順次実行
@@ -229,7 +257,8 @@ export class DownloadStepExecutor {
         const failedStep = result.step ?? steps[steps.length - 1];
         return {
           success: false,
-          error: `${description}の${failedStep}ステップで失敗: ${result.error}`
+          error: `${description}の${failedStep}ステップで失敗: ${result.error}`,
+          code: result.code
         };
       }
 
@@ -255,6 +284,7 @@ export class DownloadStepExecutor {
   ): Promise<StepExecutionOutcome> {
     let lastError: string = '';
     let lastStep: CsvDownloadStep | undefined;
+    let lastCode: string | undefined;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       // ダウンロード開始はクリック前から待ち受ける必要があるため、
@@ -275,6 +305,14 @@ export class DownloadStepExecutor {
             error: 'ダウンロード開始を確認できませんでした',
             step: 'download-csv'
           };
+        }
+
+        // コンテンツスクリプト不在エラーはリトライしない（再読み込み済みで失敗しているため）
+        if (result.code === 'content-script-missing') {
+          lastError = result.error || 'コンテンツスクリプトが見つかりません';
+          lastStep = result.step;
+          lastCode = result.code;
+          break;
         }
 
         // クリック後のページ破棄で応答だけが失われても、ダウンロードが始まっていれば
@@ -310,7 +348,8 @@ export class DownloadStepExecutor {
       response: {
         success: false,
         error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`,
-        step: lastStep
+        step: lastStep,
+        code: lastCode
       }
     };
   }
@@ -326,6 +365,9 @@ export class DownloadStepExecutor {
 
   /**
    * 同一ページ内の連続ステップの実行
+   *
+   * コンテンツスクリプトが見つからない場合（Receiving end does not exist）は、
+   * タブを再読み込みして1回だけやり直す。
    */
   private executeSteps(
     tabId: number,
@@ -342,25 +384,116 @@ export class DownloadStepExecutor {
       }
     };
 
-    const sendMessagePromise = new Promise<StepExecutionResponse>((resolve) => {
-      chrome.tabs.sendMessage(tabId, instruction, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({
-            success: false,
-            error: `コンテンツスクリプトとの通信に失敗: ${chrome.runtime.lastError.message}`,
-            communicationFailed: true
-          });
-        } else {
+    const sendMessageWithRetry = async (retryAfterReload: boolean): Promise<StepExecutionResponse> => {
+      return new Promise<StepExecutionResponse>((resolve) => {
+        chrome.tabs.sendMessage(tabId, instruction, (response) => {
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message;
+            if (isContentScriptMissingError(errorMessage) && !retryAfterReload) {
+              // コンテンツスクリプト不在で、まだ再読み込みしていない場合
+              this.log('コンテンツスクリプトが見つかりません。タブを再読み込みして再試行します:', tabId);
+              this.reloadTabAndWait(tabId)
+                .then(() => sendMessageWithRetry(true))
+                .then(resolve)
+                .catch((error) => {
+                  resolve({
+                    success: false,
+                    error: `タブの再読み込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`,
+                    code: 'content-script-missing',
+                    communicationFailed: true
+                  });
+                });
+              return;
+            }
+            // 再読み込み後も失敗、またはその他のエラー
+            const isContentScriptMissing = isContentScriptMissingError(errorMessage);
+            const errorResponse: StepExecutionResponse = {
+              success: false,
+              error: `コンテンツスクリプトとの通信に失敗: ${errorMessage}`,
+              communicationFailed: true,
+              code: isContentScriptMissing ? 'content-script-missing' : undefined
+            };
+            resolve(errorResponse);
+            return;
+          }
           resolve(response || { success: false, error: 'レスポンスがありません' });
-        }
+        });
       });
-    });
+    };
+
+    const sendMessagePromise = sendMessageWithRetry(false);
 
     return withTimeout(
       sendMessagePromise,
       this.config.stepTimeout,
       `ステップ群 ${steps.join(', ')} がタイムアウトしました（${this.config.stepTimeout}ms）`
     );
+  }
+
+  /**
+   * タブを再読み込みし、完了を待つ
+   *
+   * コンテンツスクリプトが古いタブに入っていない場合に使用する。
+   * status: 'complete' になるまで待機する。
+   */
+  private async reloadTabAndWait(tabId: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const onUpdatedListener = (
+        updatedTabId: number,
+        changeInfo: chrome.tabs.OnUpdatedInfo
+      ): void => {
+        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+          finish();
+        }
+      };
+
+      chrome.tabs.onUpdated.addListener(onUpdatedListener);
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+          reject(new Error('タブの再読み込みがタイムアウトしました'));
+        }
+      }, 30000);
+
+      chrome.tabs.reload(tabId);
+    });
+  }
+
+  /**
+   * コンテンツスクリプトへの疎通を確認する
+   *
+   * 単純なメッセージを送り、応答があるかどうかで判定する。
+   * エラーが「Receiving end does not exist」なら false を返す。
+   */
+  private async checkContentScriptConnection(tabId: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, (response) => {
+        if (chrome.runtime.lastError) {
+          const errorMessage = chrome.runtime.lastError.message;
+          if (isContentScriptMissingError(errorMessage)) {
+            resolve(false);
+            return;
+          }
+          // その他のエラーは「接続できたが失敗した」とみなす
+          resolve(true);
+        } else {
+          resolve(true);
+        }
+      });
+    });
   }
 
   /**
