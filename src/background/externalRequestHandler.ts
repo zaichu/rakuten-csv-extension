@@ -14,6 +14,7 @@ import type {
   FetchLatestCsvProgress,
   FetchLatestCsvRequest,
   FetchLatestCsvResult,
+  FetchLatestCsvTiming,
   FetchedCsv,
   LoginStateResponse,
 } from '../types';
@@ -221,29 +222,49 @@ export class ExternalRequestHandler {
   ): Promise<FetchLatestCsvResult> {
     const csvs: FetchedCsv[] = [];
     const failures: FetchLatestCsvFailure[] = [];
+    const timings: FetchLatestCsvTiming[] = [];
+
+    const totalStart = Date.now();
+    let stageStart = totalStart;
+
+    const recordTiming = (stage: string) => {
+      const now = Date.now();
+      timings.push({ stage, durationMs: now - stageStart });
+      stageStart = now;
+    };
 
     const tabId = await this.ensureRakutenTab(onTabCreated);
+    recordTiming('tab-preparation');
     if (tabId === undefined) {
+      recordTiming('total');
       return {
         type: 'result',
         csvs,
         failures: kinds.map((kind) => ({ kind, reason: '楽天証券のタブを開けませんでした' })),
+        timings,
       };
     }
 
     const loggedIn = await this.waitForLogin(tabId, notify);
+    recordTiming('login-wait');
     if (!loggedIn) {
+      recordTiming('total');
       return {
         type: 'result',
         csvs,
         failures: kinds.map((kind) => ({ kind, reason: 'ログインが完了しませんでした' })),
+        timings,
       };
     }
 
     for (const kind of kinds) {
       notify({ type: 'progress', state: 'fetching', kind });
+      const kindStart = Date.now();
 
       const outcome = await this.fetchKind(tabId, kind);
+      const kindDuration = Date.now() - kindStart;
+      timings.push({ stage: `fetch-${kind}`, durationMs: kindDuration });
+
       if (outcome.success) {
         csvs.push(outcome.csv);
         notify({ type: 'progress', state: 'completed', kind });
@@ -253,7 +274,8 @@ export class ExternalRequestHandler {
       }
     }
 
-    return { type: 'result', csvs, failures };
+    recordTiming('total');
+    return { type: 'result', csvs, failures, timings };
   }
 
   /**

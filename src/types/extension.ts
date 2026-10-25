@@ -153,10 +153,16 @@ export interface FetchLatestCsvFailure {
 /**
  * 取得結果
  */
+export interface FetchLatestCsvTiming {
+  readonly stage: string;
+  readonly durationMs: number;
+}
+
 export interface FetchLatestCsvResult {
   readonly type: 'result';
   readonly csvs: readonly FetchedCsv[];
   readonly failures: readonly FetchLatestCsvFailure[];
+  readonly timings: readonly FetchLatestCsvTiming[];
 }
 
 /**
