@@ -337,6 +337,10 @@ describe('rakutenContentScript ステップ実行', () => {
       return sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
     }
 
+    function sendFetchStarted() {
+      return sendMessage({ action: 'fetch-started' } as unknown as ChromeMessage)
+    }
+
     function addPasskeyButton() {
       const button = document.createElement('button')
       button.id = 'login-passkey'
@@ -344,8 +348,9 @@ describe('rakutenContentScript ステップ実行', () => {
       return button
     }
 
-    it('ボタンが無ければクリックしない', async () => {
+    it('check-login-state ではボタンをクリックしない（fetch-started でクリックするため）', async () => {
       document.body.innerHTML = '<input type="password" />'
+      addPasskeyButton()
       const safeClick = vi.spyOn(DomUtils, 'safeClick')
 
       await sendCheckLoginState()
@@ -365,21 +370,38 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(safeClick).not.toHaveBeenCalled()
     })
 
-    it('ボタンがあれば1回だけクリックする', async () => {
+    it('fetch-started 受信後にボタンがあれば即座にクリックする', async () => {
       document.body.innerHTML = '<input type="password" />'
       const button = addPasskeyButton()
       const safeClick = vi.spyOn(DomUtils, 'safeClick')
 
-      // 同じページで2回検出してから押す仕様のため2回送る。
-      // 前のテストで検出済みフラグが立っていると最初の1回で押される
-      await sendCheckLoginState()
-      await sendCheckLoginState()
+      await sendFetchStarted()
+
       expect(safeClick).toHaveBeenCalledTimes(1)
       expect(safeClick).toHaveBeenCalledWith(button)
+    })
 
-      // ダイアログをキャンセルしてボタンが残っていても再クリックしない
-      await sendCheckLoginState()
-      await sendCheckLoginState()
+    it('fetch-started 受信前にボタンが無く、後から出現したらクリックする', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+
+      await sendFetchStarted()
+
+      // ボタンが後から追加される
+      const button = addPasskeyButton()
+
+      expect(safeClick).toHaveBeenCalledTimes(1)
+      expect(safeClick).toHaveBeenCalledWith(button)
+    })
+
+    it('fetch-started でクリック済みなら再クリックしない', async () => {
+      document.body.innerHTML = '<input type="password" />'
+      addPasskeyButton()
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+
+      await sendFetchStarted()
+      await sendFetchStarted()
+
       expect(safeClick).toHaveBeenCalledTimes(1)
     })
   })

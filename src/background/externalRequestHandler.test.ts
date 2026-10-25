@@ -104,7 +104,7 @@ function createHandler(
   config: {
     readonly downloadStartTimeoutMs?: number
     readonly loginWaitTimeoutMs?: number
-    readonly loginPollIntervalMs?: number
+    readonly loginPollIntervalFastMs?: number
     readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
@@ -613,7 +613,7 @@ describe('externalRequestHandler', () => {
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalMs: 5,
+        loginPollIntervalFastMs: 5,
         loginWaitTimeoutMs: 500,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -637,7 +637,7 @@ describe('externalRequestHandler', () => {
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalMs: 5,
+        loginPollIntervalFastMs: 5,
         loginWaitTimeoutMs: 30,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -665,7 +665,7 @@ describe('externalRequestHandler', () => {
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalMs: 5,
+        loginPollIntervalFastMs: 5,
         loginWaitTimeoutMs: 500,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)

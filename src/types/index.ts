@@ -30,6 +30,7 @@ export type {
   FetchLatestCsvProgress,
   FetchLatestCsvProgressState,
   FetchLatestCsvResult,
+  FetchLatestCsvTiming,
   FetchLatestCsvFailure,
   FetchedCsv,
   ExternalErrorResponse,
@@ -37,7 +38,8 @@ export type {
   ApplicationMessage,
   ExtensionState,
   PageReadyMessage,
-  CsvDownloadWillStartMessage
+  CsvDownloadWillStartMessage,
+  FetchStartedMessage
 } from './extension';
 
 // 楽天証券関連の型

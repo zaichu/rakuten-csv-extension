@@ -19,7 +19,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep } from '../utils';
+import { RakutenUtils } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -43,8 +43,6 @@ export interface ExternalRequestHandlerConfig {
   readonly allowedOrigins?: readonly string[];
   /** ログイン完了を待つ最大時間(ms) */
   readonly loginWaitTimeoutMs?: number;
-  /** ログイン状態の確認間隔(ms) */
-  readonly loginPollIntervalMs?: number;
   /** ログイン状態の確認間隔(高速・ms) - ページ読み込み完了後の短い間隔 */
   readonly loginPollIntervalFastMs?: number;
   /** ダウンロード開始を待つ最大時間(ms) */
@@ -58,7 +56,6 @@ export interface ExternalRequestHandlerConfig {
 }
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
-const DEFAULT_LOGIN_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS = 500;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
@@ -136,7 +133,6 @@ export class ExternalRequestHandler {
   private readonly downloadRunner: CsvDownloadRunner;
   private readonly allowedOrigins?: readonly string[];
   private readonly loginWaitTimeoutMs: number;
-  private readonly loginPollIntervalMs: number;
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
@@ -153,7 +149,6 @@ export class ExternalRequestHandler {
     this.downloadRunner = config.downloadRunner;
     this.allowedOrigins = config.allowedOrigins;
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
-    this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
     this.loginPollIntervalFastMs = config.loginPollIntervalFastMs ?? DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS;
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
@@ -388,7 +383,6 @@ export class ExternalRequestHandler {
     notify: (progress: FetchLatestCsvProgress) => void
   ): Promise<boolean> {
     const deadline = Date.now() + this.loginWaitTimeoutMs;
-    let loginPageOpened = false;
     let notified = false;
 
     // 初回のログイン状態確認
@@ -398,10 +392,7 @@ export class ExternalRequestHandler {
     }
 
     // 未ログインならログインページを開く
-    if (!loginPageOpened) {
-      await this.openRakutenPage(tabId);
-      loginPageOpened = true;
-    }
+    await this.openRakutenPage(tabId);
 
     // ページ読み込み完了を待つ（tabs.onUpdated の complete イベント）
     await this.waitForTabLoad(tabId);
@@ -579,6 +570,19 @@ export class ExternalRequestHandler {
         resolve(response);
       });
     });
+  }
+
+  /**
+   * ログイン状態の確認
+   *
+   * コンテンツスクリプトが応答しない場合は判定できないものとして undefined を返す
+   */
+  private async getLoginState(tabId: number): Promise<boolean | undefined> {
+    const response = await this.sendToContentScript(tabId, { action: 'check-login-state' });
+    if (!isLoginStateResponse(response)) {
+      return undefined;
+    }
+    return response.loggedIn === true;
   }
 
   private isAllowedOrigin(origin: string): boolean {

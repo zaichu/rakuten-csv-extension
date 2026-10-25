@@ -24,8 +24,6 @@ class RakutenCsvExtension {
   private loginScreenDetected = false;
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
-  /** 取得処理が実行中か（バックグラウンドから通知を受けて設定） */
-  private fetchingInProgress = false;
   /** パスキーボタンの出現を監視するMutationObserver */
   private passkeyButtonObserver: MutationObserver | null = null;
 
@@ -120,7 +118,6 @@ class RakutenCsvExtension {
    * 出現を監視し、表示されたら即座にクリックする。
    */
   private handleFetchStarted(): void {
-    this.fetchingInProgress = true;
     this.startPasskeyButtonObserver();
   }
 
