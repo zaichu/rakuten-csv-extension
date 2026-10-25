@@ -28,12 +28,16 @@ import {
   type DownloadCapture,
   type DownloadedFileReader,
 } from './downloadedFile';
+import type { StepTimingReporter } from './downloadStepExecutor';
 
 /**
  * CSVダウンロード手順の実行口
  */
 export interface CsvDownloadRunner {
-  executeDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse>;
+  executeDownloadRequest(
+    message: CsvDownloadMessage,
+    reportStep?: StepTimingReporter
+  ): Promise<DownloadResponse>;
 }
 
 export interface ExternalRequestHandlerConfig {
@@ -267,6 +271,7 @@ export class ExternalRequestHandler {
 
       const outcome = await this.fetchKind(tabId, kind);
       timings.push({ stage: `fetch-${kind}`, durationMs: Date.now() - kindStart });
+      timings.push(...outcome.stepTimings);
 
       if (outcome.success) {
         csvs.push(outcome.csv);
@@ -288,41 +293,60 @@ export class ExternalRequestHandler {
     tabId: number,
     kind: CsvDownloadType
   ): Promise<
-    { success: true; csv: FetchedCsv } | { success: false; reason: string; code?: string }
+    | { success: true; csv: FetchedCsv; stepTimings: FetchLatestCsvTiming[] }
+    | { success: false; reason: string; code?: string; stepTimings: FetchLatestCsvTiming[] }
   > {
+    const stepTimings: FetchLatestCsvTiming[] = [];
+    // 種類ごとのステップの内訳を、どの段階に時間がかかるか分かる形で残す
+    const reportStep: StepTimingReporter = ({ step, phase, durationMs }) => {
+      const stage = phase === 'download-start' ? 'download-start' : step;
+      stepTimings.push({ stage: `fetch-${kind}:${stage}`, durationMs });
+    };
+
     const capture = createDownloadCapture(tabId, this.downloadStartTimeoutMs);
     this.pendingCapture = capture;
 
     let stepResult: DownloadResponse;
     try {
-      stepResult = await this.downloadRunner.executeDownloadRequest({
-        action: 'download-csv-request',
-        payload: { selectedOptions: [kind], tabId, captureDownloadStart: true },
-      });
+      stepResult = await this.downloadRunner.executeDownloadRequest(
+        {
+          action: 'download-csv-request',
+          payload: { selectedOptions: [kind], tabId, captureDownloadStart: true },
+        },
+        reportStep
+      );
     } finally {
       this.pendingCapture = undefined;
     }
 
     if (!stepResult.success) {
       capture.cancel();
-      return { success: false, reason: stepResult.error ?? 'CSVの取得に失敗しました' };
+      return {
+        success: false,
+        reason: stepResult.error ?? 'CSVの取得に失敗しました',
+        stepTimings,
+      };
     }
 
     // クリック直前の通知が届かなかった場合に備えて、待ちを開始する
     capture.arm();
     const downloadId = await capture.downloadId;
     if (downloadId === undefined) {
-      return { success: false, reason: 'CSVのダウンロードを開始できませんでした' };
+      return {
+        success: false,
+        reason: 'CSVのダウンロードを開始できませんでした',
+        stepTimings,
+      };
     }
 
     const item = await waitForCompletedDownload(downloadId, this.downloadCompleteTimeoutMs);
     if (!item) {
-      return { success: false, reason: 'CSVのダウンロードが完了しませんでした' };
+      return { success: false, reason: 'CSVのダウンロードが完了しませんでした', stepTimings };
     }
 
     const result = await readDownloadedCsv(this.fileReader, item);
     if (!result.success) {
-      return { success: false, reason: result.reason, code: result.code };
+      return { success: false, reason: result.reason, code: result.code, stepTimings };
     }
 
     return {
@@ -333,6 +357,7 @@ export class ExternalRequestHandler {
         fetchedAt: new Date().toISOString(),
         fileRemoved: result.fileRemoved,
       },
+      stepTimings,
     };
   }
 

@@ -70,10 +70,45 @@ export type StepGroup =
 /** コンテンツスクリプトとの通信が切れて応答を受け取れなかった失敗 */
 type StepExecutionResponse = DownloadResponse & { readonly communicationFailed?: boolean };
 
+/**
+ * ステップごとの所要時間
+ *
+ * どこに時間がかかっているかを画面から確認できるようにする。
+ * URLのクエリや件数・金額などの個人情報は含めない。
+ */
+export interface StepTiming {
+  readonly step: CsvDownloadStep;
+  /** クリック応答までの時間か、押下してからダウンロード開始までの時間か */
+  readonly phase: 'action' | 'download-start';
+  readonly durationMs: number;
+}
+
+export type StepTimingReporter = (timing: StepTiming) => void;
+
+/** 成功した実行の計測時刻 */
+interface StepExecutionTiming {
+  readonly startedAt: number;
+  readonly actionCompletedAt: number;
+  readonly downloadStartedAt?: number;
+}
+
 /** ステップ群の実行結果と、クリック前に待ち受けたダウンロード開始の待ち受け */
 interface StepExecutionOutcome {
   readonly response: DownloadResponse;
   readonly downloadStart?: Promise<boolean>;
+  readonly timing?: StepExecutionTiming;
+}
+
+/**
+ * ページ遷移の待ち受け
+ *
+ * 遷移が始まったかどうかを呼び出し側から確認できるようにする。遷移を伴わない
+ * ステップ（画面内の更新だけ）で上限時間まで待たないため。
+ */
+interface PageTransitionWait {
+  readonly done: Promise<void>;
+  readonly hasStarted: () => boolean;
+  readonly cancel: () => void;
 }
 
 export class DownloadStepExecutor {
@@ -93,6 +128,9 @@ export class DownloadStepExecutor {
 
   /** ページ遷移完了イベントを取りこぼした場合のハング防止タイムアウト */
   private readonly pageTransitionTimeout = 3000;
+
+  /** 遷移が始まるかを見極める猶予。遷移しないステップで上限時間まで待たないための短い待ち */
+  private readonly pageTransitionSettleTime = 300;
 
   /**
    * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
@@ -114,8 +152,13 @@ export class DownloadStepExecutor {
 
   /**
    * CSVダウンロードリクエスト処理
+   *
+   * reportStep を渡すと、ステップごとの所要時間を実行のたびに受け取れる
    */
-  async executeDownloadRequest(message: CsvDownloadMessage): Promise<DownloadResponse> {
+  async executeDownloadRequest(
+    message: CsvDownloadMessage,
+    reportStep?: StepTimingReporter
+  ): Promise<DownloadResponse> {
     const { selectedOptions, tabId, captureDownloadStart } = message.payload;
 
     this.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
@@ -148,7 +191,12 @@ export class DownloadStepExecutor {
 
       // ダウンロード処理を順次実行
       for (const downloadType of selectedOptions) {
-        const result = await this.processCsvDownload(targetTabId, downloadType, captureDownloadStart);
+        const result = await this.processCsvDownload(
+          targetTabId,
+          downloadType,
+          captureDownloadStart,
+          reportStep
+        );
 
         if (!result.success) {
           return result;
@@ -175,7 +223,8 @@ export class DownloadStepExecutor {
   private async processCsvDownload(
     tabId: number,
     downloadType: CsvDownloadType,
-    captureDownloadStart?: boolean
+    captureDownloadStart?: boolean,
+    reportStep?: StepTimingReporter
   ): Promise<DownloadResponse> {
     const config = RakutenUtils.getCsvDownloadConfig(downloadType);
 
@@ -188,7 +237,7 @@ export class DownloadStepExecutor {
 
     this.log('ダウンロード設定:', config);
 
-    return this.executeDownloadSequence(tabId, config, captureDownloadStart);
+    return this.executeDownloadSequence(tabId, config, captureDownloadStart, reportStep);
   }
 
   /**
@@ -227,7 +276,8 @@ export class DownloadStepExecutor {
   private async executeDownloadSequence(
     tabId: number,
     config: CsvDownloadConfig,
-    captureDownloadStart?: boolean
+    captureDownloadStart?: boolean,
+    reportStep?: StepTimingReporter
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
     const groups = this.groupSteps(steps);
@@ -240,7 +290,7 @@ export class DownloadStepExecutor {
 
       // クリック直後に発火するページ遷移完了イベントを取りこぼさないよう、
       // executeSteps呼び出し前（クリック前）に待ち受けを準備しておく。
-      const pageTransitionPromise = group.kind === 'page-transition'
+      const pageTransition = group.kind === 'page-transition'
         ? this.waitForPageTransition(tabId, this.pageTransitionTimeout)
         : null;
 
@@ -262,7 +312,10 @@ export class DownloadStepExecutor {
         };
       }
 
-      await pageTransitionPromise;
+      if (pageTransition) {
+        await this.settlePageTransition(pageTransition);
+      }
+      this.reportStepTiming(reportStep, steps, outcome);
       await outcome.downloadStart;
     }
 
@@ -294,11 +347,22 @@ export class DownloadStepExecutor {
         : undefined;
 
       try {
+        const attemptStart = Date.now();
         let result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
+        const actionCompletedAt = Date.now();
 
         if (result.success) {
-          if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
-            return { response: result, downloadStart };
+          const started = !downloadStart || await this.isDownloadStarted(downloadStart);
+          if (started) {
+            return {
+              response: result,
+              downloadStart,
+              timing: {
+                startedAt: attemptStart,
+                actionCompletedAt,
+                downloadStartedAt: downloadStart ? Date.now() : undefined
+              }
+            };
           }
           result = {
             success: false,
@@ -352,6 +416,34 @@ export class DownloadStepExecutor {
         code: lastCode
       }
     };
+  }
+
+  /**
+   * ステップごとの所要時間を報告する
+   *
+   * ページ遷移を伴うステップは遷移完了までを、ダウンロードのステップは押下までと
+   * 押下からダウンロード開始までを分けて報告する。
+   */
+  private reportStepTiming(
+    reportStep: StepTimingReporter | undefined,
+    steps: readonly CsvDownloadStep[],
+    outcome: StepExecutionOutcome
+  ): void {
+    const timing = outcome.timing;
+    if (!reportStep || !timing) {
+      return;
+    }
+
+    const step = steps[steps.length - 1];
+    reportStep({ step, phase: 'action', durationMs: Date.now() - timing.startedAt });
+
+    if (timing.downloadStartedAt !== undefined) {
+      reportStep({
+        step,
+        phase: 'download-start',
+        durationMs: timing.downloadStartedAt - timing.actionCompletedAt
+      });
+    }
   }
 
   /**
@@ -522,7 +614,7 @@ export class DownloadStepExecutor {
   /**
    * ページ遷移完了を待つ
    *
-   * navigate-to-page/select-tab のクリックを送る前に呼び出すことで、
+   * navigate-to-page/select-tab/display-data のクリックを送る前に呼び出すことで、
    * クリック直後に発火する chrome.tabs.onUpdated の complete イベントや
    * 新しいcontent scriptからのpage-ready通知を取りこぼさずに捕捉する
    * （クリック後に現在の状態を見ると、遷移開始前の古い complete 状態を
@@ -531,34 +623,77 @@ export class DownloadStepExecutor {
    * ページ遷移が発生しない、またはイベントを取りこぼした場合に備えて
    * timeoutMs 経過時にも resolve する。
    */
-  private waitForPageTransition(tabId: number, timeoutMs: number): Promise<void> {
+  private waitForPageTransition(tabId: number, timeoutMs: number): PageTransitionWait {
+    let settled = false;
+    let navigationStarted = false;
+    let resolveDone: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+      this.removePageReadyWaiter(tabId, finish);
+      clearTimeout(timer);
+      resolveDone();
+    };
+
+    const onUpdatedListener = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.OnUpdatedInfo
+    ): void => {
+      if (updatedTabId !== tabId) {
+        return;
+      }
+      // 遷移が始まった時点では完了を待つ（読み込み中に次のステップを送らない）
+      if (changeInfo.status === 'loading') {
+        navigationStarted = true;
+        return;
+      }
+      if (changeInfo.status === 'complete') {
+        finish();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdatedListener);
+    this.addPageReadyWaiter(tabId, finish);
+    const timer = setTimeout(finish, timeoutMs);
+
+    return { done, hasStarted: () => navigationStarted, cancel: finish };
+  }
+
+  /**
+   * ページ遷移の待ち受けを結着させる
+   *
+   * 遷移が始まっていれば完了まで待ち、始まらなければ短い猶予で次へ進む
+   * （画面内の更新だけで終わるステップが上限時間まで待たされるのを避ける）。
+   */
+  private settlePageTransition(wait: PageTransitionWait): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
 
-      const finish = () => {
+      const finish = (): void => {
         if (settled) {
           return;
         }
         settled = true;
-        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-        this.removePageReadyWaiter(tabId, finish);
         clearTimeout(timer);
         resolve();
       };
 
-      const onUpdatedListener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+      // 遷移が始まっていれば、完了イベント（または上限時間）まで待ち続ける
+      const timer = setTimeout(() => {
+        if (!wait.hasStarted()) {
           finish();
         }
-      };
+      }, this.pageTransitionSettleTime);
 
-      chrome.tabs.onUpdated.addListener(onUpdatedListener);
-      this.addPageReadyWaiter(tabId, finish);
-      const timer = setTimeout(finish, timeoutMs);
-    });
+      void wait.done.then(finish);
+    }).then(() => wait.cancel());
   }
 
   /**

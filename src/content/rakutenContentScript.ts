@@ -9,7 +9,7 @@ import type {
   CsvDownloadStep,
   CsvSelectors
 } from '../types';
-import { RakutenUtils, DomUtils, withTimeout } from '../utils';
+import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -18,6 +18,7 @@ import { RakutenUtils, DomUtils, withTimeout } from '../utils';
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
   private readonly elementTimeout = 5000;
+  private readonly elementPollInterval = 50;
   private readonly notifyTimeout = 2000;
 
   /** このページでログイン画面を検出済みか */
@@ -313,7 +314,7 @@ class RakutenCsvExtension {
   }
 
   /**
-   * 要素を検索（無ければ出現を監視してタイムアウトまで待つ）
+   * 要素を検索（無ければ短い間隔で探し直してタイムアウトまで待つ）
    */
   private async findElement(
     selectorGroup: string,
@@ -342,30 +343,20 @@ class RakutenCsvExtension {
       return existing.element;
     }
 
-    // MutationObserverで要素の出現を待機
-    return new Promise((resolve, reject) => {
-      const observer = new MutationObserver(() => {
-        const found = findMatching();
-        if (found) {
-          observer.disconnect();
-          clearTimeout(timeoutId);
-          console.log(`動的に要素が見つかりました: ${found.selector}`);
-          resolve(found.element);
-        }
-      });
+    // DOMの変化を待つ方式だと、変化を伴わずに押せるようになった要素（画像の読み込み後に
+    // 大きさが付いた等）を見逃して上限時間まで待つ。短い間隔で探し直し、押せるように
+    // なった時点で押す
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await sleep(this.elementPollInterval);
+      const found = findMatching();
+      if (found) {
+        console.log(`動的に要素が見つかりました: ${found.selector}`);
+        return found.element;
+      }
+    }
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style', 'class', 'hidden']
-      });
-
-      const timeoutId = window.setTimeout(() => {
-        observer.disconnect();
-        reject(new Error(`要素が見つかりませんでした: ${selectorGroup} (${timeout}ms)`));
-      }, timeout);
-    });
+    throw new Error(`要素が見つかりませんでした: ${selectorGroup} (${timeout}ms)`);
   }
 
   /**
