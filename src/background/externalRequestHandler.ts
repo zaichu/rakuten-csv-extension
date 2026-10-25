@@ -45,6 +45,8 @@ export interface ExternalRequestHandlerConfig {
   readonly loginWaitTimeoutMs?: number;
   /** ログイン状態の確認間隔(ms) */
   readonly loginPollIntervalMs?: number;
+  /** ログイン状態の確認間隔(高速・ms) - ページ読み込み完了後の短い間隔 */
+  readonly loginPollIntervalFastMs?: number;
   /** ダウンロード開始を待つ最大時間(ms) */
   readonly downloadStartTimeoutMs?: number;
   /** ダウンロードの完了を待つ最大時間(ms) */
@@ -57,6 +59,7 @@ export interface ExternalRequestHandlerConfig {
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS = 500;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
@@ -137,6 +140,7 @@ export class ExternalRequestHandler {
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
+  private readonly loginPollIntervalFastMs: number;
   private readonly fileReader: DownloadedFileReader;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
@@ -150,6 +154,7 @@ export class ExternalRequestHandler {
     this.allowedOrigins = config.allowedOrigins;
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
     this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
+    this.loginPollIntervalFastMs = config.loginPollIntervalFastMs ?? DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS;
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
@@ -370,6 +375,11 @@ export class ExternalRequestHandler {
   /**
    * ログイン完了を待つ
    *
+   * 1. 未ログインならログインページを開く
+   * 2. tabs.onUpdated でページ読み込み完了(status: 'complete')を待つ
+   * 3. 読み込み完了後は短い間隔(500ms)でログイン状態をポーリング
+   * 4. URL変化(tabs.onUpdated)でもログイン完了を検知する
+   *
    * コンテンツスクリプトが応答しない場合は判断できないものとして扱い、
    * ログイン画面を開いて読み込み直してから判定し直す
    */
@@ -381,38 +391,93 @@ export class ExternalRequestHandler {
     let loginPageOpened = false;
     let notified = false;
 
-    while (Date.now() < deadline) {
-      const loggedIn = await this.getLoginState(tabId);
-      if (loggedIn === true) {
-        return true;
-      }
-
-      if (loggedIn === false && !notified) {
-        notify({ type: 'progress', state: 'login-wait' });
-        notified = true;
-      }
-
-      if (!loginPageOpened) {
-        await this.openRakutenPage(tabId);
-        loginPageOpened = true;
-      }
-
-      await sleep(this.loginPollIntervalMs);
+    // 初回のログイン状態確認
+    const initialLoginState = await this.getLoginState(tabId);
+    if (initialLoginState === true) {
+      return true;
     }
-    return false;
+
+    // 未ログインならログインページを開く
+    if (!loginPageOpened) {
+      await this.openRakutenPage(tabId);
+      loginPageOpened = true;
+    }
+
+    // ページ読み込み完了を待つ（tabs.onUpdated の complete イベント）
+    await this.waitForTabLoad(tabId);
+
+    // 読み込み完了後、ログイン完了を短い間隔でポーリング + URL変化で検知
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const finish = (loggedIn: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+        clearInterval(pollTimer);
+        resolve(loggedIn);
+      };
+
+      // URL変化でログイン完了を検知（ログイン後のリダイレクト等）
+      const onUpdatedListener = (
+        updatedTabId: number,
+        changeInfo: chrome.tabs.OnUpdatedInfo
+      ): void => {
+        if (updatedTabId !== tabId) {
+          return;
+        }
+        // URLが変わった、かつログイン関連のパスでなくなった場合はログイン完了とみなす
+        if (changeInfo.url && !this.isLoginUrl(changeInfo.url)) {
+          finish(true);
+        }
+      };
+
+      chrome.tabs.onUpdated.addListener(onUpdatedListener);
+
+      // 短い間隔でポーリング（500ms）
+      const pollTimer = setInterval(async () => {
+        if (Date.now() >= deadline) {
+          finish(false);
+          return;
+        }
+
+        const loggedIn = await this.getLoginState(tabId);
+        if (loggedIn === true) {
+          finish(true);
+          return;
+        }
+
+        if (loggedIn === false && !notified) {
+          notify({ type: 'progress', state: 'login-wait' });
+          notified = true;
+        }
+
+        // コンテンツスクリプトが応答しない場合は読み込み直し
+        if (loggedIn === undefined) {
+          await this.openRakutenPage(tabId);
+          await this.waitForTabLoad(tabId);
+        }
+      }, this.loginPollIntervalFastMs);
+
+      // タイムアウト
+      setTimeout(() => {
+        finish(false);
+      }, this.loginWaitTimeoutMs);
+    });
   }
 
   /**
-   * ログイン状態の確認
-   *
-   * コンテンツスクリプトが応答しない場合は判定できないものとして undefined を返す
+   * URLがログイン関連のページか判定
    */
-  private async getLoginState(tabId: number): Promise<boolean | undefined> {
-    const response = await this.sendToContentScript(tabId, { action: 'check-login-state' });
-    if (!isLoginStateResponse(response)) {
-      return undefined;
+  private isLoginUrl(url: string): boolean {
+    try {
+      const urlObj = new URL(url);
+      return /\/login/i.test(urlObj.pathname);
+    } catch {
+      return false;
     }
-    return response.loggedIn === true;
   }
 
   /**
