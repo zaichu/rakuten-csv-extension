@@ -40,6 +40,13 @@ class RakutenCsvExtension {
   }
 
   /**
+   * テスト用：シングルトンインスタンスをリセット
+   */
+  static resetInstance(): void {
+    RakutenCsvExtension.instance = null;
+  }
+
+  /**
    * 拡張機能の初期化
    */
   private initialize(): void {
@@ -495,6 +502,9 @@ export function onExecute(): void {
     RakutenCsvExtension.getInstance();
   }
 }
+
+// テスト用にクラスをエクスポート
+export { RakutenCsvExtension };
 
 // スクリプト読み込み完了のログ
 console.log('楽天証券CSV拡張機能のコンテンツスクリプトが読み込まれました');

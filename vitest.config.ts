@@ -9,6 +9,7 @@ export default defineConfig({
     setupFiles: ['./src/tests/setup.ts'],
     exclude: ['node_modules', 'dist', 'e2e'],
     css: true,
+    pool: 'vmThreads',
     coverage: {
       reporter: ['text', 'json', 'html'],
       exclude: [

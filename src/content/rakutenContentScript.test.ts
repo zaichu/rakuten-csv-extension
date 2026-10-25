@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import type { ChromeMessage, CsvDownloadStep, DownloadResponse } from '../types'
 import { RakutenUtils, DomUtils } from '../utils'
-import { onExecute } from './rakutenContentScript'
+import { onExecute, RakutenCsvExtension } from './rakutenContentScript'
 
 /**
  * ステップ実行の挙動を固定する characterization test。
@@ -48,12 +48,21 @@ describe('rakutenContentScript ステップ実行', () => {
     listener = addListener.mock.calls[addListener.mock.calls.length - 1][0] as unknown as Listener
   })
 
+  // beforeEach でも再初期化されるため、beforeAll ではリスナー取得のみ行う
+  // 実際の beforeEach でリセット・再初期化される
+
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     document.body.innerHTML = ''
     vi.spyOn(RakutenUtils, 'isRakutenSecurities').mockReturnValue(true)
+    // シングルトンをリセットして再初期化
+    RakutenCsvExtension.resetInstance()
+    onExecute()
+    // 再初期化後のリスナーを取得
+    const addListener = vi.mocked(chrome.runtime.onMessage.addListener)
+    listener = addListener.mock.calls[addListener.mock.calls.length - 1][0] as unknown as Listener
   })
 
   afterEach(() => {
@@ -389,6 +398,9 @@ describe('rakutenContentScript ステップ実行', () => {
 
       // ボタンが後から追加される
       const button = addPasskeyButton()
+
+      // MutationObserver のコールバックは非同期で実行されるため待つ
+      await new Promise<void>(resolve => queueMicrotask(() => resolve()))
 
       expect(safeClick).toHaveBeenCalledTimes(1)
       expect(safeClick).toHaveBeenCalledWith(button)

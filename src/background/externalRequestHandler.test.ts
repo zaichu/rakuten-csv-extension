@@ -230,6 +230,10 @@ describe('externalRequestHandler', () => {
       }
       callback?.({ success: true })
     })
+    // waitForTabLoad の完了をシミュレート
+    vi.mocked(chrome.tabs.onUpdated.addListener).mockImplementation((listener) => {
+      queueMicrotask(() => listener(TARGET_TAB_ID, { status: 'complete' }, {} as chrome.tabs.Tab))
+    })
   })
 
   afterEach(() => {
