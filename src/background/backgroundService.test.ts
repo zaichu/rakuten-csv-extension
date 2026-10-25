@@ -361,20 +361,22 @@ describe('backgroundService characterization', () => {
       expect(response).toEqual({ success: true, message: 'すべてのCSVダウンロードが完了しました' })
 
       const calls = vi.mocked(chrome.tabs.sendMessage).mock.calls
-      expect(calls).toHaveLength(4)
-      expect(calls[0][1]).toMatchObject({
+      // 接続確認(1) + 4ステップグループ = 5回
+      expect(calls).toHaveLength(5)
+      // 0: 接続確認
+      expect(calls[1][1]).toMatchObject({
         action: 'execute-csv-download-steps',
         payload: { downloadSteps: ['navigate-to-page'] },
       })
-      expect(calls[1][1]).toMatchObject({
+      expect(calls[2][1]).toMatchObject({
         action: 'execute-csv-download-steps',
         payload: { downloadSteps: ['select-period'] },
       })
-      expect(calls[2][1]).toMatchObject({
+      expect(calls[3][1]).toMatchObject({
         action: 'execute-csv-download-steps',
         payload: { downloadSteps: ['display-data'] },
       })
-      expect(calls[3][1]).toMatchObject({
+      expect(calls[4][1]).toMatchObject({
         action: 'execute-csv-download-steps',
         payload: { downloadSteps: ['download-csv'] },
       })
@@ -426,7 +428,8 @@ describe('backgroundService characterization', () => {
       expect(response.success).toBe(false)
       // 初回 + リトライ2回 = 3回試行
       expect(response.error).toContain('3回試行')
-      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(3)
+      // 接続確認(1) + navigate-to-page 3回試行 = 4回
+      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(4)
     })
   })
 

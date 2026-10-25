@@ -80,7 +80,8 @@ export interface CheckLoginStateInstruction extends ChromeMessage {
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
   | ExtensionUpdatedMessage
-  | CheckLoginStateInstruction;
+  | CheckLoginStateInstruction
+  | { readonly action: 'check-connection' };
 
 /**
  * ダウンロードレスポンス
@@ -90,6 +91,7 @@ export interface DownloadResponse {
   readonly message?: string;
   readonly error?: string;
   readonly step?: CsvDownloadStep;
+  readonly code?: string;
 }
 
 /**
