@@ -69,7 +69,7 @@ export class DownloadStepExecutor {
   private readonly config: ExtensionConfig = {
     maxRetries: 2,
     stepTimeout: 30000,
-    retryInterval: 1000,
+    retryInterval: 300,
     debugMode: false
   };
 
