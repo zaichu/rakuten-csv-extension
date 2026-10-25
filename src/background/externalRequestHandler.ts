@@ -245,9 +245,6 @@ export class ExternalRequestHandler {
       };
     }
 
-    // 取得開始をコンテンツスクリプトに通知（パスキーボタン即時クリック用）
-    await this.notifyFetchStarted(tabId);
-
     const loggedIn = await this.waitForLogin(tabId, notify);
     recordTiming('login-wait');
     if (!loggedIn) {
@@ -372,18 +369,20 @@ export class ExternalRequestHandler {
    *
    * 1. 未ログインならログインページを開く
    * 2. tabs.onUpdated でページ読み込み完了(status: 'complete')を待つ
-   * 3. 読み込み完了後は短い間隔(500ms)でログイン状態をポーリング
-   * 4. URL変化(tabs.onUpdated)でもログイン完了を検知する
+   * 3. 読み込み完了後、コンテンツスクリプトに取得開始を通知（パスキーボタン即時クリック用）
+   * 4. 短い間隔(500ms)で逐次ポーリングしてログイン状態を確認
+   * 5. URL変化(tabs.onUpdated)でもログイン完了を検知する
    *
    * コンテンツスクリプトが応答しない場合は判断できないものとして扱い、
-   * ログイン画面を開いて読み込み直してから判定し直す
+   * ログイン画面を開いて読み込み直してから判定し直す（読み込み直しは1回のみ）
    */
   private async waitForLogin(
     tabId: number,
     notify: (progress: FetchLatestCsvProgress) => void
   ): Promise<boolean> {
     const deadline = Date.now() + this.loginWaitTimeoutMs;
-    let notified = false;
+    const state = { notified: false, reloadAttempted: false };
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     // 初回のログイン状態確認
     const initialLoginState = await this.getLoginState(tabId);
@@ -397,7 +396,10 @@ export class ExternalRequestHandler {
     // ページ読み込み完了を待つ（tabs.onUpdated の complete イベント）
     await this.waitForTabLoad(tabId);
 
-    // 読み込み完了後、ログイン完了を短い間隔でポーリング + URL変化で検知
+    // ページ読み込み完了後、コンテンツスクリプトに取得開始を通知
+    await this.notifyFetchStarted(tabId);
+
+    // 読み込み完了後、ログイン完了を短い間隔で逐次ポーリング + URL変化で検知
     return new Promise<boolean>((resolve) => {
       let settled = false;
 
@@ -407,7 +409,7 @@ export class ExternalRequestHandler {
         }
         settled = true;
         chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-        clearInterval(pollTimer);
+        clearTimeout(timeoutId);
         resolve(loggedIn);
       };
 
@@ -419,55 +421,81 @@ export class ExternalRequestHandler {
         if (updatedTabId !== tabId) {
           return;
         }
-        // URLが変わった、かつログイン関連のパスでなくなった場合はログイン完了とみなす
-        if (changeInfo.url && !this.isLoginUrl(changeInfo.url)) {
-          finish(true);
+        // URLが変わった場合、ログイン状態を再確認する
+        if (changeInfo.url) {
+          // 即座にポーリングで確認する（setTimeoutで非同期に）
+          setTimeout(() => {
+            if (!settled) {
+              this.pollLoginStateOnce(tabId, deadline, state, notify, finish);
+            }
+          }, 0);
         }
       };
 
       chrome.tabs.onUpdated.addListener(onUpdatedListener);
 
-      // 短い間隔でポーリング（500ms）
-      const pollTimer = setInterval(async () => {
+      // 逐次ポーリング（前回の完了を待ってから次を実行）
+      const pollLoginState = async () => {
+        if (settled) return;
         if (Date.now() >= deadline) {
           finish(false);
           return;
         }
 
-        const loggedIn = await this.getLoginState(tabId);
-        if (loggedIn === true) {
-          finish(true);
-          return;
-        }
+        await this.pollLoginStateOnce(tabId, deadline, state, notify, finish);
 
-        if (loggedIn === false && !notified) {
-          notify({ type: 'progress', state: 'login-wait' });
-          notified = true;
+        // 次のポーリングをスケジュール（逐次実行）
+        if (!settled) {
+          setTimeout(pollLoginState, this.loginPollIntervalFastMs);
         }
-
-        // コンテンツスクリプトが応答しない場合は読み込み直し
-        if (loggedIn === undefined) {
-          await this.openRakutenPage(tabId);
-          await this.waitForTabLoad(tabId);
-        }
-      }, this.loginPollIntervalFastMs);
+      };
 
       // タイムアウト
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         finish(false);
       }, this.loginWaitTimeoutMs);
+
+      // ポーリング開始
+      pollLoginState();
     });
   }
 
   /**
-   * URLがログイン関連のページか判定
+   * ログイン状態を1回ポーリング
+   *
+   * loggedIn === true なら完了
+   * loggedIn === false なら進捗通知
+   * loggedIn === undefined なら読み込み直し（1回のみ）
    */
-  private isLoginUrl(url: string): boolean {
-    try {
-      const urlObj = new URL(url);
-      return /\/login/i.test(urlObj.pathname);
-    } catch {
-      return false;
+  private async pollLoginStateOnce(
+    tabId: number,
+    deadline: number,
+    state: { notified: boolean; reloadAttempted: boolean },
+    notify: (progress: FetchLatestCsvProgress) => void,
+    finish: (loggedIn: boolean) => void
+  ): Promise<void> {
+    if (Date.now() >= deadline) {
+      finish(false);
+      return;
+    }
+
+    const loggedIn = await this.getLoginState(tabId);
+    if (loggedIn === true) {
+      finish(true);
+      return;
+    }
+
+    if (loggedIn === false && !state.notified) {
+      state.notified = true;
+      notify({ type: 'progress', state: 'login-wait' });
+    }
+
+    // コンテンツスクリプトが応答しない場合は読み込み直し（1回のみ）
+    if (loggedIn === undefined && !state.reloadAttempted) {
+      state.reloadAttempted = true;
+      await this.openRakutenPage(tabId);
+      await this.waitForTabLoad(tabId);
+      await this.notifyFetchStarted(tabId);
     }
   }
 
