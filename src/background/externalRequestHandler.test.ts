@@ -14,6 +14,7 @@ import {
   readAllowedOrigins,
 } from './externalRequestHandler'
 import type { DownloadedFileReader } from './downloadedFile'
+import type { StepTiming } from './downloadStepExecutor'
 
 /**
  * 外部ページ(shoken-webapp)からの取得依頼の挙動を固定する。
@@ -427,6 +428,36 @@ describe('externalRequestHandler', () => {
         'total',
       ])
       expect(result.timings.every((timing) => timing.durationMs >= 0)).toBe(true)
+    })
+
+    it('種類ごとのステップ所要時間を段階名に含めて返す', async () => {
+      const runner = {
+        executeDownloadRequest: vi.fn(
+          async (_message: unknown, reportStep?: (timing: StepTiming) => void) => {
+            reportStep?.({ step: 'download-csv', phase: 'action', durationMs: 12 })
+            reportStep?.({ step: 'download-csv', phase: 'download-start', durationMs: 34 })
+            return { success: false, error: '取得失敗' }
+          }
+        ),
+      }
+      const handler = new ExternalRequestHandler({
+        downloadRunner: runner,
+        allowedOrigins: ALLOWED_PATTERNS,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['domesticstock'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.timings).toEqual([
+        { stage: 'tab-preparation', durationMs: expect.any(Number) },
+        { stage: 'login-wait', durationMs: expect.any(Number) },
+        { stage: 'fetch-domesticstock', durationMs: expect.any(Number) },
+        { stage: 'fetch-domesticstock:download-csv', durationMs: 12 },
+        { stage: 'fetch-domesticstock:download-start', durationMs: 34 },
+        { stage: 'total', durationMs: expect.any(Number) },
+      ])
     })
 
     it('進行状況を種類ごとに返す', async () => {

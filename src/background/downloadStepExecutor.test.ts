@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { CsvDownloadMessage, DownloadResponse } from '../types'
-import { DownloadStepExecutor, type TabStateReader } from './downloadStepExecutor'
+import {
+  DownloadStepExecutor,
+  type StepTiming,
+  type TabStateReader,
+} from './downloadStepExecutor'
 
 /**
  * downloadStepExecutor の通信失敗時の扱いを固定する。
@@ -29,6 +33,13 @@ function downloadRequest(): CsvDownloadMessage {
   return {
     action: 'download-csv-request',
     payload: { selectedOptions: ['assetbalance'], tabId: TAB_ID },
+  }
+}
+
+function domesticStockRequest(): CsvDownloadMessage {
+  return {
+    action: 'download-csv-request',
+    payload: { selectedOptions: ['domesticstock'], tabId: TAB_ID },
   }
 }
 
@@ -270,6 +281,82 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('待ちの短縮とステップごとの計測', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  /** display-data が画面内の更新だけで済む（ページ遷移しない）国内株式の応答を返す */
+  function stubDomesticStockWithoutDisplayTransition(): string[][] {
+    const sent: string[][] = []
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      const steps = sentSteps(message)
+      if (steps.length === 0) {
+        callback?.({ success: true })
+        return
+      }
+      sent.push([...steps])
+      if (steps.includes('download-csv')) {
+        fireDownloadCreated()
+      } else if (steps.includes('navigate-to-page')) {
+        firePageTransition(tabId)
+      }
+      callback?.({ success: true })
+    })
+    return sent
+  }
+
+  it('遷移しないステップは待ちの上限まで待たずに次へ進む', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      const sent = stubDomesticStockWithoutDisplayTransition()
+
+      const pending = executor.executeDownloadRequest(domesticStockRequest())
+      // ページ遷移の上限は3000ms。遷移しない表示ステップでそれを待たないことを確かめる
+      await vi.advanceTimersByTimeAsync(1000)
+      const response = await pending
+
+      expect(response.success).toBe(true)
+      expect(sent).toEqual([
+        ['navigate-to-page'],
+        ['select-period'],
+        ['display-data'],
+        ['download-csv'],
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ステップごとの所要時間をステップの順に報告する', async () => {
+    const executor = createExecutor()
+    stubDomesticStockWithoutDisplayTransition()
+
+    const reported: StepTiming[] = []
+    const response = await executor.executeDownloadRequest(domesticStockRequest(), (timing) => {
+      reported.push(timing)
+    })
+
+    expect(response.success).toBe(true)
+    expect(reported.map((timing) => `${timing.step}:${timing.phase}`)).toEqual([
+      'navigate-to-page:action',
+      'select-period:action',
+      'display-data:action',
+      'download-csv:action',
+      'download-csv:download-start',
+    ])
+    expect(reported.every((timing) => timing.durationMs >= 0)).toBe(true)
   })
 })
 
