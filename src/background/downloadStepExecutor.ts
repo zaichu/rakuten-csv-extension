@@ -480,7 +480,7 @@ export class DownloadStepExecutor {
    */
   private async checkContentScriptConnection(tabId: number): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, (response) => {
+      chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
         if (chrome.runtime.lastError) {
           const errorMessage = chrome.runtime.lastError.message;
           if (isContentScriptMissingError(errorMessage)) {
