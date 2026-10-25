@@ -104,7 +104,7 @@ function createHandler(
   config: {
     readonly downloadStartTimeoutMs?: number
     readonly loginWaitTimeoutMs?: number
-    readonly loginPollIntervalFastMs?: number
+    readonly loginPollIntervalMs?: number
     readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
@@ -229,10 +229,6 @@ describe('externalRequestHandler', () => {
         return
       }
       callback?.({ success: true })
-    })
-    // waitForTabLoad の完了をシミュレート
-    vi.mocked(chrome.tabs.onUpdated.addListener).mockImplementation((listener) => {
-      queueMicrotask(() => listener(TARGET_TAB_ID, { status: 'complete' }, {} as chrome.tabs.Tab))
     })
   })
 
@@ -414,6 +410,23 @@ describe('externalRequestHandler', () => {
       expect(result.csvs).toHaveLength(1)
       expect(result.csvs[0].content).toBe(CSV_CONTENT)
       expect(new Date(result.csvs[0].fetchedAt).toISOString()).toBe(result.csvs[0].fetchedAt)
+    })
+
+    it('各段階の所要時間を順に返す', async () => {
+      const { handler } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.timings.map((timing) => timing.stage)).toEqual([
+        'tab-preparation',
+        'login-wait',
+        'fetch-assetbalance',
+        'total',
+      ])
+      expect(result.timings.every((timing) => timing.durationMs >= 0)).toBe(true)
     })
 
     it('進行状況を種類ごとに返す', async () => {
@@ -610,15 +623,14 @@ describe('externalRequestHandler', () => {
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
           loginChecks += 1
-          // 初回チェックとポーリング1回目は未ログイン、2回目でログイン済み
-          callback?.({ success: true, loggedIn: loginChecks > 2 })
+          callback?.({ success: true, loggedIn: loginChecks > 1 })
           return
         }
         callback?.({ success: true, content: '本文' })
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalFastMs: 5,
+        loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 500,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -642,7 +654,7 @@ describe('externalRequestHandler', () => {
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalFastMs: 5,
+        loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 30,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -670,7 +682,7 @@ describe('externalRequestHandler', () => {
       })
 
       const { handler, executed } = createHandler({}, {
-        loginPollIntervalFastMs: 5,
+        loginPollIntervalMs: 5,
         loginWaitTimeoutMs: 500,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)

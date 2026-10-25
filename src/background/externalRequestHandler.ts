@@ -19,7 +19,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils } from '../utils';
+import { RakutenUtils, sleep } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -43,8 +43,8 @@ export interface ExternalRequestHandlerConfig {
   readonly allowedOrigins?: readonly string[];
   /** ログイン完了を待つ最大時間(ms) */
   readonly loginWaitTimeoutMs?: number;
-  /** ログイン状態の確認間隔(高速・ms) - ページ読み込み完了後の短い間隔 */
-  readonly loginPollIntervalFastMs?: number;
+  /** ログイン状態の確認間隔(ms) */
+  readonly loginPollIntervalMs?: number;
   /** ダウンロード開始を待つ最大時間(ms) */
   readonly downloadStartTimeoutMs?: number;
   /** ダウンロードの完了を待つ最大時間(ms) */
@@ -56,7 +56,8 @@ export interface ExternalRequestHandlerConfig {
 }
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
-const DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS = 500;
+/** パスキー押下後のログイン完了を早く検出するため、確認間隔を短くしている */
+const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
@@ -133,10 +134,10 @@ export class ExternalRequestHandler {
   private readonly downloadRunner: CsvDownloadRunner;
   private readonly allowedOrigins?: readonly string[];
   private readonly loginWaitTimeoutMs: number;
+  private readonly loginPollIntervalMs: number;
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
-  private readonly loginPollIntervalFastMs: number;
   private readonly fileReader: DownloadedFileReader;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
@@ -149,7 +150,7 @@ export class ExternalRequestHandler {
     this.downloadRunner = config.downloadRunner;
     this.allowedOrigins = config.allowedOrigins;
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
-    this.loginPollIntervalFastMs = config.loginPollIntervalFastMs ?? DEFAULT_LOGIN_POLL_INTERVAL_FAST_MS;
+    this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
@@ -224,19 +225,22 @@ export class ExternalRequestHandler {
     const failures: FetchLatestCsvFailure[] = [];
     const timings: FetchLatestCsvTiming[] = [];
 
+    // どの段階に時間がかかっているかを画面から確認できるようにする
     const totalStart = Date.now();
     let stageStart = totalStart;
-
-    const recordTiming = (stage: string) => {
+    const recordStage = (stage: string): void => {
       const now = Date.now();
       timings.push({ stage, durationMs: now - stageStart });
       stageStart = now;
     };
+    const recordTotal = (): void => {
+      timings.push({ stage: 'total', durationMs: Date.now() - totalStart });
+    };
 
     const tabId = await this.ensureRakutenTab(onTabCreated);
-    recordTiming('tab-preparation');
+    recordStage('tab-preparation');
     if (tabId === undefined) {
-      recordTiming('total');
+      recordTotal();
       return {
         type: 'result',
         csvs,
@@ -246,9 +250,9 @@ export class ExternalRequestHandler {
     }
 
     const loggedIn = await this.waitForLogin(tabId, notify);
-    recordTiming('login-wait');
+    recordStage('login-wait');
     if (!loggedIn) {
-      recordTiming('total');
+      recordTotal();
       return {
         type: 'result',
         csvs,
@@ -262,8 +266,7 @@ export class ExternalRequestHandler {
       const kindStart = Date.now();
 
       const outcome = await this.fetchKind(tabId, kind);
-      const kindDuration = Date.now() - kindStart;
-      timings.push({ stage: `fetch-${kind}`, durationMs: kindDuration });
+      timings.push({ stage: `fetch-${kind}`, durationMs: Date.now() - kindStart });
 
       if (outcome.success) {
         csvs.push(outcome.csv);
@@ -274,7 +277,7 @@ export class ExternalRequestHandler {
       }
     }
 
-    recordTiming('total');
+    recordTotal();
     return { type: 'result', csvs, failures, timings };
   }
 
@@ -350,153 +353,51 @@ export class ExternalRequestHandler {
   }
 
   /**
-   * 取得開始をコンテンツスクリプトに通知
-   *
-   * パスキーボタンが表示されたら即座にクリックできるようにする。
-   */
-  private async notifyFetchStarted(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabId, { action: 'fetch-started' }, () => {
-        // コンテンツスクリプトが未準備でもエラーにしない
-        void chrome.runtime.lastError;
-        resolve();
-      });
-    });
-  }
-
-  /**
    * ログイン完了を待つ
    *
-   * 1. 未ログインならログインページを開く
-   * 2. tabs.onUpdated でページ読み込み完了(status: 'complete')を待つ
-   * 3. 読み込み完了後、コンテンツスクリプトに取得開始を通知（パスキーボタン即時クリック用）
-   * 4. 短い間隔(500ms)で逐次ポーリングしてログイン状態を確認
-   * 5. URL変化(tabs.onUpdated)でもログイン完了を検知する
-   *
    * コンテンツスクリプトが応答しない場合は判断できないものとして扱い、
-   * ログイン画面を開いて読み込み直してから判定し直す（読み込み直しは1回のみ）
+   * ログイン画面を開いて読み込み直してから判定し直す
    */
   private async waitForLogin(
     tabId: number,
     notify: (progress: FetchLatestCsvProgress) => void
   ): Promise<boolean> {
     const deadline = Date.now() + this.loginWaitTimeoutMs;
-    const state = { notified: false, reloadAttempted: false };
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let loginPageOpened = false;
+    let notified = false;
 
-    // 初回のログイン状態確認
-    const initialLoginState = await this.getLoginState(tabId);
-    if (initialLoginState === true) {
-      return true;
+    while (Date.now() < deadline) {
+      const loggedIn = await this.getLoginState(tabId);
+      if (loggedIn === true) {
+        return true;
+      }
+
+      if (loggedIn === false && !notified) {
+        notify({ type: 'progress', state: 'login-wait' });
+        notified = true;
+      }
+
+      if (!loginPageOpened) {
+        await this.openRakutenPage(tabId);
+        loginPageOpened = true;
+      }
+
+      await sleep(this.loginPollIntervalMs);
     }
-
-    // 未ログインならログインページを開く
-    await this.openRakutenPage(tabId);
-
-    // ページ読み込み完了を待つ（tabs.onUpdated の complete イベント）
-    await this.waitForTabLoad(tabId);
-
-    // ページ読み込み完了後、コンテンツスクリプトに取得開始を通知
-    await this.notifyFetchStarted(tabId);
-
-    // 読み込み完了後、ログイン完了を短い間隔で逐次ポーリング + URL変化で検知
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-
-      const finish = (loggedIn: boolean) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-        clearTimeout(timeoutId);
-        resolve(loggedIn);
-      };
-
-      // URL変化でログイン完了を検知（ログイン後のリダイレクト等）
-      const onUpdatedListener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId !== tabId) {
-          return;
-        }
-        // URLが変わった場合、ログイン状態を再確認する
-        if (changeInfo.url) {
-          // 即座にポーリングで確認する（setTimeoutで非同期に）
-          setTimeout(() => {
-            if (!settled) {
-              this.pollLoginStateOnce(tabId, deadline, state, notify, finish);
-            }
-          }, 0);
-        }
-      };
-
-      chrome.tabs.onUpdated.addListener(onUpdatedListener);
-
-      // 逐次ポーリング（前回の完了を待ってから次を実行）
-      const pollLoginState = async () => {
-        if (settled) return;
-        if (Date.now() >= deadline) {
-          finish(false);
-          return;
-        }
-
-        await this.pollLoginStateOnce(tabId, deadline, state, notify, finish);
-
-        // 次のポーリングをスケジュール（逐次実行）
-        if (!settled) {
-          setTimeout(pollLoginState, this.loginPollIntervalFastMs);
-        }
-      };
-
-      // タイムアウト
-      timeoutId = setTimeout(() => {
-        finish(false);
-      }, this.loginWaitTimeoutMs);
-
-      // ポーリング開始
-      pollLoginState();
-    });
+    return false;
   }
 
   /**
-   * ログイン状態を1回ポーリング
+   * ログイン状態の確認
    *
-   * loggedIn === true なら完了
-   * loggedIn === false なら進捗通知
-   * loggedIn === undefined なら読み込み直し（1回のみ）
+   * コンテンツスクリプトが応答しない場合は判定できないものとして undefined を返す
    */
-  private async pollLoginStateOnce(
-    tabId: number,
-    deadline: number,
-    state: { notified: boolean; reloadAttempted: boolean },
-    notify: (progress: FetchLatestCsvProgress) => void,
-    finish: (loggedIn: boolean) => void
-  ): Promise<void> {
-    if (Date.now() >= deadline) {
-      finish(false);
-      return;
+  private async getLoginState(tabId: number): Promise<boolean | undefined> {
+    const response = await this.sendToContentScript(tabId, { action: 'check-login-state' });
+    if (!isLoginStateResponse(response)) {
+      return undefined;
     }
-
-    const loggedIn = await this.getLoginState(tabId);
-    if (loggedIn === true) {
-      finish(true);
-      return;
-    }
-
-    if (loggedIn === false && !state.notified) {
-      state.notified = true;
-      notify({ type: 'progress', state: 'login-wait' });
-    }
-
-    // コンテンツスクリプトが応答しない場合は読み込み直し（1回のみ）
-    if (loggedIn === undefined && !state.reloadAttempted) {
-      state.reloadAttempted = true;
-      await this.openRakutenPage(tabId);
-      await this.waitForTabLoad(tabId);
-      await this.notifyFetchStarted(tabId);
-    }
+    return response.loggedIn === true;
   }
 
   /**
@@ -598,19 +499,6 @@ export class ExternalRequestHandler {
         resolve(response);
       });
     });
-  }
-
-  /**
-   * ログイン状態の確認
-   *
-   * コンテンツスクリプトが応答しない場合は判定できないものとして undefined を返す
-   */
-  private async getLoginState(tabId: number): Promise<boolean | undefined> {
-    const response = await this.sendToContentScript(tabId, { action: 'check-login-state' });
-    if (!isLoginStateResponse(response)) {
-      return undefined;
-    }
-    return response.loggedIn === true;
   }
 
   private isAllowedOrigin(origin: string): boolean {

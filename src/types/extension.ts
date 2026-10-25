@@ -81,7 +81,6 @@ export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
-  | FetchStartedMessage
   | { readonly action: 'check-connection' };
 
 /**
@@ -154,13 +153,18 @@ export interface FetchLatestCsvFailure {
 }
 
 /**
- * 取得結果
+ * 取得処理の各段階の所要時間
+ *
+ * どこに時間がかかっているかを画面から確認するための計測値
  */
 export interface FetchLatestCsvTiming {
   readonly stage: string;
   readonly durationMs: number;
 }
 
+/**
+ * 取得結果
+ */
 export interface FetchLatestCsvResult {
   readonly type: 'result';
   readonly csvs: readonly FetchedCsv[];
@@ -223,16 +227,6 @@ export interface PageReadyMessage extends ChromeMessage {
  */
 export interface CsvDownloadWillStartMessage extends ChromeMessage {
   readonly action: 'csv-download-will-start';
-}
-
-/**
- * 取得開始をコンテンツスクリプトに通知するメッセージ
- *
- * パスキーボタンが表示されたら即座にクリックできるようにするため、
- * バックグラウンドから取得開始時に送信する。
- */
-export interface FetchStartedMessage extends ChromeMessage {
-  readonly action: 'fetch-started';
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import type { ChromeMessage, CsvDownloadStep, DownloadResponse } from '../types'
 import { RakutenUtils, DomUtils } from '../utils'
-import { onExecute, RakutenCsvExtension } from './rakutenContentScript'
+import { onExecute } from './rakutenContentScript'
 
 /**
  * ステップ実行の挙動を固定する characterization test。
@@ -48,23 +48,12 @@ describe('rakutenContentScript ステップ実行', () => {
     listener = addListener.mock.calls[addListener.mock.calls.length - 1][0] as unknown as Listener
   })
 
-  // beforeEach でも再初期化されるため、beforeAll ではリスナー取得のみ行う
-  // 実際の beforeEach でリセット・再初期化される
-
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
     document.body.innerHTML = ''
     vi.spyOn(RakutenUtils, 'isRakutenSecurities').mockReturnValue(true)
-    // シングルトンをリセットして再初期化
-    RakutenCsvExtension.resetInstance()
-    onExecute()
-    // 初期化時に送られる page-ready メッセージをクリア
-    vi.mocked(chrome.runtime.sendMessage).mockClear()
-    // 再初期化後のリスナーを取得
-    const addListener = vi.mocked(chrome.runtime.onMessage.addListener)
-    listener = addListener.mock.calls[addListener.mock.calls.length - 1][0] as unknown as Listener
   })
 
   afterEach(() => {
@@ -348,10 +337,6 @@ describe('rakutenContentScript ステップ実行', () => {
       return sendMessage({ action: 'check-login-state' } as unknown as ChromeMessage)
     }
 
-    function sendFetchStarted() {
-      return sendMessage({ action: 'fetch-started' } as unknown as ChromeMessage)
-    }
-
     function addPasskeyButton() {
       const button = document.createElement('button')
       button.id = 'login-passkey'
@@ -359,9 +344,8 @@ describe('rakutenContentScript ステップ実行', () => {
       return button
     }
 
-    it('check-login-state ではボタンをクリックしない（fetch-started でクリックするため）', async () => {
+    it('ボタンが無ければクリックしない', async () => {
       document.body.innerHTML = '<input type="password" />'
-      addPasskeyButton()
       const safeClick = vi.spyOn(DomUtils, 'safeClick')
 
       await sendCheckLoginState()
@@ -381,41 +365,21 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(safeClick).not.toHaveBeenCalled()
     })
 
-    it('fetch-started 受信後にボタンがあれば即座にクリックする', async () => {
+    it('ボタンがあれば1回だけクリックする', async () => {
       document.body.innerHTML = '<input type="password" />'
       const button = addPasskeyButton()
       const safeClick = vi.spyOn(DomUtils, 'safeClick')
 
-      await sendFetchStarted()
-
+      // 同じページで2回検出してから押す仕様のため2回送る。
+      // 前のテストで検出済みフラグが立っていると最初の1回で押される
+      await sendCheckLoginState()
+      await sendCheckLoginState()
       expect(safeClick).toHaveBeenCalledTimes(1)
       expect(safeClick).toHaveBeenCalledWith(button)
-    })
 
-    it('fetch-started 受信前にボタンが無く、後から出現したらクリックする', async () => {
-      document.body.innerHTML = '<input type="password" />'
-      const safeClick = vi.spyOn(DomUtils, 'safeClick')
-
-      await sendFetchStarted()
-
-      // ボタンが後から追加される
-      const button = addPasskeyButton()
-
-      // MutationObserver のコールバックは非同期で実行されるため待つ
-      await new Promise<void>(resolve => queueMicrotask(() => resolve()))
-
-      expect(safeClick).toHaveBeenCalledTimes(1)
-      expect(safeClick).toHaveBeenCalledWith(button)
-    })
-
-    it('fetch-started でクリック済みなら再クリックしない', async () => {
-      document.body.innerHTML = '<input type="password" />'
-      addPasskeyButton()
-      const safeClick = vi.spyOn(DomUtils, 'safeClick')
-
-      await sendFetchStarted()
-      await sendFetchStarted()
-
+      // ダイアログをキャンセルしてボタンが残っていても再クリックしない
+      await sendCheckLoginState()
+      await sendCheckLoginState()
       expect(safeClick).toHaveBeenCalledTimes(1)
     })
   })
