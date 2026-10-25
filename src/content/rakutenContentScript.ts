@@ -104,8 +104,11 @@ class RakutenCsvExtension {
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
 
-      case 'fetch-started':
+case 'fetch-started':
         this.handleFetchStarted();
+        return { success: true };
+
+      case 'check-connection':
         return { success: true };
 
       default:
