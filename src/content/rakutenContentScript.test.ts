@@ -60,6 +60,8 @@ describe('rakutenContentScript ステップ実行', () => {
     // シングルトンをリセットして再初期化
     RakutenCsvExtension.resetInstance()
     onExecute()
+    // 初期化時に送られる page-ready メッセージをクリア
+    vi.mocked(chrome.runtime.sendMessage).mockClear()
     // 再初期化後のリスナーを取得
     const addListener = vi.mocked(chrome.runtime.onMessage.addListener)
     listener = addListener.mock.calls[addListener.mock.calls.length - 1][0] as unknown as Listener

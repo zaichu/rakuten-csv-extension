@@ -610,7 +610,8 @@ describe('externalRequestHandler', () => {
       setTabsSendMessageImpl((_tabId, message, callback) => {
         if (message.action === 'check-login-state') {
           loginChecks += 1
-          callback?.({ success: true, loggedIn: loginChecks > 1 })
+          // 初回チェックとポーリング1回目は未ログイン、2回目でログイン済み
+          callback?.({ success: true, loggedIn: loginChecks > 2 })
           return
         }
         callback?.({ success: true, content: '本文' })
