@@ -412,6 +412,23 @@ describe('externalRequestHandler', () => {
       expect(new Date(result.csvs[0].fetchedAt).toISOString()).toBe(result.csvs[0].fetchedAt)
     })
 
+    it('各段階の所要時間を順に返す', async () => {
+      const { handler } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.timings.map((timing) => timing.stage)).toEqual([
+        'tab-preparation',
+        'login-wait',
+        'fetch-assetbalance',
+        'total',
+      ])
+      expect(result.timings.every((timing) => timing.durationMs >= 0)).toBe(true)
+    })
+
     it('進行状況を種類ごとに返す', async () => {
       const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)

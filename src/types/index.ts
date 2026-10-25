@@ -30,6 +30,7 @@ export type {
   FetchLatestCsvProgress,
   FetchLatestCsvProgressState,
   FetchLatestCsvResult,
+  FetchLatestCsvTiming,
   FetchLatestCsvFailure,
   FetchedCsv,
   ExternalErrorResponse,

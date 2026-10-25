@@ -153,12 +153,23 @@ export interface FetchLatestCsvFailure {
 }
 
 /**
+ * 取得処理の各段階の所要時間
+ *
+ * どこに時間がかかっているかを画面から確認するための計測値
+ */
+export interface FetchLatestCsvTiming {
+  readonly stage: string;
+  readonly durationMs: number;
+}
+
+/**
  * 取得結果
  */
 export interface FetchLatestCsvResult {
   readonly type: 'result';
   readonly csvs: readonly FetchedCsv[];
   readonly failures: readonly FetchLatestCsvFailure[];
+  readonly timings: readonly FetchLatestCsvTiming[];
 }
 
 /**

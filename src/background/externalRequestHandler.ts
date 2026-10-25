@@ -14,6 +14,7 @@ import type {
   FetchLatestCsvProgress,
   FetchLatestCsvRequest,
   FetchLatestCsvResult,
+  FetchLatestCsvTiming,
   FetchedCsv,
   LoginStateResponse,
 } from '../types';
@@ -55,7 +56,8 @@ export interface ExternalRequestHandlerConfig {
 }
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
-const DEFAULT_LOGIN_POLL_INTERVAL_MS = 2_000;
+/** パスキー押下後のログイン完了を早く検出するため、確認間隔を短くしている */
+const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
@@ -221,29 +223,51 @@ export class ExternalRequestHandler {
   ): Promise<FetchLatestCsvResult> {
     const csvs: FetchedCsv[] = [];
     const failures: FetchLatestCsvFailure[] = [];
+    const timings: FetchLatestCsvTiming[] = [];
+
+    // どの段階に時間がかかっているかを画面から確認できるようにする
+    const totalStart = Date.now();
+    let stageStart = totalStart;
+    const recordStage = (stage: string): void => {
+      const now = Date.now();
+      timings.push({ stage, durationMs: now - stageStart });
+      stageStart = now;
+    };
+    const recordTotal = (): void => {
+      timings.push({ stage: 'total', durationMs: Date.now() - totalStart });
+    };
 
     const tabId = await this.ensureRakutenTab(onTabCreated);
+    recordStage('tab-preparation');
     if (tabId === undefined) {
+      recordTotal();
       return {
         type: 'result',
         csvs,
         failures: kinds.map((kind) => ({ kind, reason: '楽天証券のタブを開けませんでした' })),
+        timings,
       };
     }
 
     const loggedIn = await this.waitForLogin(tabId, notify);
+    recordStage('login-wait');
     if (!loggedIn) {
+      recordTotal();
       return {
         type: 'result',
         csvs,
         failures: kinds.map((kind) => ({ kind, reason: 'ログインが完了しませんでした' })),
+        timings,
       };
     }
 
     for (const kind of kinds) {
       notify({ type: 'progress', state: 'fetching', kind });
+      const kindStart = Date.now();
 
       const outcome = await this.fetchKind(tabId, kind);
+      timings.push({ stage: `fetch-${kind}`, durationMs: Date.now() - kindStart });
+
       if (outcome.success) {
         csvs.push(outcome.csv);
         notify({ type: 'progress', state: 'completed', kind });
@@ -253,7 +277,8 @@ export class ExternalRequestHandler {
       }
     }
 
-    return { type: 'result', csvs, failures };
+    recordTotal();
+    return { type: 'result', csvs, failures, timings };
   }
 
   /**
