@@ -286,10 +286,15 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
   })
 
   function setupReloadMock(reloadCount: { current: number }): void {
-    vi.mocked(chrome.tabs.reload).mockImplementation((tabId: number) => {
+    vi.mocked(chrome.tabs.reload).mockImplementation((tabId?: number, _reloadProperties?: unknown, callback?: () => void) => {
       reloadCount.current += 1
       // 非同期で完了イベントを発火
-      setTimeout(() => fireTabReload(tabId), 0)
+      if (tabId !== undefined) {
+        setTimeout(() => fireTabReload(tabId), 0)
+      }
+      if (callback) {
+        setTimeout(callback, 0)
+      }
     })
   }
 

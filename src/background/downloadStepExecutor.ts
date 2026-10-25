@@ -388,7 +388,7 @@ export class DownloadStepExecutor {
       return new Promise<StepExecutionResponse>((resolve) => {
         chrome.tabs.sendMessage(tabId, instruction, (response) => {
           if (chrome.runtime.lastError) {
-            const errorMessage = chrome.runtime.lastError.message;
+            const errorMessage = chrome.runtime.lastError.message ?? '';
             if (isContentScriptMissingError(errorMessage) && !retryAfterReload) {
               // コンテンツスクリプト不在で、まだ再読み込みしていない場合
               this.log('コンテンツスクリプトが見つかりません。タブを再読み込みして再試行します:', tabId);
@@ -482,7 +482,7 @@ export class DownloadStepExecutor {
     return new Promise<boolean>((resolve) => {
       chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
         if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message;
+          const errorMessage = chrome.runtime.lastError.message ?? '';
           if (isContentScriptMissingError(errorMessage)) {
             resolve(false);
             return;
