@@ -75,6 +75,27 @@ function failWithChannelClosed(callback?: (response: DownloadResponse) => void):
   delete runtime.lastError
 }
 
+/** コンテンツスクリプトが存在しないエラーを再現する */
+function failWithContentScriptMissing(callback?: (response: DownloadResponse) => void): void {
+  const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
+  runtime.lastError = {
+    message: 'Could not establish connection. Receiving end does not exist',
+  }
+  callback?.({ success: false, error: 'レスポンスがありません' })
+  delete runtime.lastError
+}
+
+/** タブ再読み込み完了イベントを発火させる */
+function fireTabReload(tabId: number): void {
+  const addListener = chrome.tabs.onUpdated.addListener as unknown as {
+    mock: { calls: unknown[][] }
+  }
+  for (const call of addListener.mock.calls) {
+    const listener = call[0] as (id: number, changeInfo: { status?: string }) => void
+    listener(tabId, { status: 'complete' })
+  }
+}
+
 describe('downloadStepExecutor の通信失敗時の扱い', () => {
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -164,7 +185,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     await vi.advanceTimersByTimeAsync(500)
     expect((await pending).success).toBe(true)
     expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
-    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(2)
+    // 接続確認(1) + navigate-to-page(1) + download-csv(1) = 3回
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledTimes(3)
   })
 
   it('通信に失敗してもダウンロード開始を観測していれば成功になる', async () => {
@@ -186,7 +208,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       message: 'すべてのCSVダウンロードが完了しました',
     })
     // ダウンロード開始を観測できた時点でリトライしない（再クリックによる二重ダウンロード防止）
-    expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
+    // 接続確認(1) + navigate-to-page(1) + download-csv(1) = 3回
+    expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(3)
   })
 
   it('通信に失敗しダウンロードも始まらなければリトライし、失敗を返す', async () => {
@@ -244,6 +267,249 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       expect(response.success).toBe(false)
       expect(response.error).toContain('要素が見つかりませんでした')
       expect(downloadAttempts).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('コンテンツスクリプト不在時の再読み込み処理', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  function setupReloadMock(reloadCount: { current: number }): void {
+    vi.mocked(chrome.tabs.reload).mockImplementation((tabId?: number, _reloadProperties?: unknown, callback?: () => void) => {
+      reloadCount.current += 1
+      // 非同期で完了イベントを発火
+      if (tabId !== undefined) {
+        setTimeout(() => fireTabReload(tabId), 0)
+      }
+      if (callback) {
+        setTimeout(callback, 0)
+      }
+    })
+  }
+
+  it('接続エラーでタブを再読み込みし、再試行で成功する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      let connectionCheckCount = 0
+      let stepAttempts = 0
+      const reloadCount = { current: 0 }
+
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        const steps = sentSteps(message)
+
+        // 接続確認メッセージ（downloadSteps が空）
+        if (steps.length === 0) {
+          connectionCheckCount += 1
+          if (connectionCheckCount === 1) {
+            // 1回目の接続確認は失敗
+            failWithContentScriptMissing(callback)
+            return
+          }
+          // 再読み込み後の接続確認は成功
+          callback?.({ success: true })
+          return
+        }
+
+        // ステップ実行
+        if (steps.includes('download-csv')) {
+          stepAttempts += 1
+          fireDownloadCreated()
+          callback?.({ success: true })
+          return
+        }
+
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      setupReloadMock(reloadCount)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      // 接続確認失敗 → 再読み込み待ち → 再接続確認 → ステップ実行
+      await vi.advanceTimersByTimeAsync(1000)
+      const response = await pending
+
+      expect(response.success).toBe(true)
+      expect(connectionCheckCount).toBe(2) // 初回失敗 + 再読み込み後成功
+      expect(reloadCount.current).toBe(1)
+      expect(stepAttempts).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('再読み込み後も接続できなければ content-script-missing エラーを返す', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      let connectionCheckCount = 0
+      const reloadCount = { current: 0 }
+
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        const steps = sentSteps(message)
+
+        if (steps.length === 0) {
+          connectionCheckCount += 1
+          // 常に接続失敗
+          failWithContentScriptMissing(callback)
+          return
+        }
+
+        if (steps.includes('download-csv')) {
+          fireDownloadCreated()
+          callback?.({ success: true })
+          return
+        }
+
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      setupReloadMock(reloadCount)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(1000)
+      const response = await pending
+
+      expect(response.success).toBe(false)
+      expect(response.code).toBe('content-script-missing')
+      expect(response.error).toContain('楽天証券のタブを再読み込みしてください')
+      expect(connectionCheckCount).toBe(2) // 初回 + 再読み込み後
+      expect(reloadCount.current).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('初回接続確認が成功すれば再読み込みしない', async () => {
+    const executor = createExecutor()
+    let connectionCheckCount = 0
+    const reloadCount = { current: 0 }
+
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      const steps = sentSteps(message)
+
+      if (steps.length === 0) {
+        connectionCheckCount += 1
+        // 初回接続確認は成功
+        callback?.({ success: true })
+        return
+      }
+
+      if (steps.includes('download-csv')) {
+        fireDownloadCreated()
+        callback?.({ success: true })
+        return
+      }
+
+      firePageTransition(tabId)
+      callback?.({ success: true })
+    })
+
+    setupReloadMock(reloadCount)
+
+    const response = await executor.executeDownloadRequest(downloadRequest())
+
+    expect(response.success).toBe(true)
+    expect(connectionCheckCount).toBe(1)
+    expect(reloadCount.current).toBe(0)
+  })
+
+  it('ステップ実行中にコンテンツスクリプト不在になれば再読み込みして再試行する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      let stepAttempts = 0
+      const reloadCount = { current: 0 }
+
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        const steps = sentSteps(message)
+
+        if (steps.length === 0) {
+          // 接続確認は成功
+          callback?.({ success: true })
+          return
+        }
+
+        if (steps.includes('download-csv')) {
+          stepAttempts += 1
+          if (stepAttempts === 1) {
+            // 1回目はコンテンツスクリプト不在
+            failWithContentScriptMissing(callback)
+            return
+          }
+          // 再読み込み後は成功
+          fireDownloadCreated()
+          callback?.({ success: true })
+          return
+        }
+
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      setupReloadMock(reloadCount)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(1000)
+      const response = await pending
+
+      expect(response.success).toBe(true)
+      expect(stepAttempts).toBe(2) // 初回失敗 + 再試行成功
+      expect(reloadCount.current).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ステップ実行中の再読み込み後も失敗すれば content-script-missing を返す', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      let stepAttempts = 0
+      const reloadCount = { current: 0 }
+
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        const steps = sentSteps(message)
+
+        if (steps.length === 0) {
+          callback?.({ success: true })
+          return
+        }
+
+        if (steps.includes('download-csv')) {
+          stepAttempts += 1
+          // 常にコンテンツスクリプト不在
+          failWithContentScriptMissing(callback)
+          return
+        }
+
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      setupReloadMock(reloadCount)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(1000)
+      const response = await pending
+
+      expect(response.success).toBe(false)
+      expect(response.code).toBe('content-script-missing')
+      expect(stepAttempts).toBe(2) // 初回 + 再試行
+      expect(reloadCount.current).toBe(1)
     } finally {
       vi.useRealTimers()
     }

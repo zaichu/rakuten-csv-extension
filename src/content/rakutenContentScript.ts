@@ -97,6 +97,9 @@ class RakutenCsvExtension {
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
 
+      case 'check-connection':
+        return { success: true };
+
       default:
         return {
           success: false,
