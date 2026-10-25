@@ -245,6 +245,9 @@ export class ExternalRequestHandler {
       };
     }
 
+    // 取得開始をコンテンツスクリプトに通知（パスキーボタン即時クリック用）
+    await this.notifyFetchStarted(tabId);
+
     const loggedIn = await this.waitForLogin(tabId, notify);
     recordTiming('login-wait');
     if (!loggedIn) {
@@ -347,6 +350,21 @@ export class ExternalRequestHandler {
       return;
     }
     this.pendingCapture.arm();
+  }
+
+  /**
+   * 取得開始をコンテンツスクリプトに通知
+   *
+   * パスキーボタンが表示されたら即座にクリックできるようにする。
+   */
+  private async notifyFetchStarted(tabId: number): Promise<void> {
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { action: 'fetch-started' }, () => {
+        // コンテンツスクリプトが未準備でもエラーにしない
+        void chrome.runtime.lastError;
+        resolve();
+      });
+    });
   }
 
   /**

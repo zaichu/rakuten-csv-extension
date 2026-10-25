@@ -24,6 +24,10 @@ class RakutenCsvExtension {
   private loginScreenDetected = false;
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
+  /** 取得処理が実行中か（バックグラウンドから通知を受けて設定） */
+  private fetchingInProgress = false;
+  /** パスキーボタンの出現を監視するMutationObserver */
+  private passkeyButtonObserver: MutationObserver | null = null;
 
   private constructor() {
     this.initialize();
@@ -97,6 +101,10 @@ class RakutenCsvExtension {
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
 
+      case 'fetch-started':
+        this.handleFetchStarted();
+        return { success: true };
+
       default:
         return {
           success: false,
@@ -106,9 +114,73 @@ class RakutenCsvExtension {
   }
 
   /**
+   * 取得開始通知を受信
+   *
+   * バックグラウンドから取得開始の合図を受け取ったら、パスキーボタンの
+   * 出現を監視し、表示されたら即座にクリックする。
+   */
+  private handleFetchStarted(): void {
+    this.fetchingInProgress = true;
+    this.startPasskeyButtonObserver();
+  }
+
+  /**
+   * パスキーボタンの出現を監視開始
+   *
+   * MutationObserverでボタンがDOMに追加されたら即座にクリックする。
+   * 既にボタンが存在する場合は即座にクリックする。
+   */
+  private startPasskeyButtonObserver(): void {
+    // 既にボタンがあれば即クリック
+    const existingButton = document.querySelector('button#login-passkey');
+    if (existingButton) {
+      this.clickPasskeyLoginButtonOnce();
+      return;
+    }
+
+    // 既に監視中なら何もしない
+    if (this.passkeyButtonObserver) {
+      return;
+    }
+
+    this.passkeyButtonObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as Element;
+            // 追加されたノードがボタン自身、またはボタンを含む場合
+            if (element.matches('button#login-passkey') || element.querySelector('button#login-passkey')) {
+              this.clickPasskeyLoginButtonOnce();
+              this.stopPasskeyButtonObserver();
+              return;
+            }
+          }
+        }
+      }
+    });
+
+    this.passkeyButtonObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  /**
+   * パスキーボタンの監視を停止
+   */
+  private stopPasskeyButtonObserver(): void {
+    if (this.passkeyButtonObserver) {
+      this.passkeyButtonObserver.disconnect();
+      this.passkeyButtonObserver = null;
+    }
+  }
+
+  /**
    * ログイン状態の確認
    *
    * 氏名や口座番号などの個人情報は読まず、ログイン画面かどうかだけを見る
+   * パスキーボタンのクリックは fetch-started 通知を受けた後の
+   * MutationObserver で行うため、ここではクリックしない
    */
   private handleCheckLoginState(): LoginStateResponse {
     const loggedIn = !this.isLoginScreen();
@@ -118,7 +190,7 @@ class RakutenCsvExtension {
     // 同じページで2回検出してから押すことで、開き直した側だけに絞る
     if (!loggedIn) {
       if (this.loginScreenDetected) {
-        this.clickPasskeyLoginButtonOnce();
+        // ここではクリックしない（fetch-started 通知後の MutationObserver で行う）
       }
       this.loginScreenDetected = true;
     }

@@ -80,7 +80,8 @@ export interface CheckLoginStateInstruction extends ChromeMessage {
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
   | ExtensionUpdatedMessage
-  | CheckLoginStateInstruction;
+  | CheckLoginStateInstruction
+  | FetchStartedMessage;
 
 /**
  * ダウンロードレスポンス
@@ -220,6 +221,16 @@ export interface PageReadyMessage extends ChromeMessage {
  */
 export interface CsvDownloadWillStartMessage extends ChromeMessage {
   readonly action: 'csv-download-will-start';
+}
+
+/**
+ * 取得開始をコンテンツスクリプトに通知するメッセージ
+ *
+ * パスキーボタンが表示されたら即座にクリックできるようにするため、
+ * バックグラウンドから取得開始時に送信する。
+ */
+export interface FetchStartedMessage extends ChromeMessage {
+  readonly action: 'fetch-started';
 }
 
 /**
