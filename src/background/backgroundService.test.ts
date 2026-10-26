@@ -150,6 +150,7 @@ describe('backgroundService characterization', () => {
     }
     if (steps.includes('download-csv')) {
       fireDownloadCreated()
+      runtimeListener({ action: 'csv-download-clicked' }, senderWithTab(tabId), () => {})
     }
   }
 

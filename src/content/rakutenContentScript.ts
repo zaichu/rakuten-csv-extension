@@ -64,8 +64,11 @@ class RakutenCsvExtension {
         // 取得URLなどが記録されないよう action のみログに残す
         console.log('コンテンツスクリプトでメッセージを受信:', message.action);
 
+        // メッセージを受け取った時点を計測の起点にする（サイト検証より前）
+        const receivedAt = Date.now();
+
         // 非同期処理を適切に処理
-        this.handleMessage(message)
+        this.handleMessage(message, receivedAt)
           .then(response => {
             sendResponse(response);
           })
@@ -86,10 +89,13 @@ class RakutenCsvExtension {
   /**
    * メッセージを処理
    */
-  private async handleMessage(message: ContentScriptMessage): Promise<ContentScriptResponse> {
+  private async handleMessage(
+    message: ContentScriptMessage,
+    receivedAt: number = Date.now()
+  ): Promise<ContentScriptResponse> {
     switch (message.action) {
       case 'execute-csv-download-steps':
-        return this.handleCsvDownloadStepsExecution(message);
+        return this.handleCsvDownloadStepsExecution(message, receivedAt);
 
       case 'check-login-state':
         return this.handleCheckLoginState();
@@ -176,7 +182,8 @@ class RakutenCsvExtension {
    * 伴い得るステップはバックグラウンド側で1要素の配列にして送られる。
    */
   private async handleCsvDownloadStepsExecution(
-    message: CsvDownloadStepsInstruction
+    message: CsvDownloadStepsInstruction,
+    receivedAt: number = Date.now()
   ): Promise<DownloadResponse> {
     const { downloadSteps, selectors, captureDownloadStart } = message.payload;
 
@@ -191,10 +198,16 @@ class RakutenCsvExtension {
       };
     }
 
+    const contentTimings: { phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; durationMs: number }[] = [];
+
     for (const step of downloadSteps) {
       try {
         const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
         console.log(`ステップ ${step} 完了:`, result);
+
+        if (result.contentTimings) {
+          contentTimings.push(...result.contentTimings);
+        }
 
         if (!result.success) {
           return { ...result, step };
@@ -211,7 +224,9 @@ class RakutenCsvExtension {
 
     return {
       success: true,
-      message: 'ステップ群の実行が完了しました'
+      message: 'ステップ群の実行が完了しました',
+      receivedAt,
+      contentTimings: contentTimings.length > 0 ? contentTimings : undefined,
     };
   }
 
@@ -267,6 +282,9 @@ class RakutenCsvExtension {
       clickAfterResponse?: boolean;
     }
   ): Promise<DownloadResponse> {
+    // content script がメッセージを受け取った時刻（service worker 側で送信からの時間を計算する）
+    const receivedAt = Date.now();
+
     if (!selector) {
       return { success: false, error: `${actionName}のセレクターが指定されていません` };
     }
@@ -275,21 +293,41 @@ class RakutenCsvExtension {
       ? await this.findElement(selector, this.elementTimeout, true)
       : await this.findElement(selector);
 
+    const buttonFoundAt = Date.now();
+
     if (options?.beforeClick) {
       await options.beforeClick();
     }
 
     if (options?.clickAfterResponse) {
+      const buttonFoundDurationMs = Math.max(0, buttonFoundAt - receivedAt);
       // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
       // クリックできたかはバックグラウンドが chrome.downloads.onCreated で判定する
       window.setTimeout(() => {
+        const clickDurationMs = Math.max(0, Date.now() - buttonFoundAt);
+        // 実クリック直前の時点を service worker へ伝え、click→download-start の起点にする
+        try {
+          chrome.runtime.sendMessage(
+            { action: 'csv-download-clicked', clickDurationMs },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {
+          // 通知できなくてもクリックは続行する
+        }
         const result = this.clickElementSafely(element, actionName);
         if (!result.success) {
           console.warn(result.error);
         }
       }, 0);
 
-      return { success: true, message: `${actionName}のクリックを開始しました` };
+      return {
+        success: true,
+        message: `${actionName}のクリックを開始しました`,
+        receivedAt,
+        contentTimings: [{ phase: 'button-found', durationMs: buttonFoundDurationMs }],
+      };
     }
 
     return this.clickElementSafely(element, actionName);
