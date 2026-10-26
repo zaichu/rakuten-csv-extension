@@ -64,8 +64,11 @@ class RakutenCsvExtension {
         // 取得URLなどが記録されないよう action のみログに残す
         console.log('コンテンツスクリプトでメッセージを受信:', message.action);
 
+        // メッセージを受け取った時点を計測の起点にする（サイト検証より前）
+        const receivedAt = Date.now();
+
         // 非同期処理を適切に処理
-        this.handleMessage(message)
+        this.handleMessage(message, receivedAt)
           .then(response => {
             sendResponse(response);
           })
@@ -86,10 +89,13 @@ class RakutenCsvExtension {
   /**
    * メッセージを処理
    */
-  private async handleMessage(message: ContentScriptMessage): Promise<ContentScriptResponse> {
+  private async handleMessage(
+    message: ContentScriptMessage,
+    receivedAt: number = Date.now()
+  ): Promise<ContentScriptResponse> {
     switch (message.action) {
       case 'execute-csv-download-steps':
-        return this.handleCsvDownloadStepsExecution(message);
+        return this.handleCsvDownloadStepsExecution(message, receivedAt);
 
       case 'check-login-state':
         return this.handleCheckLoginState();
@@ -176,7 +182,8 @@ class RakutenCsvExtension {
    * 伴い得るステップはバックグラウンド側で1要素の配列にして送られる。
    */
   private async handleCsvDownloadStepsExecution(
-    message: CsvDownloadStepsInstruction
+    message: CsvDownloadStepsInstruction,
+    receivedAt: number = Date.now()
   ): Promise<DownloadResponse> {
     const { downloadSteps, selectors, captureDownloadStart } = message.payload;
 
@@ -191,17 +198,13 @@ class RakutenCsvExtension {
       };
     }
 
-    let receivedAt: number | undefined;
-    const contentTimings: { phase: string; durationMs: number }[] = [];
+    const contentTimings: { phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; durationMs: number }[] = [];
 
     for (const step of downloadSteps) {
       try {
         const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
         console.log(`ステップ ${step} 完了:`, result);
 
-        if (result.receivedAt !== undefined) {
-          receivedAt = result.receivedAt;
-        }
         if (result.contentTimings) {
           contentTimings.push(...result.contentTimings);
         }
@@ -297,10 +300,22 @@ class RakutenCsvExtension {
     }
 
     if (options?.clickAfterResponse) {
-      const clickScheduledAt = Date.now();
+      const buttonFoundDurationMs = Math.max(0, buttonFoundAt - receivedAt);
       // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
       // クリックできたかはバックグラウンドが chrome.downloads.onCreated で判定する
       window.setTimeout(() => {
+        const clickDurationMs = Math.max(0, Date.now() - buttonFoundAt);
+        // 実クリック直前の時点を service worker へ伝え、click→download-start の起点にする
+        try {
+          chrome.runtime.sendMessage(
+            { action: 'csv-download-clicked', clickDurationMs },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {
+          // 通知できなくてもクリックは続行する
+        }
         const result = this.clickElementSafely(element, actionName);
         if (!result.success) {
           console.warn(result.error);
@@ -311,10 +326,7 @@ class RakutenCsvExtension {
         success: true,
         message: `${actionName}のクリックを開始しました`,
         receivedAt,
-        contentTimings: [
-          { phase: 'button-found', durationMs: Math.max(0, buttonFoundAt - receivedAt) },
-          { phase: 'click', durationMs: Math.max(0, clickScheduledAt - buttonFoundAt) },
-        ],
+        contentTimings: [{ phase: 'button-found', durationMs: buttonFoundDurationMs }],
       };
     }
 

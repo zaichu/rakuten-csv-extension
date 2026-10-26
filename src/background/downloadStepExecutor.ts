@@ -79,7 +79,7 @@ type StepExecutionResponse = DownloadResponse & { readonly communicationFailed?:
 export interface StepTiming {
   readonly step: CsvDownloadStep;
   /** どの区間にかかった時間か */
-  readonly phase: string;
+  readonly phase: 'action' | 'download-start' | 'receive' | 'button-found' | 'click';
   readonly durationMs: number;
 }
 
@@ -91,7 +91,9 @@ interface StepExecutionTiming {
   readonly sendStartedAt: number;
   readonly actionCompletedAt: number;
   readonly receivedAt?: number;
-  readonly contentTimings?: readonly { readonly phase: string; readonly durationMs: number }[];
+  readonly contentTimings?: readonly { readonly phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; readonly durationMs: number }[];
+  readonly clickStartedAt?: number;
+  readonly clickDurationMs?: number;
   readonly downloadStartedAt?: number;
 }
 
@@ -143,6 +145,18 @@ export class DownloadStepExecutor {
 
   /** page-ready通知を待っているtabIdごとのコールバック集合 */
   private readonly pageReadyWaiters: Map<number, Set<() => void>> = new Map();
+
+  /** 実クリック直前通知を待っているtabIdごとのコールバック集合 */
+  private readonly downloadClickWaiters: Map<
+    number,
+    Set<(clickDurationMs: number | undefined, clickedAt: number) => void>
+  > = new Map();
+
+  /** 待ち登録前に届いた実クリック通知を一時保持する */
+  private readonly pendingDownloadClicks: Map<
+    number,
+    { readonly clickedAt: number; readonly durationMs?: number }
+  > = new Map();
 
   constructor(private readonly tabState: TabStateReader) {}
 
@@ -356,6 +370,10 @@ export class DownloadStepExecutor {
         const actionCompletedAt = Date.now();
 
         if (result.success) {
+          let clickResult: { readonly clickedAt: number; readonly durationMs?: number } | undefined;
+          if (waitForDownloadStart && steps.includes('download-csv')) {
+            clickResult = await this.waitForDownloadClick(tabId, this.downloadStartTimeout);
+          }
           const started = !downloadStart || await this.isDownloadStarted(downloadStart);
           if (started) {
             return {
@@ -367,6 +385,8 @@ export class DownloadStepExecutor {
                 actionCompletedAt,
                 receivedAt: result.receivedAt,
                 contentTimings: result.contentTimings,
+                clickStartedAt: clickResult?.clickedAt,
+                clickDurationMs: clickResult?.durationMs,
                 downloadStartedAt: downloadStart ? Date.now() : undefined
               }
             };
@@ -457,12 +477,20 @@ export class DownloadStepExecutor {
         reportStep({ step, phase: contentTiming.phase, durationMs: contentTiming.durationMs });
       }
 
+      // ボタン発見後、実際にクリックするまで（通知待ちと setTimeout を含む）
+      reportStep({
+        step,
+        phase: 'click',
+        durationMs: Math.max(0, timing.clickDurationMs ?? 0)
+      });
+
       // click からダウンロード開始まで
       if (timing.downloadStartedAt !== undefined) {
+        const clickStart = timing.clickStartedAt ?? timing.actionCompletedAt;
         reportStep({
           step,
           phase: 'download-start',
-          durationMs: Math.max(0, timing.downloadStartedAt - timing.actionCompletedAt)
+          durationMs: Math.max(0, timing.downloadStartedAt - clickStart)
         });
       }
       return;
@@ -805,6 +833,73 @@ export class DownloadStepExecutor {
     }
     // finish()内でwaiters.deleteが呼ばれるため、コピーしてから反復する
     Array.from(waiters).forEach(callback => callback());
+  }
+
+  /**
+   * 実クリック直前通知を待つ
+   */
+  waitForDownloadClick(
+    tabId: number,
+    timeoutMs: number
+  ): Promise<{ readonly clickedAt: number; readonly durationMs?: number } | undefined> {
+    const pending = this.pendingDownloadClicks.get(tabId);
+    if (pending) {
+      this.pendingDownloadClicks.delete(tabId);
+      return Promise.resolve(pending);
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const callback = (durationMs: number | undefined, clickedAt: number): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        removeWaiter();
+        resolve({ clickedAt, durationMs });
+      };
+
+      const removeWaiter = (): void => {
+        const waiters = this.downloadClickWaiters.get(tabId);
+        if (!waiters) {
+          return;
+        }
+        waiters.delete(callback);
+        if (waiters.size === 0) {
+          this.downloadClickWaiters.delete(tabId);
+        }
+      };
+
+      const waiters = this.downloadClickWaiters.get(tabId) ?? new Set();
+      waiters.add(callback);
+      this.downloadClickWaiters.set(tabId, waiters);
+
+      const timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        removeWaiter();
+        resolve(undefined);
+      }, timeoutMs);
+    });
+  }
+
+  /**
+   * 実クリック直前通知を受け取る
+   */
+  notifyDownloadClicked(tabId: number | undefined, clickDurationMs?: number): void {
+    if (tabId === undefined) {
+      return;
+    }
+    const waiters = this.downloadClickWaiters.get(tabId);
+    const clickedAt = Date.now();
+    if (!waiters || waiters.size === 0) {
+      this.pendingDownloadClicks.set(tabId, { clickedAt, durationMs: clickDurationMs });
+      return;
+    }
+    Array.from(waiters).forEach((callback) => callback(clickDurationMs, clickedAt));
   }
 
   /**

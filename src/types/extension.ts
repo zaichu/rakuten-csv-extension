@@ -84,6 +84,14 @@ export type ContentScriptMessage =
   | { readonly action: 'check-connection' };
 
 /**
+ * コンテンツスクリプト側で計測したステップの内訳
+ */
+export interface DownloadStepTiming {
+  readonly phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action';
+  readonly durationMs: number;
+}
+
+/**
  * ダウンロードレスポンス
  */
 export interface DownloadResponse {
@@ -100,14 +108,6 @@ export interface DownloadResponse {
    * コンテンツスクリプト側で計測した download-csv の内訳
    */
   readonly contentTimings?: readonly DownloadStepTiming[];
-}
-
-/**
- * コンテンツスクリプト側で計測したステップの内訳
- */
-export interface DownloadStepTiming {
-  readonly phase: string;
-  readonly durationMs: number;
 }
 
 /**
@@ -246,9 +246,18 @@ export interface CsvDownloadWillStartMessage extends ChromeMessage {
 }
 
 /**
+ * CSVダウンロードの実クリック直前を知らせるメッセージ
+ */
+export interface CsvDownloadClickedMessage extends ChromeMessage {
+  readonly action: 'csv-download-clicked';
+  readonly clickDurationMs?: number;
+}
+
+/**
  * バックグラウンドが受け取るメッセージ
  */
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | CsvDownloadWillStartMessage;
+  | CsvDownloadWillStartMessage
+  | CsvDownloadClickedMessage;

@@ -122,6 +122,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   it('成功応答でもダウンロード開始を観測できなければ失敗を返す', async () => {
     vi.useFakeTimers()
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
     setTabsSendMessageImpl((tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
@@ -144,6 +145,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   it.each(['success', 'channel-closed'])('無関係なURLだけでは開始を観測しない（%s）', async (responseType) => {
     vi.useFakeTimers()
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
     setTabsSendMessageImpl((tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
@@ -174,8 +176,10 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   ])('無関係なダウンロードの後も対象URLの開始を待ち続ける（%s）', async (url) => {
     vi.useFakeTimers()
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
     setTabsSendMessageImpl((tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated('https://example.com/unrelated.zip')
         callback?.({ success: true })
         setTimeout(() => fireDownloadCreated(url), 1000)
@@ -202,8 +206,10 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
   it('通信に失敗してもダウンロード開始を観測していれば成功になる', async () => {
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
     setTabsSendMessageImpl((tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated()
         failWithChannelClosed(callback)
         return
@@ -227,7 +233,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let downloadAttempts = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
       setTabsSendMessageImpl((tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
@@ -255,11 +262,13 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let downloadAttempts = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
       setTabsSendMessageImpl((tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
-          fireDownloadCreated()
+          executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
           callback?.({
             success: false,
             error: '要素が見つかりませんでした: #missing',
@@ -316,7 +325,6 @@ describe('待ちの短縮とステップごとの計測', () => {
         receivedAt: Date.now(),
         contentTimings: [
           { phase: 'button-found', durationMs: 1 },
-          { phase: 'click', durationMs: 2 },
         ],
       })
     })
@@ -327,6 +335,8 @@ describe('待ちの短縮とステップごとの計測', () => {
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    executor.notifyDownloadClicked(TAB_ID, 3)
       const sent = stubDomesticStockWithoutDisplayTransition()
 
       const pending = executor.executeDownloadRequest(domesticStockRequest())
@@ -348,6 +358,8 @@ describe('待ちの短縮とステップごとの計測', () => {
 
   it('ステップごとの所要時間をステップの順に報告する', async () => {
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    executor.notifyDownloadClicked(TAB_ID, 3)
     stubDomesticStockWithoutDisplayTransition()
 
     const reported: StepTiming[] = []
@@ -398,7 +410,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let connectionCheckCount = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let connectionCheckCount = 0
       let stepAttempts = 0
       const reloadCount = { current: 0 }
 
@@ -421,7 +434,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
         // ステップ実行
         if (steps.includes('download-csv')) {
           stepAttempts += 1
-          fireDownloadCreated()
+          executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
           callback?.({ success: true })
           return
         }
@@ -450,7 +464,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let connectionCheckCount = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let connectionCheckCount = 0
       const reloadCount = { current: 0 }
 
       setTabsSendMessageImpl((tabId, message, callback) => {
@@ -464,7 +479,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
         }
 
         if (steps.includes('download-csv')) {
-          fireDownloadCreated()
+          executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
           callback?.({ success: true })
           return
         }
@@ -491,6 +507,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
 
   it('初回接続確認が成功すれば再読み込みしない', async () => {
     const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
     let connectionCheckCount = 0
     const reloadCount = { current: 0 }
 
@@ -505,6 +522,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
       }
 
       if (steps.includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated()
         callback?.({ success: true })
         return
@@ -527,7 +545,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let stepAttempts = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let stepAttempts = 0
       const reloadCount = { current: 0 }
 
       setTabsSendMessageImpl((tabId, message, callback) => {
@@ -547,7 +566,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
             return
           }
           // 再読み込み後は成功
-          fireDownloadCreated()
+          executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
           callback?.({ success: true })
           return
         }
@@ -574,7 +594,8 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
-      let stepAttempts = 0
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let stepAttempts = 0
       const reloadCount = { current: 0 }
 
       setTabsSendMessageImpl((tabId, message, callback) => {
