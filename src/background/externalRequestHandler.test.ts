@@ -430,6 +430,22 @@ describe('externalRequestHandler', () => {
       expect(result.timings.every((timing) => timing.durationMs >= 0)).toBe(true)
     })
 
+    it('取得終了時に stage と durationMs だけを console.table で出す', async () => {
+      const tableSpy = vi.spyOn(console, 'table').mockImplementation(() => {})
+      const { handler } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(tableSpy).toHaveBeenCalledTimes(1)
+      const rows = tableSpy.mock.calls[0][0] as { stage: string; durationMs: number }[]
+      expect(rows.every((row) => Object.keys(row).sort().join(',') === 'durationMs,stage')).toBe(true)
+      tableSpy.mockRestore()
+    })
+
     it('種類ごとのステップ所要時間を段階名に含めて返す', async () => {
       const runner = {
         executeDownloadRequest: vi.fn(

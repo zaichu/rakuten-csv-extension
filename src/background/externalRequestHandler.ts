@@ -245,6 +245,7 @@ export class ExternalRequestHandler {
     recordStage('tab-preparation');
     if (tabId === undefined) {
       recordTotal();
+      console.table(timings.map(({ stage, durationMs }) => ({ stage, durationMs })));
       return {
         type: 'result',
         csvs,
@@ -257,6 +258,7 @@ export class ExternalRequestHandler {
     recordStage('login-wait');
     if (!loggedIn) {
       recordTotal();
+      console.table(timings.map(({ stage, durationMs }) => ({ stage, durationMs })));
       return {
         type: 'result',
         csvs,
@@ -283,6 +285,7 @@ export class ExternalRequestHandler {
     }
 
     recordTotal();
+    console.table(timings.map(({ stage, durationMs }) => ({ stage, durationMs })));
     return { type: 'result', csvs, failures, timings };
   }
 
@@ -299,7 +302,7 @@ export class ExternalRequestHandler {
     const stepTimings: FetchLatestCsvTiming[] = [];
     // 種類ごとのステップの内訳を、どの段階に時間がかかるか分かる形で残す
     const reportStep: StepTimingReporter = ({ step, phase, durationMs }) => {
-      const stage = phase === 'download-start' ? 'download-start' : step;
+      const stage = phase === 'action' ? step : phase;
       stepTimings.push({ stage: `fetch-${kind}:${stage}`, durationMs });
     };
 

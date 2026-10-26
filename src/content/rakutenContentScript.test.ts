@@ -94,7 +94,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'menu-link'
       document.body.appendChild(el)
       const res = await singleStep('navigate-to-page', { menuLink: '#menu-link' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('select-tab', async () => {
@@ -102,7 +102,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'tab'
       document.body.appendChild(el)
       const res = await singleStep('select-tab', { tabSelector: '#tab' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('select-period', async () => {
@@ -110,7 +110,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.id = 'period'
       document.body.appendChild(el)
       const res = await singleStep('select-period', { periodRadio: '#period' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('display-data', async () => {
@@ -119,7 +119,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await singleStep('display-data', { displayButton: '#display' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('download-csv', async () => {
@@ -128,7 +128,10 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+      })
     })
   })
 
@@ -151,7 +154,10 @@ describe('rakutenContentScript ステップ実行', () => {
       makeInteractable(el)
       vi.spyOn(DomUtils, 'safeClick').mockReturnValue(false)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+      })
     })
   })
 
@@ -162,7 +168,7 @@ describe('rakutenContentScript ステップ実行', () => {
       el.style.display = 'none'
       document.body.appendChild(el)
       const res = await singleStep('navigate-to-page', { menuLink: '#menu-link' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('display-data は要素不在でタイムアウトエラーを返す', async () => {
@@ -189,7 +195,7 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await pending
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
     it('DOMの変化が無くても押せるようになった要素で成功する', async () => {
@@ -221,7 +227,7 @@ describe('rakutenContentScript ステップ実行', () => {
         size = { width: 100, height: 30 }
         await vi.advanceTimersByTimeAsync(500)
 
-        expect(await pending).toEqual({
+        expect(await pending).toMatchObject({
           success: true,
           message: 'ステップ群の実行が完了しました',
         })
@@ -259,7 +265,10 @@ describe('rakutenContentScript ステップ実行', () => {
           selectors: { periodRadio: '#period', csvButton: '#csv' },
         },
       } as unknown as ChromeMessage)
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toMatchObject({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+      })
     })
   })
 

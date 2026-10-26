@@ -187,6 +187,14 @@ class RakutenCsvBackgroundService {
           response = { success: true };
           break;
 
+        case 'csv-download-clicked':
+          this.downloadStepExecutor.notifyDownloadClicked(
+            sender.tab?.id,
+            (message as { clickDurationMs?: number }).clickDurationMs
+          );
+          response = { success: true };
+          break;
+
         default:
           response = { success: false, error: '未対応のアクション' };
       }
