@@ -128,7 +128,12 @@ describe('rakutenContentScript ステップ実行', () => {
       document.body.appendChild(el)
       makeInteractable(el)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toEqual({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+        receivedAt: expect.any(Number),
+        contentTimings: expect.any(Array),
+      })
     })
   })
 
@@ -151,7 +156,12 @@ describe('rakutenContentScript ステップ実行', () => {
       makeInteractable(el)
       vi.spyOn(DomUtils, 'safeClick').mockReturnValue(false)
       const res = await singleStep('download-csv', { csvButton: '#csv' })
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toEqual({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+        receivedAt: expect.any(Number),
+        contentTimings: expect.any(Array),
+      })
     })
   })
 
@@ -259,7 +269,12 @@ describe('rakutenContentScript ステップ実行', () => {
           selectors: { periodRadio: '#period', csvButton: '#csv' },
         },
       } as unknown as ChromeMessage)
-      expect(res).toEqual({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(res).toEqual({
+        success: true,
+        message: 'ステップ群の実行が完了しました',
+        receivedAt: expect.any(Number),
+        contentTimings: expect.any(Array),
+      })
     })
   })
 

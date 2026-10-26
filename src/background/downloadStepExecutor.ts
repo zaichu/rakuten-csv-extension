@@ -78,8 +78,8 @@ type StepExecutionResponse = DownloadResponse & { readonly communicationFailed?:
  */
 export interface StepTiming {
   readonly step: CsvDownloadStep;
-  /** クリック応答までの時間か、押下してからダウンロード開始までの時間か */
-  readonly phase: 'action' | 'download-start';
+  /** どの区間にかかった時間か */
+  readonly phase: string;
   readonly durationMs: number;
 }
 
@@ -88,7 +88,10 @@ export type StepTimingReporter = (timing: StepTiming) => void;
 /** 成功した実行の計測時刻 */
 interface StepExecutionTiming {
   readonly startedAt: number;
+  readonly sendStartedAt: number;
   readonly actionCompletedAt: number;
+  readonly receivedAt?: number;
+  readonly contentTimings?: readonly { readonly phase: string; readonly durationMs: number }[];
   readonly downloadStartedAt?: number;
 }
 
@@ -348,6 +351,7 @@ export class DownloadStepExecutor {
 
       try {
         const attemptStart = Date.now();
+        const sendStartedAt = Date.now();
         let result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
         const actionCompletedAt = Date.now();
 
@@ -359,7 +363,10 @@ export class DownloadStepExecutor {
               downloadStart,
               timing: {
                 startedAt: attemptStart,
+                sendStartedAt,
                 actionCompletedAt,
+                receivedAt: result.receivedAt,
+                contentTimings: result.contentTimings,
                 downloadStartedAt: downloadStart ? Date.now() : undefined
               }
             };
@@ -435,13 +442,39 @@ export class DownloadStepExecutor {
     }
 
     const step = steps[steps.length - 1];
-    reportStep({ step, phase: 'action', durationMs: Date.now() - timing.startedAt });
+
+    if (step === 'download-csv') {
+      // 送信から content script が受け取るまで
+      const receiveDuration =
+        timing.receivedAt !== undefined
+          ? Math.max(0, timing.receivedAt - timing.sendStartedAt)
+          : Math.max(0, timing.actionCompletedAt - timing.sendStartedAt);
+      reportStep({ step, phase: 'receive', durationMs: receiveDuration });
+
+      // content script 受信後、CSV保存ボタンが見つかるまで
+      // content script 側で計測した内訳をそのまま報告する
+      for (const contentTiming of timing.contentTimings ?? []) {
+        reportStep({ step, phase: contentTiming.phase, durationMs: contentTiming.durationMs });
+      }
+
+      // click からダウンロード開始まで
+      if (timing.downloadStartedAt !== undefined) {
+        reportStep({
+          step,
+          phase: 'download-start',
+          durationMs: Math.max(0, timing.downloadStartedAt - timing.actionCompletedAt)
+        });
+      }
+      return;
+    }
+
+    reportStep({ step, phase: 'action', durationMs: Math.max(0, timing.actionCompletedAt - timing.startedAt) });
 
     if (timing.downloadStartedAt !== undefined) {
       reportStep({
         step,
         phase: 'download-start',
-        durationMs: timing.downloadStartedAt - timing.actionCompletedAt
+        durationMs: Math.max(0, timing.downloadStartedAt - timing.actionCompletedAt)
       });
     }
   }

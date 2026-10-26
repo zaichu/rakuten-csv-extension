@@ -191,10 +191,20 @@ class RakutenCsvExtension {
       };
     }
 
+    let receivedAt: number | undefined;
+    const contentTimings: { phase: string; durationMs: number }[] = [];
+
     for (const step of downloadSteps) {
       try {
         const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
         console.log(`ステップ ${step} 完了:`, result);
+
+        if (result.receivedAt !== undefined) {
+          receivedAt = result.receivedAt;
+        }
+        if (result.contentTimings) {
+          contentTimings.push(...result.contentTimings);
+        }
 
         if (!result.success) {
           return { ...result, step };
@@ -211,7 +221,9 @@ class RakutenCsvExtension {
 
     return {
       success: true,
-      message: 'ステップ群の実行が完了しました'
+      message: 'ステップ群の実行が完了しました',
+      receivedAt,
+      contentTimings: contentTimings.length > 0 ? contentTimings : undefined,
     };
   }
 
@@ -267,6 +279,9 @@ class RakutenCsvExtension {
       clickAfterResponse?: boolean;
     }
   ): Promise<DownloadResponse> {
+    // content script がメッセージを受け取った時刻（service worker 側で送信からの時間を計算する）
+    const receivedAt = Date.now();
+
     if (!selector) {
       return { success: false, error: `${actionName}のセレクターが指定されていません` };
     }
@@ -275,11 +290,14 @@ class RakutenCsvExtension {
       ? await this.findElement(selector, this.elementTimeout, true)
       : await this.findElement(selector);
 
+    const buttonFoundAt = Date.now();
+
     if (options?.beforeClick) {
       await options.beforeClick();
     }
 
     if (options?.clickAfterResponse) {
+      const clickScheduledAt = Date.now();
       // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
       // クリックできたかはバックグラウンドが chrome.downloads.onCreated で判定する
       window.setTimeout(() => {
@@ -289,7 +307,15 @@ class RakutenCsvExtension {
         }
       }, 0);
 
-      return { success: true, message: `${actionName}のクリックを開始しました` };
+      return {
+        success: true,
+        message: `${actionName}のクリックを開始しました`,
+        receivedAt,
+        contentTimings: [
+          { phase: 'button-found', durationMs: Math.max(0, buttonFoundAt - receivedAt) },
+          { phase: 'click', durationMs: Math.max(0, clickScheduledAt - buttonFoundAt) },
+        ],
+      };
     }
 
     return this.clickElementSafely(element, actionName);

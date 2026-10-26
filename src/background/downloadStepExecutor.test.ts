@@ -311,7 +311,14 @@ describe('待ちの短縮とステップごとの計測', () => {
       } else if (steps.includes('navigate-to-page')) {
         firePageTransition(tabId)
       }
-      callback?.({ success: true })
+      callback?.({
+        success: true,
+        receivedAt: Date.now(),
+        contentTimings: [
+          { phase: 'button-found', durationMs: 1 },
+          { phase: 'click', durationMs: 2 },
+        ],
+      })
     })
     return sent
   }
@@ -353,7 +360,9 @@ describe('待ちの短縮とステップごとの計測', () => {
       'navigate-to-page:action',
       'select-period:action',
       'display-data:action',
-      'download-csv:action',
+      'download-csv:receive',
+      'download-csv:button-found',
+      'download-csv:click',
       'download-csv:download-start',
     ])
     expect(reported.every((timing) => timing.durationMs >= 0)).toBe(true)
