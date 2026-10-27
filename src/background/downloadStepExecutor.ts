@@ -304,6 +304,9 @@ export class DownloadStepExecutor {
 
   /**
    * 同一ページ内の連続ステップをリトライ付きで実行
+   *
+   * 送り直すのは応答が届かなかった場合だけにする。contentが確定させた
+   * 失敗（要素未検出など）を送り直すと済んだクリックを繰り返すため。
    */
   private async executeStepsWithRetry(
     tabId: number,
@@ -315,6 +318,7 @@ export class DownloadStepExecutor {
     let lastError: string = '';
     let lastStep: CsvDownloadStep | undefined;
     let lastCode: string | undefined;
+    let attempts = 0;
 
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       // ダウンロード開始はクリック前から待ち受ける必要があるため、
@@ -326,6 +330,7 @@ export class DownloadStepExecutor {
       try {
         const attemptStart = Date.now();
         const sendStartedAt = Date.now();
+        attempts += 1;
         let result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
         const actionCompletedAt = Date.now();
 
@@ -373,6 +378,13 @@ export class DownloadStepExecutor {
           return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
         }
 
+        // contentが確定させた失敗は送り直さない。済んだクリックの繰り返しは二重ダウンロードの危険がある
+        if (!result.communicationFailed) {
+          lastError = result.error || 'ステップの実行に失敗しました';
+          lastStep = result.step;
+          break;
+        }
+
         lastError = result.error || 'ステップの実行に失敗しました';
         lastStep = result.step;
 
@@ -395,7 +407,7 @@ export class DownloadStepExecutor {
     return {
       response: {
         success: false,
-        error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${this.config.maxRetries + 1}回試行）: ${lastError}`,
+        error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${attempts}回試行）: ${lastError}`,
         step: lastStep,
         code: lastCode
       }
@@ -525,7 +537,14 @@ export class DownloadStepExecutor {
             resolve(errorResponse);
             return;
           }
-          resolve(response || { success: false, error: 'レスポンスがありません' });
+          resolve(
+            response || {
+              success: false,
+              error: 'レスポンスがありません',
+              // 応答が全く届かない場合は送り直しの対象にする
+              communicationFailed: true
+            }
+          );
         });
       });
     };
