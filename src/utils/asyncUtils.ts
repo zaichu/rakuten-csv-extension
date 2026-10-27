@@ -20,3 +20,40 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMe
     );
   });
 }
+
+/**
+ * 待ち受けの定型処理（settled旗 + 上限タイマー）をまとめる
+ *
+ * リスナー登録→先に届いた通知を拾う順序は呼び出し側で保つこと。
+ * 上限時間の定数（300/3000/5000ms等）は呼び出し側のまま変えない。
+ */
+export function createOneShotWait(
+  timeoutMs: number,
+  onTimeout: () => void
+): {
+  readonly finish: (done: () => void) => void;
+  readonly cancel: () => void;
+} {
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    onTimeout();
+  }, timeoutMs);
+
+  return {
+    finish: (done: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      done();
+    },
+    cancel: () => {
+      clearTimeout(timer);
+    }
+  };
+}

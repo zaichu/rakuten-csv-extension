@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sleep, withTimeout } from './asyncUtils';
+import { sleep, withTimeout, createOneShotWait } from './asyncUtils';
 
 describe('sleep', () => {
   beforeEach(() => {
@@ -56,5 +56,45 @@ describe('withTimeout', () => {
   it('元の Promise が reject した場合、そのエラーを伝播する', async () => {
     const failing = Promise.reject(new Error('元のエラー'));
     await expect(withTimeout(failing, 1000, 'タイムアウト')).rejects.toThrow('元のエラー');
+  });
+});
+
+describe('createOneShotWait', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('finishを呼ぶと上限時間の前に打ち切れる', async () => {
+    const onTimeout = vi.fn();
+    const wait = createOneShotWait(1000, onTimeout);
+    let done = false;
+    wait.finish(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(done).toBe(true);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it('何も起きなければ上限時間で打ち切る', async () => {
+    const onTimeout = vi.fn();
+    createOneShotWait(1000, onTimeout);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('二重に完了させても一度だけ実行する', async () => {
+    const onTimeout = vi.fn();
+    const wait = createOneShotWait(1000, onTimeout);
+    const done = vi.fn();
+    wait.finish(done);
+    wait.finish(done);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(onTimeout).not.toHaveBeenCalled();
   });
 });

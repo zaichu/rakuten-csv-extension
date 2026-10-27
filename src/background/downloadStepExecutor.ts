@@ -19,7 +19,8 @@ import type {
   CsvDownloadType,
   CsvDownloadStep
 } from '../types';
-import { RakutenUtils, withTimeout, sleep } from '../utils';
+import { isPageTransitionStep } from '../types';
+import { RakutenUtils, withTimeout, sleep, createOneShotWait } from '../utils';
 import { isRakutenDownloadSource } from './downloadedFile';
 
 /** コンテンツスクリプト不在エラーの判定用 */
@@ -99,13 +100,6 @@ export class DownloadStepExecutor {
     stepTimeout: 30000,
     retryInterval: 300
   };
-
-  /** ページ遷移・ページ更新を伴い得るステップ（単独実行のうえ遷移完了を待つ対象） */
-  private readonly pageTransitionSteps: ReadonlySet<CsvDownloadStep> = new Set([
-    'navigate-to-page',
-    'select-tab',
-    'display-data'
-  ]);
 
   /** ページ遷移完了イベントを取りこぼした場合のハング防止タイムアウト */
   private readonly pageTransitionTimeout = 3000;
@@ -239,7 +233,7 @@ export class DownloadStepExecutor {
     > = [];
 
     for (const step of steps) {
-      if (this.pageTransitionSteps.has(step)) {
+      if (isPageTransitionStep(step)) {
         groups.push({ kind: 'page-transition', step });
         continue;
       }
@@ -553,18 +547,17 @@ export class DownloadStepExecutor {
    */
   private async reloadTabAndWait(tabId: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      let settled = false;
-
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-        clearTimeout(timer);
-        resolve();
+      let cleanup: () => void = () => {};
+      const wait = createOneShotWait(30000, () => {
+        cleanup();
+        reject(new Error('タブの再読み込みがタイムアウトしました'));
+      });
+      const finish = (): void => {
+        wait.finish(() => {
+          cleanup();
+          resolve();
+        });
       };
-
       const onUpdatedListener = (
         updatedTabId: number,
         changeInfo: chrome.tabs.OnUpdatedInfo
@@ -573,15 +566,11 @@ export class DownloadStepExecutor {
           finish();
         }
       };
+      cleanup = () => {
+        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+      };
 
       chrome.tabs.onUpdated.addListener(onUpdatedListener);
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-          reject(new Error('タブの再読み込みがタイムアウトしました'));
-        }
-      }, 30000);
 
       chrome.tabs.reload(tabId);
     });
@@ -647,24 +636,21 @@ export class DownloadStepExecutor {
    * timeoutMs 経過時にも resolve する。
    */
   private waitForPageTransition(tabId: number, timeoutMs: number): PageTransitionWait {
-    let settled = false;
     let navigationStarted = false;
     let resolveDone: () => void = () => {};
     const done = new Promise<void>((resolve) => {
       resolveDone = resolve;
     });
 
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-      this.removePageReadyWaiter(tabId, finish);
-      clearTimeout(timer);
-      resolveDone();
+    let cleanup: () => void = () => {};
+    const wait = createOneShotWait(timeoutMs, () => {
+      cleanup();
+    });
+    const finish = (): void => {
+      wait.finish(() => {
+        cleanup();
+      });
     };
-
     const onUpdatedListener = (
       updatedTabId: number,
       changeInfo: chrome.tabs.OnUpdatedInfo
@@ -681,10 +667,14 @@ export class DownloadStepExecutor {
         finish();
       }
     };
+    cleanup = (): void => {
+      chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+      this.removePageReadyWaiter(tabId, finish);
+      resolveDone();
+    };
 
     chrome.tabs.onUpdated.addListener(onUpdatedListener);
     this.addPageReadyWaiter(tabId, finish);
-    const timer = setTimeout(finish, timeoutMs);
 
     return { done, hasStarted: () => navigationStarted, cancel: finish };
   }
@@ -736,18 +726,17 @@ export class DownloadStepExecutor {
         return;
       }
 
-      let settled = false;
-
-      const finish = (started: boolean) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        chrome.downloads.onCreated.removeListener(listener);
-        clearTimeout(timer);
-        resolve(started);
+      let cleanup: () => void = () => {};
+      const wait = createOneShotWait(timeoutMs, () => {
+        cleanup();
+        resolve(false);
+      });
+      const finish = (started: boolean): void => {
+        wait.finish(() => {
+          cleanup();
+          resolve(started);
+        });
       };
-
       const listener = (item: chrome.downloads.DownloadItem): void => {
         // blob: は内側のオリジンまで見る判定を使い、別タブの無関係な
         // blob/data ダウンロードを開始済みと誤認しない
@@ -756,9 +745,11 @@ export class DownloadStepExecutor {
         }
         finish(true);
       };
+      cleanup = () => {
+        chrome.downloads.onCreated.removeListener(listener);
+      };
 
       chrome.downloads.onCreated.addListener(listener);
-      const timer = setTimeout(() => finish(false), timeoutMs);
     });
   }
 
@@ -811,17 +802,7 @@ export class DownloadStepExecutor {
     }
 
     return new Promise((resolve) => {
-      let settled = false;
-      const callback = (durationMs: number | undefined, clickedAt: number): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        removeWaiter();
-        resolve({ clickedAt, durationMs });
-      };
-
+      let callback: (durationMs: number | undefined, clickedAt: number) => void = () => {};
       const removeWaiter = (): void => {
         const waiters = this.downloadClickWaiters.get(tabId);
         if (!waiters) {
@@ -832,19 +813,20 @@ export class DownloadStepExecutor {
           this.downloadClickWaiters.delete(tabId);
         }
       };
+      const wait = createOneShotWait(timeoutMs, () => {
+        removeWaiter();
+        resolve(undefined);
+      });
+      callback = (durationMs: number | undefined, clickedAt: number): void => {
+        wait.finish(() => {
+          removeWaiter();
+          resolve({ clickedAt, durationMs });
+        });
+      };
 
       const waiters = this.downloadClickWaiters.get(tabId) ?? new Set();
       waiters.add(callback);
       this.downloadClickWaiters.set(tabId, waiters);
-
-      const timer = setTimeout(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        removeWaiter();
-        resolve(undefined);
-      }, timeoutMs);
     });
   }
 
