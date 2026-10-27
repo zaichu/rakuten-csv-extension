@@ -395,7 +395,7 @@ export class ExternalRequestHandler {
       }
 
       if (!loginPageOpened) {
-        await this.openRakutenPage(tabId);
+        await openTab(RakutenUtils.BASE_URL, tabId);
         loginPageOpened = true;
       }
 
@@ -427,7 +427,7 @@ export class ExternalRequestHandler {
       return existing.id;
     }
 
-    const tab = await this.createRakutenTab();
+    const tab = await openTab(RakutenUtils.BASE_URL);
     if (tab?.id === undefined) {
       return undefined;
     }
@@ -453,29 +453,6 @@ export class ExternalRequestHandler {
         await chrome.windows.update(tab.windowId, { focused: true });
       }
     }
-  }
-
-  private createRakutenTab(): Promise<chrome.tabs.Tab | undefined> {
-    return new Promise((resolve) => {
-      chrome.tabs.create({ url: RakutenUtils.BASE_URL, active: true }, (tab) => {
-        // lastError を読むことで未処理エラーの警告を避ける
-        void chrome.runtime.lastError;
-        resolve(tab);
-      });
-    });
-  }
-
-  /**
-   * 未ログインならログイン画面を開く
-   */
-  private openRakutenPage(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.tabs.update(tabId, { url: RakutenUtils.BASE_URL }, () => {
-        // lastError を読むことで未処理エラーの警告を避ける
-        void chrome.runtime.lastError;
-        resolve();
-      });
-    });
   }
 
   /**
@@ -550,6 +527,21 @@ function isLoginStateResponse(response: unknown): response is LoginStateResponse
     response !== null &&
     typeof (response as LoginStateResponse).success === 'boolean'
   );
+}
+
+function openTab(url: string, tabId?: number): Promise<chrome.tabs.Tab | undefined> {
+  return new Promise((resolve) => {
+    const done = (tab?: chrome.tabs.Tab): void => {
+      // lastError を読むことで未処理エラーの警告を避ける
+      void chrome.runtime.lastError;
+      resolve(tab);
+    };
+    if (tabId === undefined) {
+      chrome.tabs.create({ url, active: true }, done);
+    } else {
+      chrome.tabs.update(tabId, { url }, done);
+    }
+  });
 }
 
 function errorResponse(error: string): ExternalErrorResponse {
