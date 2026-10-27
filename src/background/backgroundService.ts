@@ -9,6 +9,7 @@
 import type {
   ExtensionState,
   CsvDownloadMessage,
+  CsvDownloadClickedMessage,
   DownloadResponse,
   BackgroundMessage,
   ExtensionUpdatedMessage
@@ -177,7 +178,7 @@ class RakutenCsvBackgroundService {
         case 'csv-download-clicked':
           this.downloadStepExecutor.notifyDownloadClicked(
             sender.tab?.id,
-            (message as { clickDurationMs?: number }).clickDurationMs
+            (message as CsvDownloadClickedMessage).clickDurationMs
           );
           response = { success: true };
           break;

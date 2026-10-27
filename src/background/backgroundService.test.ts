@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import type {
   ChromeMessage,
   CsvDownloadMessage,
+  CsvDownloadStep,
   CsvDownloadType,
   DownloadResponse,
   ExtensionState,
 } from '../types'
+import { isPageTransitionStep } from '../types'
 import './backgroundService'
 
 /**
@@ -121,16 +123,14 @@ describe('backgroundService characterization', () => {
     }
   }
 
-  /** downloadStepExecutor.pageTransitionSteps と同じ集合 */
-  const PAGE_TRANSITION_STEPS = new Set(['navigate-to-page', 'select-tab', 'display-data'])
-
   /**
    * content script 側の正常応答をスタブする既定の sendMessage 実装。
    * wait 系の待ち受けが登録される前にイベントを発火させないよう、
    * 呼び出し時点で登録済みのリスナーを同期的に発火させて解消する。
+   * 単独実行の対象は型側の判定(isPageTransitionStep)で見分ける。
    */
   function stubContentScriptSuccess(tabId: number, steps: readonly string[]): void {
-    if (steps.length === 1 && PAGE_TRANSITION_STEPS.has(steps[0])) {
+    if (steps.length === 1 && isPageTransitionStep(steps[0] as CsvDownloadStep)) {
       firePageTransition(tabId)
     }
     if (steps.includes('download-csv')) {

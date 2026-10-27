@@ -22,6 +22,22 @@ export type CsvDownloadStep =
   | 'download-csv';         // CSV保存
 
 /**
+ * ページ遷移・ページ更新を伴い得るステップ
+ *
+ * 単独実行・遷移待ちの対象。ステップ種の知識はここに寄せる。
+ * 追加時はこの集合だけを変える。
+ */
+export const PAGE_TRANSITION_STEPS: ReadonlySet<CsvDownloadStep> = new Set([
+  'navigate-to-page',
+  'select-tab',
+  'display-data'
+]);
+
+export function isPageTransitionStep(step: CsvDownloadStep): boolean {
+  return PAGE_TRANSITION_STEPS.has(step);
+}
+
+/**
  * Chrome拡張機能のメッセージ基底型
  */
 export interface ChromeMessage {

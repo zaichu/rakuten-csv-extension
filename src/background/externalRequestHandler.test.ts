@@ -14,7 +14,7 @@ import {
   readAllowedOrigins,
 } from './externalRequestHandler'
 import type { DownloadedFileReader } from './downloadedFile'
-import type { StepTiming } from './downloadStepExecutor'
+import { DownloadStepExecutor } from './downloadStepExecutor'
 
 /**
  * 外部ページ(shoken-webapp)からの取得依頼の挙動を固定する。
@@ -97,9 +97,16 @@ function createFileReader(
 /**
  * ハンドラと、ダウンロード手順を実行するランナーを用意する
  *
- * ランナーは実際のコンテンツスクリプトと同じく、クリック直前にバックグラウンドへ
+ * ランナーは実クラス(DownloadStepExecutor)の一部だけを差し替えたものを使う。
+ * 実クラスと同じく、クリック直前にバックグラウンドへ
  * 通知してからダウンロードを発生させる
  */
+function createDownloadExecutor(): DownloadStepExecutor {
+  return new DownloadStepExecutor({
+    hasRakutenTab: () => true,
+    getActiveTabId: () => TARGET_TAB_ID,
+  })
+}
 function createHandler(
   responses: Partial<Record<CsvDownloadType, DownloadResponse>> = {},
   config: {
@@ -111,30 +118,28 @@ function createHandler(
 ) {
   const executed: CsvDownloadType[] = []
 
-  const runner = {
-    executeDownloadRequest: vi.fn(
-      async (message: { payload: { selectedOptions: readonly CsvDownloadType[] } }) => {
-        const kind = message.payload.selectedOptions[0]
-        executed.push(kind)
-        handler.notifyDownloadWillStart(TARGET_TAB_ID)
-        downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, kind))
-        fireDownloadCreated({
-          id: DOWNLOAD_ID,
-          url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
-        })
-        return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
-      }
-    ),
-  }
+  const executor = createDownloadExecutor()
 
   const handler = new ExternalRequestHandler({
-    downloadRunner: runner,
+    downloadRunner: executor,
     allowedOrigins: ALLOWED_PATTERNS,
     fileReader: config.fileReader ?? createFileReader(),
     ...config,
   })
 
-  return { handler, runner, executed }
+  vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async (message) => {
+    const kind = message.payload.selectedOptions[0]
+    executed.push(kind)
+    handler.notifyDownloadWillStart(TARGET_TAB_ID)
+    downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, kind))
+    fireDownloadCreated({
+      id: DOWNLOAD_ID,
+      url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
+    })
+    return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
+  })
+
+  return { handler, runner: executor, executed }
 }
 
 function fireDownloadCreated(item: { id: number; url: string }): void {
@@ -351,7 +356,7 @@ describe('externalRequestHandler', () => {
           outcome === '一部失敗' ? { dividend: { success: false, error: '取得失敗' } } : {},
           { loginWaitTimeoutMs: outcome === 'ログイン時間切れ' ? 0 : 500 }
         )
-        if (outcome === '例外') runner.executeDownloadRequest.mockRejectedValueOnce(new Error('失敗'))
+        if (outcome === '例外') vi.mocked(runner.executeDownloadRequest).mockRejectedValueOnce(new Error('失敗'))
         if (outcome === 'タブ削除失敗') {
           vi.mocked(chrome.tabs.remove).mockRejectedValueOnce(new Error('閉じたタブ'))
         }
@@ -447,17 +452,16 @@ describe('externalRequestHandler', () => {
     })
 
     it('種類ごとのステップ所要時間を段階名に含めて返す', async () => {
-      const runner = {
-        executeDownloadRequest: vi.fn(
-          async (_message: unknown, reportStep?: (timing: StepTiming) => void) => {
-            reportStep?.({ step: 'download-csv', phase: 'action', durationMs: 12 })
-            reportStep?.({ step: 'download-csv', phase: 'download-start', durationMs: 34 })
-            return { success: false, error: '取得失敗' }
-          }
-        ),
-      }
+      const executor = createDownloadExecutor()
+      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(
+        async (_message, reportStep) => {
+          reportStep?.({ step: 'download-csv', phase: 'action', durationMs: 12 })
+          reportStep?.({ step: 'download-csv', phase: 'download-start', durationMs: 34 })
+          return { success: false, error: '取得失敗' }
+        }
+      )
       const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
+        downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -550,16 +554,15 @@ describe('externalRequestHandler', () => {
 
     it('取得中は別の依頼を受け付けない', async () => {
       let release: (() => void) | undefined
-      const runner = {
-        executeDownloadRequest: vi.fn(async () => {
-          await new Promise<void>((resolve) => {
-            release = resolve
-          })
-          return { success: true, message: '取得完了' }
-        }),
-      }
+      const executor = createDownloadExecutor()
+      const executeMock = vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return { success: true, message: '取得完了' }
+      })
       const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
+        downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 50,
       })
@@ -567,7 +570,7 @@ describe('externalRequestHandler', () => {
 
       handler.handleConnection(port)
       listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-      await waitUntil(() => runner.executeDownloadRequest.mock.calls.length > 0)
+      await waitUntil(() => executeMock.mock.calls.length > 0)
       listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['dividend'] })
 
       const error = await waitForMessage<ExternalErrorResponse>(
@@ -582,23 +585,22 @@ describe('externalRequestHandler', () => {
 
   describe('ダウンロード開始の待ち受け', () => {
     it('クリック直前の通知より前のダウンロードは捕捉しない', async () => {
-      const runner = {
-        executeDownloadRequest: vi.fn(async () => {
-          fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
-          handler.notifyDownloadWillStart(TARGET_TAB_ID)
-          downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, 'assetbalance'))
-          fireDownloadCreated({
-            id: DOWNLOAD_ID,
-            url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
-          })
-          return { success: true, message: '取得完了' }
-        }),
-      }
+      const executor = createDownloadExecutor()
       const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
+        downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 50,
         fileReader: createFileReader(),
+      })
+      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
+        fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+        handler.notifyDownloadWillStart(TARGET_TAB_ID)
+        downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, 'assetbalance'))
+        fireDownloadCreated({
+          id: DOWNLOAD_ID,
+          url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
+        })
+        return { success: true, message: '取得完了' }
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -611,18 +613,17 @@ describe('externalRequestHandler', () => {
     })
 
     it('対象タブ以外からの通知では待ち受けを開始しない', async () => {
-      const runner = {
-        executeDownloadRequest: vi.fn(async () => {
-          handler.notifyDownloadWillStart(OTHER_TAB_ID)
-          fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
-          return { success: true, message: '取得完了' }
-        }),
-      }
+      const executor = createDownloadExecutor()
       const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
+        downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 30,
         fileReader: createFileReader(),
+      })
+      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
+        handler.notifyDownloadWillStart(OTHER_TAB_ID)
+        fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
+        return { success: true, message: '取得完了' }
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -637,20 +638,19 @@ describe('externalRequestHandler', () => {
     })
 
     it('通知が無い場合はダウンロードを取り逃がす', async () => {
-      const runner = {
-        executeDownloadRequest: vi.fn(async () => {
-          fireDownloadCreated({
-            id: DOWNLOAD_ID,
-            url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
-          })
-          return { success: true, message: '取得完了' }
-        }),
-      }
+      const executor = createDownloadExecutor()
       const handler = new ExternalRequestHandler({
-        downloadRunner: runner,
+        downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
         downloadStartTimeoutMs: 30,
         fileReader: createFileReader(),
+      })
+      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
+        fireDownloadCreated({
+          id: DOWNLOAD_ID,
+          url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
+        })
+        return { success: true, message: '取得完了' }
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
