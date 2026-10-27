@@ -24,6 +24,7 @@ export type {
   CsvDownloadConfig,
   CsvSelectors,
   DownloadResponse,
+  DownloadStepTiming,
   LoginStateResponse,
   CheckLoginStateInstruction,
   FetchLatestCsvRequest,

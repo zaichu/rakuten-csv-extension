@@ -51,8 +51,6 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
     selectors: {
       // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
       menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
-      // 国内株式タブを選択
-      // tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
       // 表示期間のラジオボタンをすべてを選択
       periodRadio: "#termCdALL",
       // この条件で表示するボタン押下

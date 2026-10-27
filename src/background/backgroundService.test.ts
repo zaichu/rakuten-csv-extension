@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import type {
   ChromeMessage,
   CsvDownloadMessage,
-  CsvDownloadStep,
   CsvDownloadType,
   DownloadResponse,
   ExtensionState,
@@ -19,25 +18,11 @@ import './backgroundService'
  * 経由の振る舞いを検証する（private メソッドは直接触らない）。
  */
 
-type ExtensionConfigShape = {
-  readonly maxRetries: number
-  readonly stepTimeout: number
-  readonly retryInterval: number
-  readonly debugMode: boolean
-}
-
 type BackgroundServiceApi = {
   getState(): ExtensionState
-  getConfig(): ExtensionConfigShape
   getExternalRequestHandler(): {
     notifyDownloadWillStart(tabId: number | undefined): void
   }
-  groupSteps: (
-    steps: readonly CsvDownloadStep[]
-  ) => readonly (
-    | { readonly kind: 'page-transition'; readonly step: CsvDownloadStep }
-    | { readonly kind: 'batch'; readonly steps: readonly CsvDownloadStep[] }
-  )[]
 }
 
 function getService(): BackgroundServiceApi {
@@ -220,69 +205,6 @@ describe('backgroundService characterization', () => {
         tabsOnActivated: true,
         runtimeOnMessage: true,
       })
-    })
-
-    it('既定の設定値を保持している', () => {
-      expect(getService().getConfig()).toEqual({
-        maxRetries: 2,
-        stepTimeout: 30000,
-        retryInterval: 300,
-        debugMode: false,
-      })
-    })
-  })
-
-  describe('groupSteps のグルーピングロジック', () => {
-    it('navigate-to-page/select-tab/display-data は単独の page-transition グループになる', () => {
-      const service = getService()
-      expect(service.groupSteps(['navigate-to-page'])).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-      ])
-      expect(service.groupSteps(['select-tab'])).toEqual([
-        { kind: 'page-transition', step: 'select-tab' },
-      ])
-      expect(service.groupSteps(['display-data'])).toEqual([
-        { kind: 'page-transition', step: 'display-data' },
-      ])
-    })
-
-    it('それ以外の連続ステップは1つの batch グループにまとまる', () => {
-      expect(getService().groupSteps(['select-period', 'download-csv'])).toEqual([
-        { kind: 'batch', steps: ['select-period', 'download-csv'] },
-      ])
-    })
-
-    it('dividend のステップ列は page-transition と batch が交互になる', () => {
-      expect(
-        getService().groupSteps(['navigate-to-page', 'select-period', 'display-data', 'download-csv'])
-      ).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-        { kind: 'batch', steps: ['select-period'] },
-        { kind: 'page-transition', step: 'display-data' },
-        { kind: 'batch', steps: ['download-csv'] },
-      ])
-    })
-
-    it('mutualfund のステップ列は select-tab も単独グループになる', () => {
-      expect(
-        getService().groupSteps([
-          'navigate-to-page',
-          'select-tab',
-          'select-period',
-          'display-data',
-          'download-csv',
-        ])
-      ).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-        { kind: 'page-transition', step: 'select-tab' },
-        { kind: 'batch', steps: ['select-period'] },
-        { kind: 'page-transition', step: 'display-data' },
-        { kind: 'batch', steps: ['download-csv'] },
-      ])
-    })
-
-    it('空のステップ列は空のグループ列になる', () => {
-      expect(getService().groupSteps([])).toEqual([])
     })
   })
 

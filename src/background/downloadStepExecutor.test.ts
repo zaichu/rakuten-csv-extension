@@ -3,7 +3,6 @@ import type { CsvDownloadMessage, DownloadResponse } from '../types'
 import {
   DownloadStepExecutor,
   type StepTiming,
-  type TabStateReader,
 } from './downloadStepExecutor'
 
 /**
@@ -22,11 +21,10 @@ type SendMessageImpl = (
 ) => void
 
 function createExecutor(): DownloadStepExecutor {
-  const tabState: TabStateReader = {
+  return new DownloadStepExecutor({
     hasRakutenTab: () => true,
     getActiveTabId: () => TAB_ID,
-  }
-  return new DownloadStepExecutor(tabState)
+  })
 }
 
 function downloadRequest(): CsvDownloadMessage {
@@ -630,5 +628,59 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('groupSteps のグルーピングロジック', () => {
+  it('navigate-to-page/select-tab/display-data は単独の page-transition グループになる', () => {
+    const executor = createExecutor()
+    expect(executor.groupSteps(['navigate-to-page'])).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+    ])
+    expect(executor.groupSteps(['select-tab'])).toEqual([
+      { kind: 'page-transition', step: 'select-tab' },
+    ])
+    expect(executor.groupSteps(['display-data'])).toEqual([
+      { kind: 'page-transition', step: 'display-data' },
+    ])
+  })
+
+  it('それ以外の連続ステップは1つの batch グループにまとまる', () => {
+    expect(createExecutor().groupSteps(['select-period', 'download-csv'])).toEqual([
+      { kind: 'batch', steps: ['select-period', 'download-csv'] },
+    ])
+  })
+
+  it('dividend のステップ列は page-transition と batch が交互になる', () => {
+    expect(
+      createExecutor().groupSteps(['navigate-to-page', 'select-period', 'display-data', 'download-csv'])
+    ).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+      { kind: 'batch', steps: ['select-period'] },
+      { kind: 'page-transition', step: 'display-data' },
+      { kind: 'batch', steps: ['download-csv'] },
+    ])
+  })
+
+  it('mutualfund のステップ列は select-tab も単独グループになる', () => {
+    expect(
+      createExecutor().groupSteps([
+        'navigate-to-page',
+        'select-tab',
+        'select-period',
+        'display-data',
+        'download-csv',
+      ])
+    ).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+      { kind: 'page-transition', step: 'select-tab' },
+      { kind: 'batch', steps: ['select-period'] },
+      { kind: 'page-transition', step: 'display-data' },
+      { kind: 'batch', steps: ['download-csv'] },
+    ])
+  })
+
+  it('空のステップ列は空のグループ列になる', () => {
+    expect(createExecutor().groupSteps([])).toEqual([])
   })
 })

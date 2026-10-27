@@ -3,6 +3,7 @@ import type {
   ContentScriptMessage,
   ContentScriptResponse,
   DownloadResponse,
+  DownloadStepTiming,
   LoginStateResponse,
   PageReadyMessage,
   ChromeMessage,
@@ -198,7 +199,7 @@ class RakutenCsvExtension {
       };
     }
 
-    const contentTimings: { phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; durationMs: number }[] = [];
+    const contentTimings: DownloadStepTiming[] = [];
 
     for (const step of downloadSteps) {
       try {
