@@ -252,21 +252,35 @@ export function toFileUrl(path: string): string {
 /**
  * 読み込んでよいダウンロードか
  */
-export function validateDownloadedCsv(item: chrome.downloads.DownloadItem): { ok: boolean; reason?: string } {
+export type DownloadValidation = { readonly ok: boolean; readonly reason?: string };
+
+function invalid(reason: string): DownloadValidation {
+  return { ok: false, reason };
+}
+
+function readOk(content: string, fileRemoved: boolean): ReadDownloadedCsvResult {
+  return { success: true, content, fileRemoved };
+}
+
+function readFail(reason: string, code?: string): ReadDownloadedCsvResult {
+  return code === undefined ? { success: false, reason } : { success: false, reason, code };
+}
+
+export function validateDownloadedCsv(item: chrome.downloads.DownloadItem): DownloadValidation {
   if (!isRakutenDownloadSource(item.url) && !isRakutenDownloadSource(item.finalUrl)) {
-    return { ok: false, reason: 'ダウンロード元が楽天証券のファイルではありません' };
+    return invalid('ダウンロード元が楽天証券のファイルではありません');
   }
   if (!item.filename.toLowerCase().endsWith('.csv')) {
-    return { ok: false, reason: '拡張子がCSVのファイルではありません' };
+    return invalid('拡張子がCSVのファイルではありません');
   }
   if (item.fileSize === 0) {
-    return { ok: false, reason: 'ファイルが空です' };
+    return invalid('ファイルが空です');
   }
   if (item.fileSize < 0) {
-    return { ok: false, reason: 'ファイルサイズを判定できません' };
+    return invalid('ファイルサイズを判定できません');
   }
   if (item.fileSize > MAX_CSV_FILE_SIZE) {
-    return { ok: false, reason: 'ファイルが大きすぎます' };
+    return invalid('ファイルが大きすぎます');
   }
   return { ok: true };
 }
@@ -300,16 +314,12 @@ export async function readDownloadedCsv(
 ): Promise<ReadDownloadedCsvResult> {
   const validation = validateDownloadedCsv(item);
   if (!validation.ok) {
-    return { success: false, reason: validation.reason ?? 'CSVファイルを読み取れませんでした' };
+    return readFail(validation.reason ?? 'CSVファイルを読み取れませんでした');
   }
 
   if (!(await reader.isFileAccessAllowed())) {
     await removeDownloadedFile(reader, item.id);
-    return {
-      success: false,
-      reason: 'ファイルの URL へのアクセスが許可されていません',
-      code: FILE_ACCESS_DISABLED_CODE,
-    };
+    return readFail('ファイルの URL へのアクセスが許可されていません', FILE_ACCESS_DISABLED_CODE);
   }
 
   let content: string;
@@ -317,24 +327,21 @@ export async function readDownloadedCsv(
     const bytes = await reader.read(item.filename);
     if (bytes.byteLength > MAX_CSV_FILE_SIZE) {
       await removeDownloadedFile(reader, item.id);
-      return { success: false, reason: 'ファイルが大きすぎます' };
+      return readFail('ファイルが大きすぎます');
     }
     content = decodeCsvBytes(bytes);
   } catch {
     await removeDownloadedFile(reader, item.id);
-    return { success: false, reason: 'CSVファイルの読み取りに失敗しました' };
+    return readFail('CSVファイルの読み取りに失敗しました');
   }
 
   if (isHtmlContent(content)) {
     await removeDownloadedFile(reader, item.id);
-    return {
-      success: false,
-      reason: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）',
-    };
+    return readFail('CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）');
   }
 
   const fileRemoved = await removeDownloadedFile(reader, item.id);
-  return { success: true, content, fileRemoved };
+  return readOk(content, fileRemoved);
 }
 
 /**

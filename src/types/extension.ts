@@ -108,12 +108,34 @@ export interface DownloadStepTiming {
 }
 
 /**
+ * 応答の共通形(success/error)
+ */
+interface BaseResponse {
+  readonly success: boolean;
+  readonly error?: string;
+}
+
+/**
+ * 種類付きの共通形
+ */
+interface WithKind {
+  readonly kind: CsvDownloadType;
+}
+
+/**
+ * 失敗理由の共通形
+ */
+interface WithReason {
+  readonly reason: string;
+  /** 失敗を区別するコード（画面が案内可以用） */
+  readonly code?: string;
+}
+
+/**
  * ダウンロードレスポンス
  */
-export interface DownloadResponse {
-  readonly success: boolean;
+export interface DownloadResponse extends BaseResponse {
   readonly message?: string;
-  readonly error?: string;
   readonly step?: CsvDownloadStep;
   readonly code?: string;
   /**
@@ -129,10 +151,8 @@ export interface DownloadResponse {
 /**
  * ログイン状態の確認結果
  */
-export interface LoginStateResponse {
-  readonly success: boolean;
+export interface LoginStateResponse extends BaseResponse {
   readonly loggedIn?: boolean;
-  readonly error?: string;
 }
 
 /**
@@ -156,18 +176,15 @@ export type FetchLatestCsvProgressState = 'login-wait' | 'fetching' | 'completed
 /**
  * 画面へ返す進行状況
  */
-export interface FetchLatestCsvProgress {
+export type FetchLatestCsvProgress = {
   readonly type: 'progress';
   readonly state: FetchLatestCsvProgressState;
-  readonly kind?: CsvDownloadType;
-  readonly reason?: string;
-}
+} & Partial<WithKind> & Partial<Pick<WithReason, 'reason'>>;
 
 /**
  * 取得できたCSV
  */
-export interface FetchedCsv {
-  readonly kind: CsvDownloadType;
+export interface FetchedCsv extends WithKind {
   readonly content: string;
   readonly fetchedAt: string;
   /** ダウンロードされたファイルを削除できたか */
@@ -177,12 +194,7 @@ export interface FetchedCsv {
 /**
  * 取得に失敗した種類と理由
  */
-export interface FetchLatestCsvFailure {
-  readonly kind: CsvDownloadType;
-  readonly reason: string;
-  /** 失敗を区別するコード（画面が案内可以用） */
-  readonly code?: string;
-}
+export interface FetchLatestCsvFailure extends WithKind, WithReason {}
 
 /**
  * 取得処理の各段階の所要時間
