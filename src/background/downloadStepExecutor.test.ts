@@ -7,7 +7,6 @@ import {
   failWithChannelClosed,
   failWithContentScriptMissing,
   fireDownloadCreatedByUrl as fireDownloadCreated,
-  firePageTransition,
   fireTabReload,
   resetTestDoubles,
   sentSteps,
@@ -188,11 +187,9 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         downloadAttempts += 1
-      } else {
-        firePageTransition(tabId)
       }
       callback?.({ success: true })
     })
@@ -215,7 +212,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         downloadAttempts += 1
         fireDownloadCreated('https://example.com/unrelated.zip')
@@ -228,7 +225,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
         }
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -245,7 +241,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     vi.useFakeTimers()
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated('https://example.com/unrelated.zip')
@@ -253,7 +249,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
         setTimeout(() => fireDownloadCreated(url), 1000)
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -274,14 +269,13 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   it('通信に失敗してもダウンロード開始を観測していれば成功になる', async () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated()
         failWithChannelClosed(callback)
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -301,13 +295,12 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           failWithChannelClosed(callback)
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -329,13 +322,12 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           callback?.(undefined as unknown as DownloadResponse)
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -357,7 +349,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           executor.notifyDownloadClicked(TAB_ID, 0)
@@ -369,7 +361,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
           })
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -388,12 +379,11 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
   it('要素未検出の失敗では手順を送り直さない', async () => {
     const executor = createExecutor()
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).length === 0) {
         callback?.({ success: true })
         return
       }
-      firePageTransition(tabId)
       callback?.({
         success: false,
         error: '要素が見つかりませんでした: #missing',
@@ -421,7 +411,7 @@ describe('待ちの短縮とステップごとの計測', () => {
   /** display-data が画面内の更新だけで済む（ページ遷移しない）国内株式の応答を返す */
   function stubDomesticStockWithoutDisplayTransition(): string[][] {
     const sent: string[][] = []
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       const steps = sentSteps(message)
       if (steps.length === 0) {
         callback?.({ success: true })
@@ -430,8 +420,6 @@ describe('待ちの短縮とステップごとの計測', () => {
       sent.push([...steps])
       if (steps.includes('download-csv')) {
         fireDownloadCreated()
-      } else if (steps.includes('navigate-to-page')) {
-        firePageTransition(tabId)
       }
       callback?.({
         success: true,
@@ -524,7 +512,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
       let stepAttempts = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -548,7 +536,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -577,7 +564,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
       let stepAttempts = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -597,7 +584,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -624,7 +610,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     let connectionCheckCount = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -641,7 +627,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -667,7 +652,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     let connectionCheckCount = 0
     const reloadCount = { current: 0 }
 
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       const steps = sentSteps(message)
 
       if (message.action === 'check-connection') {
@@ -684,7 +669,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
         return
       }
 
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
