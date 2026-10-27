@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { CsvDownloadMessage } from '../types'
+import type { CsvDownloadMessage, DownloadResponse } from '../types'
 import { type StepTiming } from './downloadStepExecutor'
 import {
   TEST_TAB_ID as TAB_ID,
@@ -182,6 +182,35 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
       expect(response.success).toBe(false)
       expect(response.error).toContain('コンテンツスクリプトとの通信に失敗')
+      expect(response.error).toContain('3回試行')
+      expect(downloadAttempts).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('応答が全く届かない場合も送り直す', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        if (sentSteps(message).includes('download-csv')) {
+          downloadAttempts += 1
+          callback?.(undefined as unknown as DownloadResponse)
+          return
+        }
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+
+      expect(response.success).toBe(false)
+      expect(response.error).toContain('レスポンスがありません')
       expect(response.error).toContain('3回試行')
       expect(downloadAttempts).toBe(3)
     } finally {

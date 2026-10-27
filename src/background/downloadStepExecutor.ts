@@ -537,7 +537,14 @@ export class DownloadStepExecutor {
             resolve(errorResponse);
             return;
           }
-          resolve(response || { success: false, error: 'レスポンスがありません' });
+          resolve(
+            response || {
+              success: false,
+              error: 'レスポンスがありません',
+              // 応答が全く届かない場合は送り直しの対象にする
+              communicationFailed: true
+            }
+          );
         });
       });
     };

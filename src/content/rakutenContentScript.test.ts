@@ -173,13 +173,34 @@ describe('rakutenContentScript ステップ実行', () => {
       vi.useFakeTimers()
       try {
         const pending = singleStep('display-data', { displayButton: '#missing-display' })
-        await vi.advanceTimersByTimeAsync(6000)
+        await vi.advanceTimersByTimeAsync(16000)
         const res = await pending
         expect(res).toEqual({
           success: false,
-          error: '要素が見つかりませんでした: #missing-display (5000ms)',
+          error: '要素が見つかりませんでした: #missing-display (15000ms)',
           step: 'display-data',
         })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('5秒を過ぎてから現れた要素も送り直さずに押せる', async () => {
+      vi.useFakeTimers()
+      try {
+        const safeClick = vi.spyOn(DomUtils, 'safeClick')
+        const pending = singleStep('display-data', { displayButton: '#late-slow' })
+        await vi.advanceTimersByTimeAsync(7000)
+
+        const el = document.createElement('button')
+        el.id = 'late-slow'
+        document.body.appendChild(el)
+        makeInteractable(el)
+        await vi.advanceTimersByTimeAsync(500)
+
+        const res = await pending
+        expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
+        expect(safeClick).toHaveBeenCalledTimes(1)
       } finally {
         vi.useRealTimers()
       }
