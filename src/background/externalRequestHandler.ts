@@ -18,7 +18,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep, createOneShotWait, withTimeout } from '../utils';
+import { RakutenUtils, sleep, withTimeout, waitForTabComplete } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -465,32 +465,7 @@ export class ExternalRequestHandler {
    * タブの読み込み完了を待つ
    */
   private waitForTabLoad(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      let cleanup: () => void = () => {};
-      const wait = createOneShotWait(this.tabLoadTimeoutMs, () => {
-        cleanup();
-        resolve();
-      });
-      const finish = (): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve();
-        });
-      };
-      const listener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          finish();
-        }
-      };
-      cleanup = () => {
-        chrome.tabs.onUpdated.removeListener(listener);
-      };
-
-      chrome.tabs.onUpdated.addListener(listener);
-    });
+    return waitForTabComplete(tabId, this.tabLoadTimeoutMs);
   }
 
   /**
