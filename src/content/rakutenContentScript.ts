@@ -1,4 +1,5 @@
 import type {
+  CheckCsvDownloadStepInstruction,
   CsvDownloadStepsInstruction,
   ContentScriptMessage,
   ContentScriptResponse,
@@ -99,6 +100,9 @@ class RakutenCsvExtension {
       case 'execute-csv-download-steps':
         return this.handleCsvDownloadStepsExecution(message, receivedAt);
 
+      case 'check-csv-download-step':
+        return this.checkCsvDownloadStep(message);
+
       case 'check-login-state':
         return this.handleCheckLoginState();
 
@@ -115,6 +119,23 @@ class RakutenCsvExtension {
           error: `未対応のアクション: ${(message as ChromeMessage).action}`
         };
     }
+  }
+
+  private checkCsvDownloadStep(message: CheckCsvDownloadStepInstruction): DownloadResponse {
+    const { step, selectors } = message.payload;
+    const selector = {
+      'navigate-to-page': selectors.menuLink,
+      'select-tab': selectors.tabSelector,
+      'select-period': selectors.periodRadio,
+      'display-data': selectors.displayButton,
+      'download-csv': selectors.csvButton
+    }[step];
+    const requireInteractable = step === 'display-data' || step === 'download-csv';
+    const found = Boolean(selector && selector.split(',').some(candidate => {
+      const element = document.querySelector(candidate.trim());
+      return element && (!requireInteractable || DomUtils.isElementInteractable(element));
+    }));
+    return { success: found };
   }
 
   /**

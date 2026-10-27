@@ -16,6 +16,7 @@ export type {
   ChromeMessage,
   CsvDownloadMessage,
   CsvDownloadStepsInstruction,
+  CheckCsvDownloadStepInstruction,
   ExtensionUpdatedMessage,
   ContentScriptMessage,
   ContentScriptResponse,
