@@ -204,7 +204,6 @@ class RakutenCsvBackgroundService {
     if (sender.tab?.id) {
       this.addRakutenTab(sender.tab.id);
       this.setActiveTab(sender.tab.id);
-      this.downloadStepExecutor.resolvePageReadyWaiters(sender.tab.id);
     }
     return { success: true };
   }

@@ -24,7 +24,7 @@ export type CsvDownloadStep =
 /**
  * ページ遷移・ページ更新を伴い得るステップ
  *
- * 単独実行・遷移待ちの対象。ステップ種の知識はここに寄せる。
+ * 単独実行の対象。ステップ種の知識はここに寄せる。
  * 追加時はこの集合だけを変える。
  */
 export const PAGE_TRANSITION_STEPS: ReadonlySet<CsvDownloadStep> = new Set([
@@ -76,6 +76,14 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
   };
 }
 
+export interface CheckCsvDownloadStepInstruction extends ChromeMessage {
+  readonly action: 'check-csv-download-step';
+  readonly payload: {
+    readonly step: CsvDownloadStep;
+    readonly selectors: CsvSelectors;
+  };
+}
+
 /**
  * 拡張機能更新通知メッセージ
  */
@@ -95,6 +103,7 @@ export interface CheckLoginStateInstruction extends ChromeMessage {
  */
 export type ContentScriptMessage =
   | CsvDownloadStepsInstruction
+  | CheckCsvDownloadStepInstruction
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
   | { readonly action: 'check-connection' };

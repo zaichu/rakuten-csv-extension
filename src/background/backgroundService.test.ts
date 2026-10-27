@@ -248,7 +248,7 @@ describe('backgroundService characterization', () => {
       const response = await downloadRequest(112, ['dividend'])
       expect(response).toEqual({ success: true, message: 'すべてのCSVダウンロードが完了しました' })
 
-      const calls = vi.mocked(chrome.tabs.sendMessage).mock.calls
+      const calls = vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => (call[1] as ChromeMessage).action !== 'check-csv-download-step')
       // 接続確認(1) + 4ステップグループ = 5回
       expect(calls).toHaveLength(5)
       // 0: 接続確認
@@ -306,18 +306,20 @@ describe('backgroundService characterization', () => {
       expect(response.error).toContain('期間選択失敗(stub)')
     })
 
-    it('contentが確定させたステップ失敗は送り直さず試行回数を含むエラーになる', async () => {
+    it('contentが確定させたステップ失敗は送り直さずエラーになる', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(115))
-      setTabsSendMessageImpl((_tabId, _message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
+        if (message.action === 'check-csv-download-step') {
+          callback?.({ success: true })
+          return
+        }
         callback?.({ success: false, error: '常時失敗(stub)' })
       })
 
       const response = (await downloadRequest(115, ['dividend'])) as DownloadResponse
       expect(response.success).toBe(false)
-      // 確定した失敗は送り直さないため1回試行
-      expect(response.error).toContain('1回試行')
-      // 接続確認(1) + navigate-to-page 1回試行 = 2回
-      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
+      expect(response.error).toContain('常時失敗(stub)')
+      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => (call[1] as ChromeMessage).action === 'execute-csv-download-steps')).toHaveLength(1)
     })
   })
 
@@ -368,7 +370,7 @@ describe('backgroundService characterization', () => {
         expect(response.success).toBe(false)
         expect(response.error).toContain('ダウンロード開始を確認できませんでした')
         // 成功応答なのに開始を観測できない確定結果は送り直さない
-        expect(response.error).toContain('1回試行')
+        expect(vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => sentSteps(call[1] as { payload?: Record<string, unknown> }).includes('download-csv'))).toHaveLength(1)
       } finally {
         vi.useRealTimers()
       }
