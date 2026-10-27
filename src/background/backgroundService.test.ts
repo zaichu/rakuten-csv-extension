@@ -306,7 +306,7 @@ describe('backgroundService characterization', () => {
       expect(response.error).toContain('期間選択失敗(stub)')
     })
 
-    it('ステップ失敗時は maxRetries(2) 回までリトライし試行回数を含むエラーになる', async () => {
+    it('contentが確定させたステップ失敗は送り直さず試行回数を含むエラーになる', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(115))
       setTabsSendMessageImpl((_tabId, _message, callback) => {
         callback?.({ success: false, error: '常時失敗(stub)' })
@@ -314,10 +314,10 @@ describe('backgroundService characterization', () => {
 
       const response = (await downloadRequest(115, ['dividend'])) as DownloadResponse
       expect(response.success).toBe(false)
-      // 初回 + リトライ2回 = 3回試行
-      expect(response.error).toContain('3回試行')
-      // 接続確認(1) + navigate-to-page 3回試行 = 4回
-      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(4)
+      // 確定した失敗は送り直さないため1回試行
+      expect(response.error).toContain('1回試行')
+      // 接続確認(1) + navigate-to-page 1回試行 = 2回
+      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
     })
   })
 
@@ -367,7 +367,8 @@ describe('backgroundService characterization', () => {
         const response = (await pending) as DownloadResponse
         expect(response.success).toBe(false)
         expect(response.error).toContain('ダウンロード開始を確認できませんでした')
-        expect(response.error).toContain('3回試行')
+        // 成功応答なのに開始を観測できない確定結果は送り直さない
+        expect(response.error).toContain('1回試行')
       } finally {
         vi.useRealTimers()
       }

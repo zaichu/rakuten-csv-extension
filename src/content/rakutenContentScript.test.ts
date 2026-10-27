@@ -196,6 +196,21 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
     })
 
+    it('後から現れた要素は上限を待たずにすぐ操作しクリックは1回だけ行う', async () => {
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+      const startedAt = Date.now()
+      const pending = singleStep('display-data', { displayButton: '#late-quick' })
+      await new Promise((r) => setTimeout(r, 100))
+      const el = document.createElement('button')
+      el.id = 'late-quick'
+      document.body.appendChild(el)
+      makeInteractable(el)
+      const res = await pending
+      expect(res).toMatchObject({ success: true, message: 'ステップ群の実行が完了しました' })
+      expect(Date.now() - startedAt).toBeLessThan(2000)
+      expect(safeClick).toHaveBeenCalledTimes(1)
+    })
+
     it('DOMの変化が無くても押せるようになった要素で成功する', async () => {
       vi.useFakeTimers()
       try {

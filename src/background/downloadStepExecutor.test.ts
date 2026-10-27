@@ -65,10 +65,14 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
     expect(response.success).toBe(false)
     expect(response.error).toContain('ダウンロード開始を確認できませんでした')
-    expect(downloadAttempts).toBe(3)
+    // 成功応答なのに開始を観測できない確定結果は送り直さない（再クリック防止）
+    expect(downloadAttempts).toBe(1)
   })
 
-  it.each(['success', 'channel-closed'])('無関係なURLだけでは開始を観測しない（%s）', async (responseType) => {
+  it.each([
+    { responseType: 'success', expectedAttempts: 1 },
+    { responseType: 'channel-closed', expectedAttempts: 3 },
+  ])('無関係なURLだけでは開始を観測しない（$responseType）', async ({ responseType, expectedAttempts }) => {
     vi.useFakeTimers()
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
@@ -93,7 +97,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const pending = executor.executeDownloadRequest(downloadRequest())
     await vi.advanceTimersByTimeAsync(30000)
     expect((await pending).success).toBe(false)
-    expect(downloadAttempts).toBe(3)
+    // channel-closedは応答が届いていないため送り直すが、確定した成功応答は送り直さない
+    expect(downloadAttempts).toBe(expectedAttempts)
   })
 
   it.each([
@@ -212,10 +217,34 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
       expect(response.success).toBe(false)
       expect(response.error).toContain('要素が見つかりませんでした')
-      expect(downloadAttempts).toBe(3)
+      // contentが確定させた失敗は送り直さない（再クリック防止）
+      expect(downloadAttempts).toBe(1)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('要素未検出の失敗では手順を送り直さない', async () => {
+    const executor = createExecutor()
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      if (sentSteps(message).length === 0) {
+        callback?.({ success: true })
+        return
+      }
+      firePageTransition(tabId)
+      callback?.({
+        success: false,
+        error: '要素が見つかりませんでした: #missing',
+        step: 'navigate-to-page',
+      })
+    })
+
+    const response = await executor.executeDownloadRequest(downloadRequest())
+
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('1回試行')
+    // 接続確認(1) + navigate-to-page(1) のみ。送り直しが無いため再クリックしない
+    expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
   })
 })
 
