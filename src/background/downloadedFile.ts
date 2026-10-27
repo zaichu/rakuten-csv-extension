@@ -103,7 +103,8 @@ function isRakutenDomainUrl(url: string): boolean {
 /**
  * ダウンロードの完了を待ち、その内容を取得する
  *
- * 完了イベントを取りこぼした場合に備えて、現在の状態も確認する
+ * 完了イベントを取りこぼした場合に備えて、現在の状態も確認する。
+ * 待ち受け中の取りこぼしにも備えて状態を定期確認し、上限までの回復を早める。
  */
 export async function waitForCompletedDownload(
   downloadId: number,
@@ -119,6 +120,7 @@ export async function waitForCompletedDownload(
       settled = true;
       chrome.downloads.onChanged.removeListener(listener);
       clearTimeout(timer);
+      clearInterval(pollTimer);
       resolve(item);
     };
 
@@ -150,6 +152,17 @@ export async function waitForCompletedDownload(
     });
 
     const timer = setTimeout(() => finish(undefined), timeoutMs);
+    const pollTimer = setInterval(() => {
+      void findDownload(downloadId).then((item) => {
+        if (item?.state === 'complete') {
+          finish(item);
+          return;
+        }
+        if (item?.state === 'interrupted') {
+          finish(undefined);
+        }
+      });
+    }, 1000);
   });
 }
 

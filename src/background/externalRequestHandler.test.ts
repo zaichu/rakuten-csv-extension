@@ -111,6 +111,7 @@ function createHandler(
     readonly downloadStartTimeoutMs?: number
     readonly loginWaitTimeoutMs?: number
     readonly loginPollIntervalMs?: number
+    readonly loginStateQueryTimeoutMs?: number
     readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
@@ -682,6 +683,36 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(posted.filter(isProgress)[0]).toEqual({ type: 'progress', state: 'login-wait' })
+      expect(executed).toEqual(['assetbalance'])
+      expect(result.csvs).toHaveLength(1)
+    })
+
+    it('ログイン状態の問い合わせが無応答でも待ち続けて取得を続ける', async () => {
+      let loginChecks = 0
+      setTabsSendMessageImpl((_tabId, message, callback) => {
+        if (message.action === 'check-login-state') {
+          loginChecks += 1
+          if (loginChecks <= 2) {
+            return
+          }
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true, content: '本文' })
+      })
+
+      const { handler, executed } = createHandler({}, {
+        loginPollIntervalMs: 5,
+        loginWaitTimeoutMs: 500,
+        loginStateQueryTimeoutMs: 30,
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(loginChecks).toBeGreaterThanOrEqual(3)
       expect(executed).toEqual(['assetbalance'])
       expect(result.csvs).toHaveLength(1)
     })
