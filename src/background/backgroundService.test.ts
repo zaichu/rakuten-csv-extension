@@ -9,6 +9,14 @@ import type {
 } from '../types'
 import { isPageTransitionStep } from '../types'
 import './backgroundService'
+import {
+  fireDownloadCreatedByUrl as fireDownloadCreated,
+  firePageTransition,
+  resetTestDoubles,
+  sentSteps,
+  silenceConsole,
+  stubTabsSendMessage as setTabsSendMessageImpl,
+} from '../tests/fixtures'
 
 /**
  * backgroundService の現状挙動を固定する characterization test。
@@ -50,22 +58,9 @@ type TabUpdatedListener = (
 
 type TabRemovedListener = (tabId: number) => void
 
-type SendMessageImpl = (
-  tabId: number,
-  message: { action: string; payload?: Record<string, unknown> },
-  callback?: (response: DownloadResponse) => void
-) => void
-
 function lastCallArg<T>(mockFn: unknown, index: number): T {
   const mock = mockFn as { mock: { calls: unknown[][] } }
   return mock.mock.calls[mock.mock.calls.length - 1][index] as T
-}
-
-function setTabsSendMessageImpl(impl: SendMessageImpl): void {
-  const mock = chrome.tabs.sendMessage as unknown as {
-    mockImplementation: (fn: SendMessageImpl) => void
-  }
-  mock.mockImplementation(impl)
 }
 
 function senderWithTab(tabId: number): chrome.runtime.MessageSender {
@@ -101,28 +96,6 @@ describe('backgroundService characterization', () => {
     return sendRuntimeMessage(message, {})
   }
 
-  /** ページ遷移完了イベントを発火させ、waitForPageTransition の待ちを解消する */
-  function firePageTransition(tabId: number): void {
-    const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-      mock: { calls: unknown[][] }
-    }
-    for (const call of addListener.mock.calls) {
-      const listener = call[0] as TabUpdatedListener
-      listener(tabId, { status: 'complete' }, { url: RAKUTEN_URL })
-    }
-  }
-
-  /** ダウンロード開始イベントを発火させ、waitForDownloadStart の待ちを解消する */
-  function fireDownloadCreated(): void {
-    const addListener = chrome.downloads.onCreated.addListener as unknown as {
-      mock: { calls: unknown[][] }
-    }
-    for (const call of addListener.mock.calls) {
-      const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
-      listener({ url: RAKUTEN_URL })
-    }
-  }
-
   /**
    * content script 側の正常応答をスタブする既定の sendMessage 実装。
    * wait 系の待ち受けが登録される前にイベントを発火させないよう、
@@ -137,11 +110,6 @@ describe('backgroundService characterization', () => {
       fireDownloadCreated()
       runtimeListener({ action: 'csv-download-clicked' }, senderWithTab(tabId), () => {})
     }
-  }
-
-  /** 送信された execute-csv-download-steps メッセージからステップ列を取り出す */
-  function sentSteps(message: { payload?: Record<string, unknown> }): readonly string[] {
-    return (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
   }
 
   function cleanupRegisteredTabs(): void {
@@ -180,9 +148,7 @@ describe('backgroundService characterization', () => {
   })
 
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
     setTabsSendMessageImpl((tabId, message, callback) => {
       stubContentScriptSuccess(tabId, sentSteps(message))
       callback?.({ success: true })
@@ -191,8 +157,7 @@ describe('backgroundService characterization', () => {
 
   afterEach(() => {
     cleanupRegisteredTabs()
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   describe('イベント配線（モジュール読み込み時のリスナー登録）', () => {

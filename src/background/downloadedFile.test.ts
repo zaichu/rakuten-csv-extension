@@ -100,17 +100,15 @@ function createFileReader(
   }
 }
 
+import { silenceConsole, resetTestDoubles } from '../tests/fixtures'
 describe('downloadedFile', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
     setDownloadsSearchImpl()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   describe('ダウンロード開始の待ち受け', () => {
