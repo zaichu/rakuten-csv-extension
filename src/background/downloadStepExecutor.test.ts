@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { CsvDownloadMessage, DownloadResponse } from '../types'
+import { type StepTiming } from './downloadStepExecutor'
 import {
-  DownloadStepExecutor,
-  type StepTiming,
-  type TabStateReader,
-} from './downloadStepExecutor'
+  TEST_TAB_ID as TAB_ID,
+  createTestExecutor as createExecutor,
+  failWithChannelClosed,
+  failWithContentScriptMissing,
+  fireDownloadCreatedByUrl as fireDownloadCreated,
+  firePageTransition,
+  fireTabReload,
+  resetTestDoubles,
+  sentSteps,
+  silenceConsole,
+  stubTabsSendMessage as setTabsSendMessageImpl,
+} from '../tests/fixtures'
 
 /**
  * downloadStepExecutor の通信失敗時の扱いを固定する。
@@ -12,22 +21,6 @@ import {
  * クリック後にページが破棄されると content script の応答が届かないが、
  * ダウンロードが始まっていれば取得は成立している。
  */
-
-const TAB_ID = 42
-
-type SendMessageImpl = (
-  tabId: number,
-  message: { action: string; payload?: Record<string, unknown> },
-  callback?: (response: DownloadResponse) => void
-) => void
-
-function createExecutor(): DownloadStepExecutor {
-  const tabState: TabStateReader = {
-    hasRakutenTab: () => true,
-    getActiveTabId: () => TAB_ID,
-  }
-  return new DownloadStepExecutor(tabState)
-}
 
 function downloadRequest(): CsvDownloadMessage {
   return {
@@ -43,80 +36,13 @@ function domesticStockRequest(): CsvDownloadMessage {
   }
 }
 
-function setTabsSendMessageImpl(impl: SendMessageImpl): void {
-  const mock = chrome.tabs.sendMessage as unknown as {
-    mockImplementation: (fn: SendMessageImpl) => void
-  }
-  mock.mockImplementation(impl)
-}
-
-function sentSteps(message: { payload?: Record<string, unknown> }): readonly string[] {
-  return (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-}
-
-/** ページ遷移完了イベントを発火させ、waitForPageTransition の待ちを解消する */
-function firePageTransition(tabId: number): void {
-  const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (id: number, changeInfo: { status?: string }) => void
-    listener(tabId, { status: 'complete' })
-  }
-}
-
-/** ダウンロード開始イベントを発火させ、waitForDownloadStart の待ちを解消する */
-function fireDownloadCreated(url = 'https://www.rakuten-sec.co.jp/download.csv'): void {
-  const addListener = chrome.downloads.onCreated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
-    listener({ url })
-  }
-}
-
-/** content script がページ破棄で応答を返せなかった状況を再現する */
-function failWithChannelClosed(callback?: (response: DownloadResponse) => void): void {
-  const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
-  runtime.lastError = {
-    message: 'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received',
-  }
-  callback?.({ success: false, error: 'レスポンスがありません' })
-  delete runtime.lastError
-}
-
-/** コンテンツスクリプトが存在しないエラーを再現する */
-function failWithContentScriptMissing(callback?: (response: DownloadResponse) => void): void {
-  const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
-  runtime.lastError = {
-    message: 'Could not establish connection. Receiving end does not exist',
-  }
-  callback?.({ success: false, error: 'レスポンスがありません' })
-  delete runtime.lastError
-}
-
-/** タブ再読み込み完了イベントを発火させる */
-function fireTabReload(tabId: number): void {
-  const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (id: number, changeInfo: { status?: string }) => void
-    listener(tabId, { status: 'complete' })
-  }
-}
-
 describe('downloadStepExecutor の通信失敗時の扱い', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   it('成功応答でもダウンロード開始を観測できなければ失敗を返す', async () => {
@@ -139,10 +65,14 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
     expect(response.success).toBe(false)
     expect(response.error).toContain('ダウンロード開始を確認できませんでした')
-    expect(downloadAttempts).toBe(3)
+    // 成功応答なのに開始を観測できない確定結果は送り直さない（再クリック防止）
+    expect(downloadAttempts).toBe(1)
   })
 
-  it.each(['success', 'channel-closed'])('無関係なURLだけでは開始を観測しない（%s）', async (responseType) => {
+  it.each([
+    { responseType: 'success', expectedAttempts: 1 },
+    { responseType: 'channel-closed', expectedAttempts: 3 },
+  ])('無関係なURLだけでは開始を観測しない（$responseType）', async ({ responseType, expectedAttempts }) => {
     vi.useFakeTimers()
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
@@ -167,7 +97,8 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const pending = executor.executeDownloadRequest(downloadRequest())
     await vi.advanceTimersByTimeAsync(30000)
     expect((await pending).success).toBe(false)
-    expect(downloadAttempts).toBe(3)
+    // channel-closedは応答が届いていないため送り直すが、確定した成功応答は送り直さない
+    expect(downloadAttempts).toBe(expectedAttempts)
   })
 
   it.each([
@@ -258,6 +189,35 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     }
   })
 
+  it('応答が全く届かない場合も送り直す', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        if (sentSteps(message).includes('download-csv')) {
+          downloadAttempts += 1
+          callback?.(undefined as unknown as DownloadResponse)
+          return
+        }
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+
+      expect(response.success).toBe(false)
+      expect(response.error).toContain('レスポンスがありません')
+      expect(response.error).toContain('3回試行')
+      expect(downloadAttempts).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('コンテンツスクリプトが返した失敗はダウンロード開始を観測しても失敗のまま', async () => {
     vi.useFakeTimers()
     try {
@@ -286,23 +246,44 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
       expect(response.success).toBe(false)
       expect(response.error).toContain('要素が見つかりませんでした')
-      expect(downloadAttempts).toBe(3)
+      // contentが確定させた失敗は送り直さない（再クリック防止）
+      expect(downloadAttempts).toBe(1)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('要素未検出の失敗では手順を送り直さない', async () => {
+    const executor = createExecutor()
+    setTabsSendMessageImpl((tabId, message, callback) => {
+      if (sentSteps(message).length === 0) {
+        callback?.({ success: true })
+        return
+      }
+      firePageTransition(tabId)
+      callback?.({
+        success: false,
+        error: '要素が見つかりませんでした: #missing',
+        step: 'navigate-to-page',
+      })
+    })
+
+    const response = await executor.executeDownloadRequest(downloadRequest())
+
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('1回試行')
+    // 接続確認(1) + navigate-to-page(1) のみ。送り直しが無いため再クリックしない
+    expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
   })
 })
 
 describe('待ちの短縮とステップごとの計測', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   /** display-data が画面内の更新だけで済む（ページ遷移しない）国内株式の応答を返す */
@@ -383,14 +364,11 @@ describe('待ちの短縮とステップごとの計測', () => {
 
 describe('コンテンツスクリプト不在時の再読み込み処理', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   function setupReloadMock(reloadCount: { current: number }): void {
@@ -630,5 +608,59 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('groupSteps のグルーピングロジック', () => {
+  it('navigate-to-page/select-tab/display-data は単独の page-transition グループになる', () => {
+    const executor = createExecutor()
+    expect(executor.groupSteps(['navigate-to-page'])).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+    ])
+    expect(executor.groupSteps(['select-tab'])).toEqual([
+      { kind: 'page-transition', step: 'select-tab' },
+    ])
+    expect(executor.groupSteps(['display-data'])).toEqual([
+      { kind: 'page-transition', step: 'display-data' },
+    ])
+  })
+
+  it('それ以外の連続ステップは1つの batch グループにまとまる', () => {
+    expect(createExecutor().groupSteps(['select-period', 'download-csv'])).toEqual([
+      { kind: 'batch', steps: ['select-period', 'download-csv'] },
+    ])
+  })
+
+  it('dividend のステップ列は page-transition と batch が交互になる', () => {
+    expect(
+      createExecutor().groupSteps(['navigate-to-page', 'select-period', 'display-data', 'download-csv'])
+    ).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+      { kind: 'batch', steps: ['select-period'] },
+      { kind: 'page-transition', step: 'display-data' },
+      { kind: 'batch', steps: ['download-csv'] },
+    ])
+  })
+
+  it('mutualfund のステップ列は select-tab も単独グループになる', () => {
+    expect(
+      createExecutor().groupSteps([
+        'navigate-to-page',
+        'select-tab',
+        'select-period',
+        'display-data',
+        'download-csv',
+      ])
+    ).toEqual([
+      { kind: 'page-transition', step: 'navigate-to-page' },
+      { kind: 'page-transition', step: 'select-tab' },
+      { kind: 'batch', steps: ['select-period'] },
+      { kind: 'page-transition', step: 'display-data' },
+      { kind: 'batch', steps: ['download-csv'] },
+    ])
+  })
+
+  it('空のステップ列は空のグループ列になる', () => {
+    expect(createExecutor().groupSteps([])).toEqual([])
   })
 })

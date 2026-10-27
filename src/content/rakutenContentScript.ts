@@ -3,6 +3,7 @@ import type {
   ContentScriptMessage,
   ContentScriptResponse,
   DownloadResponse,
+  DownloadStepTiming,
   LoginStateResponse,
   PageReadyMessage,
   ChromeMessage,
@@ -17,7 +18,8 @@ import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
  */
 class RakutenCsvExtension {
   private static instance: RakutenCsvExtension | null = null;
-  private readonly elementTimeout = 5000;
+  // 送り直しをしない分、1回の試行で従来の合計（約15秒）まで待つ
+  private readonly elementTimeout = 15000;
   private readonly elementPollInterval = 50;
   private readonly notifyTimeout = 2000;
 
@@ -198,7 +200,7 @@ class RakutenCsvExtension {
       };
     }
 
-    const contentTimings: { phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; durationMs: number }[] = [];
+    const contentTimings: DownloadStepTiming[] = [];
 
     for (const step of downloadSteps) {
       try {

@@ -68,17 +68,3 @@ export const CATEGORIZED_OPTIONS: Record<string, DownloadOption[]> = {
   income: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'income'),
   transaction: DOWNLOAD_OPTIONS.filter(opt => opt.category === 'transaction')
 };
-
-/**
- * カテゴリの表示名を取得
- */
-export const getCategoryLabel = (category: string): string => {
-  return CATEGORY_META[category as DownloadCategory]?.label || category;
-};
-
-/**
- * カテゴリのアイコンを取得
- */
-export const getCategoryIcon = (category: string): string => {
-  return CATEGORY_META[category as DownloadCategory]?.icon || '📋';
-};

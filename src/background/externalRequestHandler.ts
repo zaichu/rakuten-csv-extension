@@ -6,7 +6,6 @@
 
 import type {
   ChromeMessage,
-  CsvDownloadMessage,
   CsvDownloadType,
   DownloadResponse,
   ExternalErrorResponse,
@@ -19,7 +18,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep } from '../utils';
+import { RakutenUtils, sleep, createOneShotWait } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -28,21 +27,11 @@ import {
   type DownloadCapture,
   type DownloadedFileReader,
 } from './downloadedFile';
-import type { StepTimingReporter } from './downloadStepExecutor';
-
-/**
- * CSVダウンロード手順の実行口
- */
-export interface CsvDownloadRunner {
-  executeDownloadRequest(
-    message: CsvDownloadMessage,
-    reportStep?: StepTimingReporter
-  ): Promise<DownloadResponse>;
-}
+import type { DownloadStepExecutor, StepTimingReporter } from './downloadStepExecutor';
 
 export interface ExternalRequestHandlerConfig {
-  /** CSVダウンロード手順の実行 */
-  readonly downloadRunner: CsvDownloadRunner;
+  /** CSVダウンロード手順の実行（DownloadStepExecutorそのもの） */
+  readonly downloadRunner: DownloadStepExecutor;
   /** 接続を許可するオリジンのマッチパターン（既定は manifest の externally_connectable） */
   readonly allowedOrigins?: readonly string[];
   /** ログイン完了を待つ最大時間(ms) */
@@ -135,7 +124,7 @@ function isCsvDownloadType(value: unknown): value is CsvDownloadType {
  * 外部ページ(shoken-webapp)への応答
  */
 export class ExternalRequestHandler {
-  private readonly downloadRunner: CsvDownloadRunner;
+  private readonly downloadRunner: DownloadStepExecutor;
   private readonly allowedOrigins?: readonly string[];
   private readonly loginWaitTimeoutMs: number;
   private readonly loginPollIntervalMs: number;
@@ -406,7 +395,7 @@ export class ExternalRequestHandler {
       }
 
       if (!loginPageOpened) {
-        await this.openRakutenPage(tabId);
+        await openTab(RakutenUtils.BASE_URL, tabId);
         loginPageOpened = true;
       }
 
@@ -438,7 +427,7 @@ export class ExternalRequestHandler {
       return existing.id;
     }
 
-    const tab = await this.createRakutenTab();
+    const tab = await openTab(RakutenUtils.BASE_URL);
     if (tab?.id === undefined) {
       return undefined;
     }
@@ -466,40 +455,22 @@ export class ExternalRequestHandler {
     }
   }
 
-  private createRakutenTab(): Promise<chrome.tabs.Tab | undefined> {
-    return new Promise((resolve) => {
-      chrome.tabs.create({ url: RakutenUtils.BASE_URL, active: true }, (tab) => {
-        // lastError を読むことで未処理エラーの警告を避ける
-        void chrome.runtime.lastError;
-        resolve(tab);
-      });
-    });
-  }
-
-  /**
-   * 未ログインならログイン画面を開く
-   */
-  private openRakutenPage(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      chrome.tabs.update(tabId, { url: RakutenUtils.BASE_URL }, () => {
-        // lastError を読むことで未処理エラーの警告を避ける
-        void chrome.runtime.lastError;
-        resolve();
-      });
-    });
-  }
-
   /**
    * タブの読み込み完了を待つ
    */
   private waitForTabLoad(tabId: number): Promise<void> {
     return new Promise((resolve) => {
-      const finish = (): void => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        clearTimeout(timer);
+      let cleanup: () => void = () => {};
+      const wait = createOneShotWait(this.tabLoadTimeoutMs, () => {
+        cleanup();
         resolve();
+      });
+      const finish = (): void => {
+        wait.finish(() => {
+          cleanup();
+          resolve();
+        });
       };
-
       const listener = (
         updatedTabId: number,
         changeInfo: chrome.tabs.OnUpdatedInfo
@@ -508,9 +479,11 @@ export class ExternalRequestHandler {
           finish();
         }
       };
+      cleanup = () => {
+        chrome.tabs.onUpdated.removeListener(listener);
+      };
 
       chrome.tabs.onUpdated.addListener(listener);
-      const timer = setTimeout(finish, this.tabLoadTimeoutMs);
     });
   }
 
@@ -554,6 +527,21 @@ function isLoginStateResponse(response: unknown): response is LoginStateResponse
     response !== null &&
     typeof (response as LoginStateResponse).success === 'boolean'
   );
+}
+
+function openTab(url: string, tabId?: number): Promise<chrome.tabs.Tab | undefined> {
+  return new Promise((resolve) => {
+    const done = (tab?: chrome.tabs.Tab): void => {
+      // lastError を読むことで未処理エラーの警告を避ける
+      void chrome.runtime.lastError;
+      resolve(tab);
+    };
+    if (tabId === undefined) {
+      chrome.tabs.create({ url, active: true }, done);
+    } else {
+      chrome.tabs.update(tabId, { url }, done);
+    }
+  });
 }
 
 function errorResponse(error: string): ExternalErrorResponse {

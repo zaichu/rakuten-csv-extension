@@ -11,6 +11,9 @@ export class RakutenUtils {
 
   private static readonly DOMAIN_PATTERN = 'rakuten-sec.co.jp';
 
+  /** 証券Webのトップページ */
+  static readonly SHOKEN_WEB_URL = 'https://shoken-webapp.pages.dev';
+
   /**
    * 楽天証券のサイトかどうかを判定
    */
@@ -35,6 +38,24 @@ export class RakutenUtils {
       console.error('楽天証券ページを開けませんでした:', error);
       // フォールバック：直接ブラウザで開く
       window.open(this.BASE_URL, '_blank');
+    }
+  }
+
+  /**
+   * 証券Webのトップページを新しいタブで開く
+   */
+  static async openShokenWebPage(): Promise<void> {
+    if (!chrome?.tabs?.create) {
+      const error = new Error('Chrome拡張機能のAPIが利用できません');
+      console.error('証券Webページを開けませんでした:', error);
+      throw error;
+    }
+
+    try {
+      await chrome.tabs.create({ url: this.SHOKEN_WEB_URL });
+    } catch (error) {
+      console.error('証券Webページを開けませんでした:', error);
+      throw error;
     }
   }
 

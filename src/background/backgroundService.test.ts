@@ -7,7 +7,16 @@ import type {
   DownloadResponse,
   ExtensionState,
 } from '../types'
+import { isPageTransitionStep } from '../types'
 import './backgroundService'
+import {
+  fireDownloadCreatedByUrl as fireDownloadCreated,
+  firePageTransition,
+  resetTestDoubles,
+  sentSteps,
+  silenceConsole,
+  stubTabsSendMessage as setTabsSendMessageImpl,
+} from '../tests/fixtures'
 
 /**
  * backgroundService の現状挙動を固定する characterization test。
@@ -19,25 +28,11 @@ import './backgroundService'
  * 経由の振る舞いを検証する（private メソッドは直接触らない）。
  */
 
-type ExtensionConfigShape = {
-  readonly maxRetries: number
-  readonly stepTimeout: number
-  readonly retryInterval: number
-  readonly debugMode: boolean
-}
-
 type BackgroundServiceApi = {
   getState(): ExtensionState
-  getConfig(): ExtensionConfigShape
   getExternalRequestHandler(): {
     notifyDownloadWillStart(tabId: number | undefined): void
   }
-  groupSteps: (
-    steps: readonly CsvDownloadStep[]
-  ) => readonly (
-    | { readonly kind: 'page-transition'; readonly step: CsvDownloadStep }
-    | { readonly kind: 'batch'; readonly steps: readonly CsvDownloadStep[] }
-  )[]
 }
 
 function getService(): BackgroundServiceApi {
@@ -63,22 +58,9 @@ type TabUpdatedListener = (
 
 type TabRemovedListener = (tabId: number) => void
 
-type SendMessageImpl = (
-  tabId: number,
-  message: { action: string; payload?: Record<string, unknown> },
-  callback?: (response: DownloadResponse) => void
-) => void
-
 function lastCallArg<T>(mockFn: unknown, index: number): T {
   const mock = mockFn as { mock: { calls: unknown[][] } }
   return mock.mock.calls[mock.mock.calls.length - 1][index] as T
-}
-
-function setTabsSendMessageImpl(impl: SendMessageImpl): void {
-  const mock = chrome.tabs.sendMessage as unknown as {
-    mockImplementation: (fn: SendMessageImpl) => void
-  }
-  mock.mockImplementation(impl)
 }
 
 function senderWithTab(tabId: number): chrome.runtime.MessageSender {
@@ -114,49 +96,20 @@ describe('backgroundService characterization', () => {
     return sendRuntimeMessage(message, {})
   }
 
-  /** ページ遷移完了イベントを発火させ、waitForPageTransition の待ちを解消する */
-  function firePageTransition(tabId: number): void {
-    const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-      mock: { calls: unknown[][] }
-    }
-    for (const call of addListener.mock.calls) {
-      const listener = call[0] as TabUpdatedListener
-      listener(tabId, { status: 'complete' }, { url: RAKUTEN_URL })
-    }
-  }
-
-  /** ダウンロード開始イベントを発火させ、waitForDownloadStart の待ちを解消する */
-  function fireDownloadCreated(): void {
-    const addListener = chrome.downloads.onCreated.addListener as unknown as {
-      mock: { calls: unknown[][] }
-    }
-    for (const call of addListener.mock.calls) {
-      const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
-      listener({ url: RAKUTEN_URL })
-    }
-  }
-
-  /** downloadStepExecutor.pageTransitionSteps と同じ集合 */
-  const PAGE_TRANSITION_STEPS = new Set(['navigate-to-page', 'select-tab', 'display-data'])
-
   /**
    * content script 側の正常応答をスタブする既定の sendMessage 実装。
    * wait 系の待ち受けが登録される前にイベントを発火させないよう、
    * 呼び出し時点で登録済みのリスナーを同期的に発火させて解消する。
+   * 単独実行の対象は型側の判定(isPageTransitionStep)で見分ける。
    */
   function stubContentScriptSuccess(tabId: number, steps: readonly string[]): void {
-    if (steps.length === 1 && PAGE_TRANSITION_STEPS.has(steps[0])) {
+    if (steps.length === 1 && isPageTransitionStep(steps[0] as CsvDownloadStep)) {
       firePageTransition(tabId)
     }
     if (steps.includes('download-csv')) {
       fireDownloadCreated()
       runtimeListener({ action: 'csv-download-clicked' }, senderWithTab(tabId), () => {})
     }
-  }
-
-  /** 送信された execute-csv-download-steps メッセージからステップ列を取り出す */
-  function sentSteps(message: { payload?: Record<string, unknown> }): readonly string[] {
-    return (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
   }
 
   function cleanupRegisteredTabs(): void {
@@ -195,9 +148,7 @@ describe('backgroundService characterization', () => {
   })
 
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
     setTabsSendMessageImpl((tabId, message, callback) => {
       stubContentScriptSuccess(tabId, sentSteps(message))
       callback?.({ success: true })
@@ -206,8 +157,7 @@ describe('backgroundService characterization', () => {
 
   afterEach(() => {
     cleanupRegisteredTabs()
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   describe('イベント配線（モジュール読み込み時のリスナー登録）', () => {
@@ -220,69 +170,6 @@ describe('backgroundService characterization', () => {
         tabsOnActivated: true,
         runtimeOnMessage: true,
       })
-    })
-
-    it('既定の設定値を保持している', () => {
-      expect(getService().getConfig()).toEqual({
-        maxRetries: 2,
-        stepTimeout: 30000,
-        retryInterval: 300,
-        debugMode: false,
-      })
-    })
-  })
-
-  describe('groupSteps のグルーピングロジック', () => {
-    it('navigate-to-page/select-tab/display-data は単独の page-transition グループになる', () => {
-      const service = getService()
-      expect(service.groupSteps(['navigate-to-page'])).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-      ])
-      expect(service.groupSteps(['select-tab'])).toEqual([
-        { kind: 'page-transition', step: 'select-tab' },
-      ])
-      expect(service.groupSteps(['display-data'])).toEqual([
-        { kind: 'page-transition', step: 'display-data' },
-      ])
-    })
-
-    it('それ以外の連続ステップは1つの batch グループにまとまる', () => {
-      expect(getService().groupSteps(['select-period', 'download-csv'])).toEqual([
-        { kind: 'batch', steps: ['select-period', 'download-csv'] },
-      ])
-    })
-
-    it('dividend のステップ列は page-transition と batch が交互になる', () => {
-      expect(
-        getService().groupSteps(['navigate-to-page', 'select-period', 'display-data', 'download-csv'])
-      ).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-        { kind: 'batch', steps: ['select-period'] },
-        { kind: 'page-transition', step: 'display-data' },
-        { kind: 'batch', steps: ['download-csv'] },
-      ])
-    })
-
-    it('mutualfund のステップ列は select-tab も単独グループになる', () => {
-      expect(
-        getService().groupSteps([
-          'navigate-to-page',
-          'select-tab',
-          'select-period',
-          'display-data',
-          'download-csv',
-        ])
-      ).toEqual([
-        { kind: 'page-transition', step: 'navigate-to-page' },
-        { kind: 'page-transition', step: 'select-tab' },
-        { kind: 'batch', steps: ['select-period'] },
-        { kind: 'page-transition', step: 'display-data' },
-        { kind: 'batch', steps: ['download-csv'] },
-      ])
-    })
-
-    it('空のステップ列は空のグループ列になる', () => {
-      expect(getService().groupSteps([])).toEqual([])
     })
   })
 
@@ -419,7 +306,7 @@ describe('backgroundService characterization', () => {
       expect(response.error).toContain('期間選択失敗(stub)')
     })
 
-    it('ステップ失敗時は maxRetries(2) 回までリトライし試行回数を含むエラーになる', async () => {
+    it('contentが確定させたステップ失敗は送り直さず試行回数を含むエラーになる', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(115))
       setTabsSendMessageImpl((_tabId, _message, callback) => {
         callback?.({ success: false, error: '常時失敗(stub)' })
@@ -427,10 +314,10 @@ describe('backgroundService characterization', () => {
 
       const response = (await downloadRequest(115, ['dividend'])) as DownloadResponse
       expect(response.success).toBe(false)
-      // 初回 + リトライ2回 = 3回試行
-      expect(response.error).toContain('3回試行')
-      // 接続確認(1) + navigate-to-page 3回試行 = 4回
-      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(4)
+      // 確定した失敗は送り直さないため1回試行
+      expect(response.error).toContain('1回試行')
+      // 接続確認(1) + navigate-to-page 1回試行 = 2回
+      expect(vi.mocked(chrome.tabs.sendMessage).mock.calls).toHaveLength(2)
     })
   })
 
@@ -480,7 +367,8 @@ describe('backgroundService characterization', () => {
         const response = (await pending) as DownloadResponse
         expect(response.success).toBe(false)
         expect(response.error).toContain('ダウンロード開始を確認できませんでした')
-        expect(response.error).toContain('3回試行')
+        // 成功応答なのに開始を観測できない確定結果は送り直さない
+        expect(response.error).toContain('1回試行')
       } finally {
         vi.useRealTimers()
       }

@@ -1,4 +1,16 @@
-import type { CsvDownloadConfig, CsvDownloadType } from '../types';
+import type { CsvDownloadConfig, CsvDownloadType, CsvSelectors } from '../types';
+
+/**
+ * 実現損益系の共通セレクター
+ *
+ * 将来セレクターが分岐したら呼び出し側でオーバーライドする
+ */
+const realGainLossBaseSelectors: CsvSelectors = {
+  menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
+  periodRadio: "#termCdALL",
+  displayButton: "[onclick*='search()']",
+  csvButton: "[onclick*='csvDownLoad()']"
+};
 
 /**
  * CSVダウンロード設定データ
@@ -48,34 +60,15 @@ export const CSV_DOWNLOAD_CONFIGS: Record<CsvDownloadType, CsvDownloadConfig> = 
     downloadType: 'domesticstock',
     description: '国内株式の実現損益',
     steps: ['navigate-to-page', 'select-period', 'display-data', 'download-csv'],
-    selectors: {
-      // マイメニューから実現損益のページに遷移 - 正確なonclickパターンを使用
-      menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
-      // 国内株式タブを選択
-      // tabSelector: "#ass_fu_real_gain_loss_tab > ul > li.first-child.pcmm-tab__item > a",
-      // 表示期間のラジオボタンをすべてを選択
-      periodRadio: "#termCdALL",
-      // この条件で表示するボタン押下
-      displayButton: "[onclick*='search()']",
-      // csv保存ボタンを押下
-      csvButton: "[onclick*='csvDownLoad()']"
-    }
+    selectors: { ...realGainLossBaseSelectors }
   },
   'mutualfund': {
     downloadType: 'mutualfund',
     description: '投資信託の実現損益',
     steps: ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'],
     selectors: {
-      // マイメニューから投資信託取引履歴のページに遷移 - 正確なonclickパターンを使用
-      menuLink: "a[onclick*='ass_real_gain_loss.do'], a[data-ratid='mem_pc_mymenu_real-gain-loss']",
-      // 投資信託タブを選択
-      tabSelector: "a[href*='ass_fu_real_gain_loss.do']",
-      // 表示期間のラジオボタンをすべてを選択
-      periodRadio: "#termCdALL",
-      // この条件で表示するボタン押下
-      displayButton: "[onclick*='search()']",
-      // csv保存ボタンを押下
-      csvButton: "[onclick*='csvDownLoad()']"
+      ...realGainLossBaseSelectors,
+      tabSelector: "a[href*='ass_fu_real_gain_loss.do']"
     }
   }
 };

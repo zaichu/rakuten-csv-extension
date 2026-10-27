@@ -94,18 +94,11 @@ export const useApplicationMessage = (config: MessageConfig = {}) => {
     };
   }, [clearTimer]);
 
-  /**
-   * メッセージの存在チェック
-   */
-  const hasMessage = message !== null;
-
   return {
     // 現在のメッセージ
     message,
-    hasMessage,
 
     // メッセージ操作
-    showMessage,
     clearMessage,
 
     // 便利メソッド

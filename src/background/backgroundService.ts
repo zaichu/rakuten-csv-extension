@@ -9,13 +9,13 @@
 import type {
   ExtensionState,
   CsvDownloadMessage,
+  CsvDownloadClickedMessage,
   DownloadResponse,
   BackgroundMessage,
-  ExtensionUpdatedMessage,
-  CsvDownloadStep
+  ExtensionUpdatedMessage
 } from '../types';
 import { RakutenUtils } from '../utils';
-import { DownloadStepExecutor, type ExtensionConfig, type StepGroup } from './downloadStepExecutor';
+import { DownloadStepExecutor } from './downloadStepExecutor';
 import { ExternalRequestHandler } from './externalRequestHandler';
 
 /**
@@ -56,7 +56,6 @@ class RakutenCsvBackgroundService {
   private initialize(): void {
     this.setupEventListeners();
     this.findExistingRakutenTabs();
-    this.log('楽天証券CSV拡張機能のバックグラウンドサービスが初期化されました');
   }
 
   /**
@@ -104,12 +103,7 @@ class RakutenCsvBackgroundService {
    * インストール処理
    */
   private handleInstallation(details: chrome.runtime.InstalledDetails): void {
-    this.log('拡張機能がインストールされました:', details);
-
-    if (details.reason === 'install') {
-      this.log('初回インストール');
-    } else if (details.reason === 'update') {
-      this.log('拡張機能が更新されました');
+    if (details.reason === 'update') {
       this.notifyUpdate();
     }
   }
@@ -118,7 +112,6 @@ class RakutenCsvBackgroundService {
    * 起動処理
    */
   private handleStartup(): void {
-    this.log('拡張機能が起動しました');
     this.findExistingRakutenTabs();
   }
 
@@ -133,7 +126,6 @@ class RakutenCsvBackgroundService {
     if (changeInfo.status === 'complete' && tab.url) {
       if (this.isRakutenSecurities(tab.url)) {
         this.addRakutenTab(tabId);
-        this.log(`楽天証券サイトが読み込まれました: ${tabId}`);
       } else {
         this.removeRakutenTab(tabId);
       }
@@ -145,7 +137,6 @@ class RakutenCsvBackgroundService {
    */
   private handleTabRemoval(tabId: number): void {
     this.removeRakutenTab(tabId);
-    this.log(`タブが削除されました: ${tabId}`);
   }
 
   /**
@@ -155,7 +146,6 @@ class RakutenCsvBackgroundService {
     chrome.tabs.get(activeInfo.tabId, (tab) => {
       if (!chrome.runtime.lastError && tab.url && this.isRakutenSecurities(tab.url)) {
         this.setActiveTab(activeInfo.tabId);
-        this.log(`楽天証券タブがアクティブになりました: ${activeInfo.tabId}`);
       }
     });
   }
@@ -168,8 +158,6 @@ class RakutenCsvBackgroundService {
     sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void
   ): Promise<void> {
-    this.log('メッセージを受信:', message);
-
     try {
       let response: unknown;
 
@@ -190,7 +178,7 @@ class RakutenCsvBackgroundService {
         case 'csv-download-clicked':
           this.downloadStepExecutor.notifyDownloadClicked(
             sender.tab?.id,
-            (message as { clickDurationMs?: number }).clickDurationMs
+            (message as CsvDownloadClickedMessage).clickDurationMs
           );
           response = { success: true };
           break;
@@ -216,7 +204,6 @@ class RakutenCsvBackgroundService {
     if (sender.tab?.id) {
       this.addRakutenTab(sender.tab.id);
       this.setActiveTab(sender.tab.id);
-      this.log(`ページ準備完了通知を受信: ${sender.tab.id}`);
       this.downloadStepExecutor.resolvePageReadyWaiters(sender.tab.id);
     }
     return { success: true };
@@ -237,7 +224,6 @@ class RakutenCsvBackgroundService {
       tabs.forEach(tab => {
         if (tab.id) {
           this.addRakutenTab(tab.id);
-          this.log(`既存の楽天証券タブを発見: ${tab.id}`);
         }
       });
     });
@@ -251,7 +237,6 @@ class RakutenCsvBackgroundService {
     this.getState().rakutenTabs.forEach(tabId => {
       chrome.tabs.sendMessage(tabId, message, () => {
         if (chrome.runtime.lastError) {
-          this.log('タブへの更新通知に失敗:', chrome.runtime.lastError.message);
           this.removeRakutenTab(tabId);
         }
       });
@@ -263,24 +248,6 @@ class RakutenCsvBackgroundService {
    */
   private isRakutenSecurities(url: string): boolean {
     return RakutenUtils.isRakutenSecurities(url);
-  }
-
-  /**
-   * ステップ列を実行単位でグルーピング（DownloadStepExecutor への委譲）
-   *
-   * テストおよびデバッグ用に公開している（getState/getConfig と同様）。
-   */
-  groupSteps(steps: readonly CsvDownloadStep[]): readonly StepGroup[] {
-    return this.downloadStepExecutor.groupSteps(steps);
-  }
-
-  /**
-   * ログ出力
-   */
-  private log(message: string, ...args: unknown[]): void {
-    if (this.downloadStepExecutor.getConfig().debugMode) {
-      console.log(`[RakutenCSV] ${message}`, ...args);
-    }
   }
 
   /**
@@ -313,13 +280,6 @@ class RakutenCsvBackgroundService {
 
   private setActiveTab(tabId: number): void {
     this.activeTabId = tabId;
-  }
-
-  /**
-   * 設定を取得（デバッグ用）
-   */
-  getConfig(): ExtensionConfig {
-    return this.downloadStepExecutor.getConfig();
   }
 
   /**

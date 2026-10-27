@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { DownloadResponse, CsvDownloadType, CsvDownloadMessage } from '../types';
+import { RakutenUtils } from '../utils';
 
 function isDownloadResponse(value: unknown): value is DownloadResponse {
   if (typeof value !== 'object' || value === null) return false;
@@ -48,7 +49,7 @@ export const useCsvDownload = () => {
    * 楽天証券サイトの検証
    */
   const validateRakutenSite = (url?: string): void => {
-    if (!url?.includes('rakuten-sec.co.jp')) {
+    if (!url || !RakutenUtils.isRakutenSecurities(url)) {
       console.log('現在のURL:', url);
       throw new Error('楽天証券のサイトで使用してください');
     }
@@ -94,8 +95,6 @@ export const useCsvDownload = () => {
         errorMessage = '拡張機能を再読み込みしてください。';
       } else if (error.message.includes('楽天証券')) {
         errorMessage = error.message;
-      } else if (error.message.includes('選択されていません')) {
-        errorMessage = error.message;
       } else {
         errorMessage = `予期しないエラー: ${error.message}`;
       }
@@ -127,11 +126,6 @@ export const useCsvDownload = () => {
     console.log(`CSVダウンロード開始: ${Array.from(selectedOptions).join(', ')}`);
 
     try {
-      // 空の選択チェック
-      if (selectedOptions.size === 0) {
-        throw new Error('ダウンロードオプションが選択されていません');
-      }
-
       // アクティブなタブを取得
       const activeTab = await getActiveTab();
       
