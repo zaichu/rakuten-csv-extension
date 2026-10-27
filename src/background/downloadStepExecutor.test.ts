@@ -568,6 +568,54 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     }
   })
 
+  it('疎通確認が無応答でも上限で区切って再読み込みに進む', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      let connectionCheckCount = 0
+      let stepAttempts = 0
+      const reloadCount = { current: 0 }
+
+      setTabsSendMessageImpl((tabId, message, callback) => {
+        const steps = sentSteps(message)
+
+        if (message.action === 'check-connection') {
+          connectionCheckCount += 1
+          if (connectionCheckCount === 1) {
+            return
+          }
+          callback?.({ success: true })
+          return
+        }
+
+        if (steps.includes('download-csv')) {
+          stepAttempts += 1
+          executor.notifyDownloadClicked(TAB_ID, 0)
+          fireDownloadCreated()
+          callback?.({ success: true })
+          return
+        }
+
+        firePageTransition(tabId)
+        callback?.({ success: true })
+      })
+
+      setupReloadMock(reloadCount)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(5000)
+      const response = await pending
+
+      expect(response.success).toBe(true)
+      expect(connectionCheckCount).toBe(2)
+      expect(reloadCount.current).toBe(1)
+      expect(stepAttempts).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('再読み込み後も接続できなければ content-script-missing エラーを返す', async () => {
     vi.useFakeTimers()
     try {

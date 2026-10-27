@@ -18,7 +18,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep, createOneShotWait } from '../utils';
+import { RakutenUtils, sleep, createOneShotWait, withTimeout } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -38,6 +38,8 @@ export interface ExternalRequestHandlerConfig {
   readonly loginWaitTimeoutMs?: number;
   /** ログイン状態の確認間隔(ms) */
   readonly loginPollIntervalMs?: number;
+  /** ログイン状態の問い合わせ1件の応答期限(ms) */
+  readonly loginStateQueryTimeoutMs?: number;
   /** ダウンロード開始を待つ最大時間(ms) */
   readonly downloadStartTimeoutMs?: number;
   /** ダウンロードの完了を待つ最大時間(ms) */
@@ -51,6 +53,8 @@ export interface ExternalRequestHandlerConfig {
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 /** パスキー押下後のログイン完了を早く検出するため、確認間隔を短くしている */
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
+/** content script の入れ替わり中は応答もエラーも届かないことがあるため、要素の問い合わせと同じ上限で区切る */
+const DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS = 2_000;
 const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
@@ -128,6 +132,7 @@ export class ExternalRequestHandler {
   private readonly allowedOrigins?: readonly string[];
   private readonly loginWaitTimeoutMs: number;
   private readonly loginPollIntervalMs: number;
+  private readonly loginStateQueryTimeoutMs: number;
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
@@ -144,6 +149,7 @@ export class ExternalRequestHandler {
     this.allowedOrigins = config.allowedOrigins;
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
     this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
+    this.loginStateQueryTimeoutMs = config.loginStateQueryTimeoutMs ?? DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS;
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
@@ -489,17 +495,25 @@ export class ExternalRequestHandler {
 
   /**
    * コンテンツスクリプトへメッセージを送る
+   *
+   * ログイン画面からの戻りなどで content script が入れ替わる最中は、
+   * 応答もエラーも届かず待ち続けることがある。上限で区切って不明扱いにし、
+   * 次の確認へ進む（上限自体はログイン待ちの全体期限とは別）。
    */
   private sendToContentScript(tabId: number, message: ChromeMessage): Promise<unknown> {
-    return new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabId, message, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(undefined);
-          return;
-        }
-        resolve(response);
-      });
-    });
+    return withTimeout(
+      new Promise((resolve) => {
+        chrome.tabs.sendMessage(tabId, message, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve(undefined);
+            return;
+          }
+          resolve(response);
+        });
+      }),
+      this.loginStateQueryTimeoutMs,
+      'コンテンツスクリプトの応答がありません'
+    ).catch(() => undefined);
   }
 
   private isAllowedOrigin(origin: string): boolean {
