@@ -1,16 +1,5 @@
-/**
- * CSVダウンロードのステップ実行系
- *
- * backgroundService.ts から分離した責務のひとつ。
- * ステップ列のグルーピング、content script への実行指示、リトライ、
- * ターゲットタブ決定を担う。
- *
- * waitForPageTransition / waitForDownloadStart はクリック直前の待ち受け準備と
- * 実行呼び出しの順序依存（レース回避の核心）があるため、実行ロジックと
- * 同一モジュールに残している。切り離さないこと。
- */
-
 import type {
+  CheckCsvDownloadStepInstruction,
   CsvDownloadMessage,
   CsvDownloadStepsInstruction,
   DownloadResponse,
@@ -82,39 +71,15 @@ interface StepExecutionOutcome {
   readonly timing?: StepExecutionTiming;
 }
 
-/**
- * ページ遷移の待ち受け
- *
- * 遷移が始まったかどうかを呼び出し側から確認できるようにする。遷移を伴わない
- * ステップ（画面内の更新だけ）で上限時間まで待たないため。
- */
-interface PageTransitionWait {
-  readonly done: Promise<void>;
-  readonly hasStarted: () => boolean;
-  readonly cancel: () => void;
-}
-
 export class DownloadStepExecutor {
-  private readonly config = {
-    maxRetries: 2,
-    stepTimeout: 30000,
-    retryInterval: 300
-  };
-
-  /** ページ遷移完了イベントを取りこぼした場合のハング防止タイムアウト */
-  private readonly pageTransitionTimeout = 3000;
-
-  /** 遷移が始まるかを見極める猶予。遷移しないステップで上限時間まで待たないための短い待ち */
-  private readonly pageTransitionSettleTime = 300;
+  private readonly stepTimeout = 30000;
+  private readonly elementPollInterval = 100;
 
   /**
    * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
    * downloads APIが使えない場合のハング防止タイムアウト
    */
   private readonly downloadStartTimeout = 5000;
-
-  /** page-ready通知を待っているtabIdごとのコールバック集合 */
-  private readonly pageReadyWaiters: Map<number, Set<() => void>> = new Map();
 
   /** 実クリック直前通知を待っているtabIdごとのコールバック集合 */
   private readonly downloadClickWaiters: Map<
@@ -265,13 +230,7 @@ export class DownloadStepExecutor {
       const steps: readonly CsvDownloadStep[] =
         group.kind === 'page-transition' ? [group.step] : group.steps;
 
-      // クリック直後に発火するページ遷移完了イベントを取りこぼさないよう、
-      // executeSteps呼び出し前（クリック前）に待ち受けを準備しておく。
-      const pageTransition = group.kind === 'page-transition'
-        ? this.waitForPageTransition(tabId, this.pageTransitionTimeout)
-        : null;
-
-      const outcome = await this.executeStepsWithRetry(
+      const outcome = await this.executeStepsOnce(
         tabId,
         steps,
         selectors,
@@ -289,9 +248,6 @@ export class DownloadStepExecutor {
         };
       }
 
-      if (pageTransition) {
-        await this.settlePageTransition(pageTransition);
-      }
       this.reportStepTiming(reportStep, steps, outcome);
       await outcome.downloadStart;
     }
@@ -302,122 +258,123 @@ export class DownloadStepExecutor {
     };
   }
 
-  /**
-   * 同一ページ内の連続ステップをリトライ付きで実行
-   *
-   * 送り直すのは応答が届かなかった場合だけにする。contentが確定させた
-   * 失敗（要素未検出など）を送り直すと済んだクリックを繰り返すため。
-   */
-  private async executeStepsWithRetry(
+  private async executeStepsOnce(
     tabId: number,
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
     captureDownloadStart: boolean | undefined,
     waitForDownloadStart: boolean
   ): Promise<StepExecutionOutcome> {
-    let lastError: string = '';
-    let lastStep: CsvDownloadStep | undefined;
-    let lastCode: string | undefined;
-    let attempts = 0;
-
-    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-      // ダウンロード開始はクリック前から待ち受ける必要があるため、
-      // リトライのたびにクリック前に待ち受けを張り直す
-      const downloadStart = waitForDownloadStart
-        ? this.waitForDownloadStart(this.downloadStartTimeout)
-        : undefined;
-
-      try {
-        const attemptStart = Date.now();
-        const sendStartedAt = Date.now();
-        attempts += 1;
-        let result = await this.executeSteps(tabId, steps, selectors, captureDownloadStart);
-        const actionCompletedAt = Date.now();
-
-        if (result.success) {
-          let clickResult: { readonly clickedAt: number; readonly durationMs?: number } | undefined;
-          if (waitForDownloadStart && steps.includes('download-csv')) {
-            clickResult = await this.waitForDownloadClick(tabId, this.downloadStartTimeout);
-          }
-          const started = !downloadStart || await this.isDownloadStarted(downloadStart);
-          if (started) {
-            return {
-              response: result,
-              downloadStart,
-              timing: {
-                startedAt: attemptStart,
-                sendStartedAt,
-                actionCompletedAt,
-                receivedAt: result.receivedAt,
-                contentTimings: result.contentTimings,
-                clickStartedAt: clickResult?.clickedAt,
-                clickDurationMs: clickResult?.durationMs,
-                downloadStartedAt: downloadStart ? Date.now() : undefined
-              }
-            };
-          }
-          result = {
-            success: false,
-            error: 'ダウンロード開始を確認できませんでした',
-            step: 'download-csv'
-          };
+    const startedAt = Date.now();
+    const deadline = startedAt + this.stepTimeout;
+    if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
+      return {
+        response: {
+          success: false,
+          error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
+          step: steps[0]
         }
-
-        // コンテンツスクリプト不在エラーはリトライしない（再読み込み済みで失敗しているため）
-        if (result.code === 'content-script-missing') {
-          lastError = result.error || 'コンテンツスクリプトが見つかりません';
-          lastStep = result.step;
-          lastCode = result.code;
-          break;
-        }
-
-        // クリック後のページ破棄で応答だけが失われても、ダウンロードが始まっていれば
-        // 取得は成立している。再クリックすると二重ダウンロードになるため打ち切る。
-        // コンテンツスクリプトが返した失敗（要素未検出など）は成功にしない
-        if (result.communicationFailed && (await this.isDownloadStarted(downloadStart))) {
-          return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
-        }
-
-        // contentが確定させた失敗は送り直さない。済んだクリックの繰り返しは二重ダウンロードの危険がある
-        if (!result.communicationFailed) {
-          lastError = result.error || 'ステップの実行に失敗しました';
-          lastStep = result.step;
-          break;
-        }
-
-        lastError = result.error || 'ステップの実行に失敗しました';
-        lastStep = result.step;
-
-        if (attempt < this.config.maxRetries) {
-          await sleep(this.config.retryInterval);
-        }
-      } catch (error) {
-        if (await this.isDownloadStarted(downloadStart)) {
-          return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
-        }
-
-        lastError = error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました';
-
-        if (attempt < this.config.maxRetries) {
-          await sleep(this.config.retryInterval);
-        }
-      }
+      };
     }
 
-    return {
-      response: {
-        success: false,
-        error: `ステップ群 ${steps.join(', ')} の実行に失敗しました（${attempts}回試行）: ${lastError}`,
-        step: lastStep,
-        code: lastCode
+    const downloadStart = waitForDownloadStart
+      ? this.waitForDownloadStart(this.downloadStartTimeout)
+      : undefined;
+    try {
+      const sendStartedAt = Date.now();
+      const result = await this.executeSteps(
+        tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
+      );
+      const actionCompletedAt = Date.now();
+      if (result.success) {
+        const clickResult = waitForDownloadStart && steps.includes('download-csv')
+          ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
+          : undefined;
+        if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
+          return {
+            response: result,
+            downloadStart,
+            timing: {
+              startedAt,
+              sendStartedAt,
+              actionCompletedAt,
+              receivedAt: result.receivedAt,
+              contentTimings: result.contentTimings,
+              clickStartedAt: clickResult?.clickedAt,
+              clickDurationMs: clickResult?.durationMs,
+              downloadStartedAt: downloadStart ? Date.now() : undefined
+            }
+          };
+        }
+        return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
       }
+
+      if (result.code === 'content-script-missing') {
+        return { response: result };
+      }
+
+      // クリック後の通信切れでも開始を観測済みなら、再クリックせず成功とする。
+      // content が確定させた失敗は成功にしない。
+      if (result.communicationFailed && await this.isDownloadStarted(downloadStart)) {
+        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+      }
+      return { response: result };
+    } catch (error) {
+      if (await this.isDownloadStarted(downloadStart)) {
+        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+      }
+      return {
+        response: {
+          success: false,
+          error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
+        }
+      };
+    }
+  }
+
+  private async waitForStepElement(
+    tabId: number,
+    step: CsvDownloadStep,
+    selectors: CsvDownloadConfig['selectors'],
+    deadline: number
+  ): Promise<boolean> {
+    const instruction: CheckCsvDownloadStepInstruction = {
+      action: 'check-csv-download-step',
+      payload: { step, selectors }
     };
+    while (Date.now() < deadline) {
+      const pollStartedAt = Date.now();
+      try {
+        const found = await withTimeout(
+          new Promise<boolean>(resolve => {
+            chrome.tabs.sendMessage(tabId, instruction, (response: DownloadResponse | undefined) => {
+              resolve(!chrome.runtime.lastError && response?.success === true);
+            });
+          }),
+          Math.min(this.elementPollInterval, deadline - pollStartedAt),
+          '要素の問い合わせに応答がありません'
+        );
+        if (found && Date.now() < deadline) {
+          return true;
+        }
+      } catch {
+        // 遷移で content が不在・無応答の間も、クリックを再送せず要素だけを探す。
+      }
+      const delay = Math.min(
+        this.elementPollInterval - (Date.now() - pollStartedAt),
+        deadline - Date.now()
+      );
+      if (delay > 0) {
+        await sleep(delay);
+      }
+    }
+    return false;
   }
 
   /**
    * ステップごとの所要時間を報告する
    *
-   * ページ遷移を伴うステップは遷移完了までを、ダウンロードのステップは押下までと
+   * ダウンロードのステップは押下までと
    * 押下からダウンロード開始までを分けて報告する。
    */
   private reportStepTiming(
@@ -440,10 +397,14 @@ export class DownloadStepExecutor {
           : Math.max(0, timing.actionCompletedAt - timing.sendStartedAt);
       reportStep({ step, phase: 'receive', durationMs: receiveDuration });
 
-      // content script 受信後、CSV保存ボタンが見つかるまで
-      // content script 側で計測した内訳をそのまま報告する
       for (const contentTiming of timing.contentTimings ?? []) {
-        reportStep({ step, phase: contentTiming.phase, durationMs: contentTiming.durationMs });
+        reportStep({
+          step,
+          phase: contentTiming.phase,
+          durationMs: contentTiming.durationMs + (contentTiming.phase === 'button-found'
+            ? Math.max(0, timing.sendStartedAt - timing.startedAt)
+            : 0)
+        });
       }
 
       // ボタン発見後、実際にクリックするまで（通知待ちと setTimeout を含む）
@@ -485,76 +446,40 @@ export class DownloadStepExecutor {
     return downloadStart ? await downloadStart : false;
   }
 
-  /**
-   * 同一ページ内の連続ステップの実行
-   *
-   * コンテンツスクリプトが見つからない場合（Receiving end does not exist）は、
-   * タブを再読み込みして1回だけやり直す。
-   */
   private executeSteps(
     tabId: number,
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
+    timeoutMs: number,
     captureDownloadStart?: boolean
   ): Promise<StepExecutionResponse> {
     const instruction: CsvDownloadStepsInstruction = {
       action: 'execute-csv-download-steps',
-      payload: {
-        downloadSteps: steps,
-        selectors: selectors,
-        captureDownloadStart: captureDownloadStart
-      }
+      payload: { downloadSteps: steps, selectors, captureDownloadStart }
     };
-
-    const sendMessageWithRetry = async (retryAfterReload: boolean): Promise<StepExecutionResponse> => {
-      return new Promise<StepExecutionResponse>((resolve) => {
-        chrome.tabs.sendMessage(tabId, instruction, (response) => {
-          if (chrome.runtime.lastError) {
-            const errorMessage = chrome.runtime.lastError.message ?? '';
-            if (isContentScriptMissingError(errorMessage) && !retryAfterReload) {
-              // コンテンツスクリプト不在で、まだ再読み込みしていない場合
-              this.reloadTabAndWait(tabId)
-                .then(() => sendMessageWithRetry(true))
-                .then(resolve)
-                .catch((error) => {
-                  resolve({
-                    success: false,
-                    error: `タブの再読み込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`,
-                    code: 'content-script-missing',
-                    communicationFailed: true
-                  });
-                });
-              return;
-            }
-            // 再読み込み後も失敗、またはその他のエラー
-            const isContentScriptMissing = isContentScriptMissingError(errorMessage);
-            const errorResponse: StepExecutionResponse = {
-              success: false,
-              error: `コンテンツスクリプトとの通信に失敗: ${errorMessage}`,
-              communicationFailed: true,
-              code: isContentScriptMissing ? 'content-script-missing' : undefined
-            };
-            resolve(errorResponse);
-            return;
-          }
-          resolve(
-            response || {
-              success: false,
-              error: 'レスポンスがありません',
-              // 応答が全く届かない場合は送り直しの対象にする
-              communicationFailed: true
-            }
-          );
+    const sendMessagePromise = new Promise<StepExecutionResponse>((resolve) => {
+      chrome.tabs.sendMessage(tabId, instruction, (response) => {
+        if (chrome.runtime.lastError) {
+          const errorMessage = chrome.runtime.lastError.message ?? '';
+          resolve({
+            success: false,
+            error: `コンテンツスクリプトとの通信に失敗: ${errorMessage}`,
+            communicationFailed: true,
+            code: isContentScriptMissingError(errorMessage) ? 'content-script-missing' : undefined
+          });
+          return;
+        }
+        resolve(response || {
+          success: false,
+          error: 'レスポンスがありません',
+          communicationFailed: true
         });
       });
-    };
-
-    const sendMessagePromise = sendMessageWithRetry(false);
-
+    });
     return withTimeout(
       sendMessagePromise,
-      this.config.stepTimeout,
-      `ステップ群 ${steps.join(', ')} がタイムアウトしました（${this.config.stepTimeout}ms）`
+      timeoutMs,
+      `ステップ群 ${steps.join(', ')} がタイムアウトしました（${this.stepTimeout}ms）`
     );
   }
 
@@ -643,92 +568,6 @@ export class DownloadStepExecutor {
   }
 
   /**
-   * ページ遷移完了を待つ
-   *
-   * navigate-to-page/select-tab/display-data のクリックを送る前に呼び出すことで、
-   * クリック直後に発火する chrome.tabs.onUpdated の complete イベントや
-   * 新しいcontent scriptからのpage-ready通知を取りこぼさずに捕捉する
-   * （クリック後に現在の状態を見ると、遷移開始前の古い complete 状態を
-   * 誤って「遷移完了」と判定してしまうレースコンディションがあるため、
-   * 現在の状態は参照しない）。
-   * ページ遷移が発生しない、またはイベントを取りこぼした場合に備えて
-   * timeoutMs 経過時にも resolve する。
-   */
-  private waitForPageTransition(tabId: number, timeoutMs: number): PageTransitionWait {
-    let navigationStarted = false;
-    let resolveDone: () => void = () => {};
-    const done = new Promise<void>((resolve) => {
-      resolveDone = resolve;
-    });
-
-    let cleanup: () => void = () => {};
-    const wait = createOneShotWait(timeoutMs, () => {
-      cleanup();
-    });
-    const finish = (): void => {
-      wait.finish(() => {
-        cleanup();
-      });
-    };
-    const onUpdatedListener = (
-      updatedTabId: number,
-      changeInfo: chrome.tabs.OnUpdatedInfo
-    ): void => {
-      if (updatedTabId !== tabId) {
-        return;
-      }
-      // 遷移が始まった時点では完了を待つ（読み込み中に次のステップを送らない）
-      if (changeInfo.status === 'loading') {
-        navigationStarted = true;
-        return;
-      }
-      if (changeInfo.status === 'complete') {
-        finish();
-      }
-    };
-    cleanup = (): void => {
-      chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-      this.removePageReadyWaiter(tabId, finish);
-      resolveDone();
-    };
-
-    chrome.tabs.onUpdated.addListener(onUpdatedListener);
-    this.addPageReadyWaiter(tabId, finish);
-
-    return { done, hasStarted: () => navigationStarted, cancel: finish };
-  }
-
-  /**
-   * ページ遷移の待ち受けを結着させる
-   *
-   * 遷移が始まっていれば完了まで待ち、始まらなければ短い猶予で次へ進む
-   * （画面内の更新だけで終わるステップが上限時間まで待たされるのを避ける）。
-   */
-  private settlePageTransition(wait: PageTransitionWait): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let settled = false;
-
-      const finish = (): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      };
-
-      // 遷移が始まっていれば、完了イベント（または上限時間）まで待ち続ける
-      const timer = setTimeout(() => {
-        if (!wait.hasStarted()) {
-          finish();
-        }
-      }, this.pageTransitionSettleTime);
-
-      void wait.done.then(finish);
-    }).then(() => wait.cancel());
-  }
-
-  /**
    * ダウンロード開始を待つ
    *
    * download-csvのクリックを送る前に呼び出すことで、クリック直後に発火する
@@ -770,41 +609,6 @@ export class DownloadStepExecutor {
 
       chrome.downloads.onCreated.addListener(listener);
     });
-  }
-
-  /**
-   * page-ready待ちのコールバックを登録
-   */
-  private addPageReadyWaiter(tabId: number, callback: () => void): void {
-    const waiters = this.pageReadyWaiters.get(tabId) ?? new Set<() => void>();
-    waiters.add(callback);
-    this.pageReadyWaiters.set(tabId, waiters);
-  }
-
-  /**
-   * page-ready待ちのコールバックを解除
-   */
-  private removePageReadyWaiter(tabId: number, callback: () => void): void {
-    const waiters = this.pageReadyWaiters.get(tabId);
-    if (!waiters) {
-      return;
-    }
-    waiters.delete(callback);
-    if (waiters.size === 0) {
-      this.pageReadyWaiters.delete(tabId);
-    }
-  }
-
-  /**
-   * page-ready待ちのコールバックへ通知
-   */
-  resolvePageReadyWaiters(tabId: number): void {
-    const waiters = this.pageReadyWaiters.get(tabId);
-    if (!waiters) {
-      return;
-    }
-    // finish()内でwaiters.deleteが呼ばれるため、コピーしてから反復する
-    Array.from(waiters).forEach(callback => callback());
   }
 
   /**

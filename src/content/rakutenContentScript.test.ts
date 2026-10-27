@@ -59,6 +59,45 @@ describe('rakutenContentScript ステップ実行', () => {
     resetTestDoubles()
   })
 
+  describe('次のステップの要素の問い合わせ', () => {
+    it.each([
+      ['navigate-to-page', 'menuLink'],
+      ['select-tab', 'tabSelector'],
+      ['select-period', 'periodRadio'],
+      ['display-data', 'displayButton'],
+      ['download-csv', 'csvButton'],
+    ])('%s の要素があってもクリックせず即座に返す', async (step, selectorKey) => {
+      const button = document.createElement('button')
+      button.id = 'next'
+      document.body.appendChild(button)
+      makeInteractable(button)
+      const safeClick = vi.spyOn(DomUtils, 'safeClick')
+      const res = await sendMessage({
+        action: 'check-csv-download-step',
+        payload: { step, selectors: { [selectorKey]: '#missing, #next' } },
+      })
+      expect(res.success).toBe(true)
+      expect(safeClick).not.toHaveBeenCalled()
+    })
+
+    it('要素がなければ待たずに未検出を返す', async () => {
+      const res = await sendMessage({
+        action: 'check-csv-download-step',
+        payload: { step: 'download-csv', selectors: { csvButton: '#missing' } },
+      })
+      expect(res.success).toBe(false)
+    })
+
+    it.each(['display-data', 'download-csv'])('%s は操作できる要素だけを検出する', async (step) => {
+      document.body.innerHTML = '<button id="next" disabled></button>'
+      const res = await sendMessage({
+        action: 'check-csv-download-step',
+        payload: { step, selectors: { displayButton: '#next', csvButton: '#next' } },
+      })
+      expect(res.success).toBe(false)
+    })
+  })
+
   describe('セレクター未指定時のエラーメッセージ', () => {
     it('navigate-to-page', async () => {
       const res = await singleStep('navigate-to-page', {})
