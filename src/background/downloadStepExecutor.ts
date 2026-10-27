@@ -14,6 +14,7 @@ import type {
   CsvDownloadMessage,
   CsvDownloadStepsInstruction,
   DownloadResponse,
+  DownloadStepTiming,
   CsvDownloadConfig,
   CsvDownloadType,
   CsvDownloadStep
@@ -30,24 +31,6 @@ const CONTENT_SCRIPT_MISSING_ERRORS = [
 /** コンテンツスクリプト不在エラーかどうか判定 */
 function isContentScriptMissingError(message: string): boolean {
   return CONTENT_SCRIPT_MISSING_ERRORS.some(e => message.includes(e));
-}
-
-/**
- * 拡張機能の設定
- */
-export interface ExtensionConfig {
-  readonly maxRetries: number;
-  readonly stepTimeout: number;
-  readonly retryInterval: number;
-  readonly debugMode: boolean;
-}
-
-/**
- * ダウンロード実行が必要とするタブ状態の読み取り口
- */
-export interface TabStateReader {
-  hasRakutenTab(tabId: number): boolean;
-  getActiveTabId(): number | undefined;
 }
 
 /**
@@ -73,15 +56,9 @@ type StepExecutionResponse = DownloadResponse & { readonly communicationFailed?:
 /**
  * ステップごとの所要時間
  *
- * どこに時間がかかっているかを画面から確認できるようにする。
- * URLのクエリや件数・金額などの個人情報は含めない。
+ * content側の計測値に実行ステップを添えたもの。
  */
-export interface StepTiming {
-  readonly step: CsvDownloadStep;
-  /** どの区間にかかった時間か */
-  readonly phase: 'action' | 'download-start' | 'receive' | 'button-found' | 'click';
-  readonly durationMs: number;
-}
+export type StepTiming = DownloadStepTiming & { readonly step: CsvDownloadStep };
 
 export type StepTimingReporter = (timing: StepTiming) => void;
 
@@ -91,7 +68,7 @@ interface StepExecutionTiming {
   readonly sendStartedAt: number;
   readonly actionCompletedAt: number;
   readonly receivedAt?: number;
-  readonly contentTimings?: readonly { readonly phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action'; readonly durationMs: number }[];
+  readonly contentTimings?: readonly DownloadStepTiming[];
   readonly clickStartedAt?: number;
   readonly clickDurationMs?: number;
   readonly downloadStartedAt?: number;
@@ -117,11 +94,10 @@ interface PageTransitionWait {
 }
 
 export class DownloadStepExecutor {
-  private readonly config: ExtensionConfig = {
+  private readonly config = {
     maxRetries: 2,
     stepTimeout: 30000,
-    retryInterval: 300,
-    debugMode: false
+    retryInterval: 300
   };
 
   /** ページ遷移・ページ更新を伴い得るステップ（単独実行のうえ遷移完了を待つ対象） */
@@ -158,14 +134,12 @@ export class DownloadStepExecutor {
     { readonly clickedAt: number; readonly durationMs?: number }
   > = new Map();
 
-  constructor(private readonly tabState: TabStateReader) {}
-
-  /**
-   * 設定を取得（デバッグ用）
-   */
-  getConfig(): ExtensionConfig {
-    return { ...this.config };
-  }
+  constructor(
+    private readonly tabState: {
+      hasRakutenTab(tabId: number): boolean;
+      getActiveTabId(): number | undefined;
+    }
+  ) {}
 
   /**
    * CSVダウンロードリクエスト処理
@@ -177,8 +151,6 @@ export class DownloadStepExecutor {
     reportStep?: StepTimingReporter
   ): Promise<DownloadResponse> {
     const { selectedOptions, tabId, captureDownloadStart } = message.payload;
-
-    this.log('CSVダウンロードリクエストを受信:', { selectedOptions, tabId });
 
     try {
       // タブIDの決定
@@ -192,7 +164,6 @@ export class DownloadStepExecutor {
       // コンテンツスクリプトへの疎通確認
       const connected = await this.checkContentScriptConnection(targetTabId);
       if (!connected) {
-        this.log('コンテンツスクリプトが見つからないためタブを再読み込みします:', targetTabId);
         await this.reloadTabAndWait(targetTabId);
         // 再読み込み後、再度疎通確認
         const reconnected = await this.checkContentScriptConnection(targetTabId);
@@ -203,7 +174,6 @@ export class DownloadStepExecutor {
             code: 'content-script-missing'
           };
         }
-        this.log('タブ再読み込み後、コンテンツスクリプトとの疎通を確認しました:', targetTabId);
       }
 
       // ダウンロード処理を順次実行
@@ -251,8 +221,6 @@ export class DownloadStepExecutor {
         error: `未対応のダウンロードタイプです: ${downloadType}`
       };
     }
-
-    this.log('ダウンロード設定:', config);
 
     return this.executeDownloadSequence(tabId, config, captureDownloadStart, reportStep);
   }
@@ -302,8 +270,6 @@ export class DownloadStepExecutor {
     for (const group of groups) {
       const steps: readonly CsvDownloadStep[] =
         group.kind === 'page-transition' ? [group.step] : group.steps;
-
-      this.log(`ステップ: ${steps.join(', ')} を実行中...`);
 
       // クリック直後に発火するページ遷移完了イベントを取りこぼさないよう、
       // executeSteps呼び出し前（クリック前）に待ち受けを準備しておく。
@@ -410,7 +376,6 @@ export class DownloadStepExecutor {
         // 取得は成立している。再クリックすると二重ダウンロードになるため打ち切る。
         // コンテンツスクリプトが返した失敗（要素未検出など）は成功にしない
         if (result.communicationFailed && (await this.isDownloadStarted(downloadStart))) {
-          this.log(`ステップ群 ${steps.join(', ')} は通信が切れたが、ダウンロード開始を確認しました`);
           return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
         }
 
@@ -418,12 +383,10 @@ export class DownloadStepExecutor {
         lastStep = result.step;
 
         if (attempt < this.config.maxRetries) {
-          this.log(`ステップ群 ${steps.join(', ')} をリトライします (${attempt + 1}/${this.config.maxRetries})`);
           await sleep(this.config.retryInterval);
         }
       } catch (error) {
         if (await this.isDownloadStarted(downloadStart)) {
-          this.log(`ステップ群 ${steps.join(', ')} は応答を受け取れなかったが、ダウンロード開始を確認しました`);
           return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
         }
 
@@ -544,7 +507,6 @@ export class DownloadStepExecutor {
             const errorMessage = chrome.runtime.lastError.message ?? '';
             if (isContentScriptMissingError(errorMessage) && !retryAfterReload) {
               // コンテンツスクリプト不在で、まだ再読み込みしていない場合
-              this.log('コンテンツスクリプトが見つかりません。タブを再読み込みして再試行します:', tabId);
               this.reloadTabAndWait(tabId)
                 .then(() => sendMessageWithRetry(true))
                 .then(resolve)
@@ -900,15 +862,6 @@ export class DownloadStepExecutor {
       return;
     }
     Array.from(waiters).forEach((callback) => callback(clickDurationMs, clickedAt));
-  }
-
-  /**
-   * ログ出力
-   */
-  private log(message: string, ...args: unknown[]): void {
-    if (this.config.debugMode) {
-      console.log(`[RakutenCSV] ${message}`, ...args);
-    }
   }
 
   /**
