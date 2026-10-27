@@ -74,6 +74,10 @@ interface StepExecutionOutcome {
 export class DownloadStepExecutor {
   private readonly stepTimeout = 30000;
   private readonly elementPollInterval = 100;
+  // 問い合わせの送出間隔と1件の応答期限を分ける。配送遅延で150msかかる正常応答を捨てないため
+  private readonly elementQueryTimeout = 2000;
+  // 表示更新中も旧CSVボタンが残るため、更新前の結果を保存しないよう表示直後に待つ
+  private readonly displayUpdateSettleTime = 300;
 
   /**
    * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
@@ -250,6 +254,10 @@ export class DownloadStepExecutor {
 
       this.reportStepTiming(reportStep, steps, outcome);
       await outcome.downloadStart;
+
+      if (group.kind === 'page-transition' && group.step === 'display-data') {
+        await sleep(this.displayUpdateSettleTime);
+      }
     }
 
     return {
@@ -342,33 +350,53 @@ export class DownloadStepExecutor {
       action: 'check-csv-download-step',
       payload: { step, selectors }
     };
-    while (Date.now() < deadline) {
-      const pollStartedAt = Date.now();
-      try {
-        const found = await withTimeout(
-          new Promise<boolean>(resolve => {
-            chrome.tabs.sendMessage(tabId, instruction, (response: DownloadResponse | undefined) => {
-              resolve(!chrome.runtime.lastError && response?.success === true);
-            });
-          }),
-          Math.min(this.elementPollInterval, deadline - pollStartedAt),
-          '要素の問い合わせに応答がありません'
-        );
-        if (found && Date.now() < deadline) {
-          return true;
+    let found = false;
+    // 次の問い合わせを100msで送りつつ、期限内の遅い成功も拾うため問い合わせを重ねる
+    while (Date.now() < deadline && !found) {
+      const iterStartedAt = Date.now();
+      const query = this.queryStepElement(tabId, instruction, deadline);
+      void query.then(ok => {
+        if (ok && Date.now() < deadline) {
+          found = true;
         }
-      } catch {
-        // 遷移で content が不在・無応答の間も、クリックを再送せず要素だけを探す。
+      });
+      const raced = await Promise.race([query, sleep(this.elementPollInterval)]);
+      if (found || raced === true) {
+        return Date.now() < deadline;
       }
-      const delay = Math.min(
-        this.elementPollInterval - (Date.now() - pollStartedAt),
+      const elapsed = Date.now() - iterStartedAt;
+      const remain = Math.min(
+        this.elementPollInterval - elapsed,
         deadline - Date.now()
       );
-      if (delay > 0) {
-        await sleep(delay);
+      if (remain > 0) {
+        await sleep(remain);
+      }
+      if (found && Date.now() < deadline) {
+        return true;
       }
     }
     return false;
+  }
+
+  private queryStepElement(
+    tabId: number,
+    instruction: CheckCsvDownloadStepInstruction,
+    deadline: number
+  ): Promise<boolean> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      return Promise.resolve(false);
+    }
+    return withTimeout(
+      new Promise<boolean>(resolve => {
+        chrome.tabs.sendMessage(tabId, instruction, (response: DownloadResponse | undefined) => {
+          resolve(!chrome.runtime.lastError && response?.success === true);
+        });
+      }),
+      Math.min(this.elementQueryTimeout, remaining),
+      '要素の問い合わせに応答がありません'
+    ).catch(() => false);
   }
 
   /**

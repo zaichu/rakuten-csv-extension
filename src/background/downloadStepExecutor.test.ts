@@ -120,6 +120,58 @@ describe('次の要素の問い合わせ', () => {
     expect(executed).toEqual(['navigate-to-page'])
     expect(chrome.tabs.reload).not.toHaveBeenCalled()
   })
+
+  it('問い合わせの応答が150msかかっても期限内の成功を見逃さない', async () => {
+    const executor = createExecutor()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        setTimeout(() => callback?.({ success: true }), 150)
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(5000)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+
+  it('display-dataの後は更新待ちを挟んでからCSVを実行する', async () => {
+    const executor = createExecutor()
+    const sentAt = new Map<string, number>()
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true })
+        return
+      }
+      for (const step of sentSteps(message)) {
+        if (!sentAt.has(step)) {
+          sentAt.set(step, Date.now())
+        }
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(domesticStockRequest())
+    await vi.advanceTimersByTimeAsync(5000)
+    expect((await pending).success).toBe(true)
+    expect(sentAt.get('display-data')).toBeDefined()
+    expect(sentAt.get('download-csv')).toBeDefined()
+    expect(sentAt.get('download-csv')! - sentAt.get('display-data')!).toBeGreaterThanOrEqual(300)
+  })
 })
 
 describe('downloadStepExecutor の通信失敗時の扱い', () => {
