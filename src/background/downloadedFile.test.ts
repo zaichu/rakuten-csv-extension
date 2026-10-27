@@ -192,6 +192,29 @@ describe('downloadedFile', () => {
 
       await expect(pending).resolves.toBeUndefined()
     })
+
+    it('完了イベントが届かなくても状態の定期確認で完了を拾う', async () => {
+      vi.useFakeTimers()
+      try {
+        let searchCalls = 0
+        const mock = chrome.downloads.search as unknown as {
+          mockImplementation: (fn: DownloadsSearchImpl) => void
+        }
+        mock.mockImplementation(async () => {
+          searchCalls += 1
+          return searchCalls === 1
+            ? [{ ...createDownloadItem(), state: 'in_progress' } as chrome.downloads.DownloadItem]
+            : [createDownloadItem()]
+        })
+
+        const pending = waitForCompletedDownload(DOWNLOAD_ID, 5000)
+        await vi.advanceTimersByTimeAsync(1000)
+
+        await expect(pending).resolves.toEqual(createDownloadItem())
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('ダウンロード元の検査', () => {

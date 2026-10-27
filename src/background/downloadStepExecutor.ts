@@ -76,6 +76,8 @@ export class DownloadStepExecutor {
   private readonly elementPollInterval = 100;
   // 問い合わせの送出間隔と1件の応答期限を分ける。配送遅延で150msかかる正常応答を捨てないため
   private readonly elementQueryTimeout = 2000;
+  // 入れ替わり中の無応答で止まらないよう、疎通確認にも要素の問い合わせと同じ上限を付ける
+  private readonly connectionQueryTimeout = 2000;
   // 表示更新中も旧CSVボタンが残るため、更新前の結果を保存しないよう表示直後に待つ
   private readonly displayUpdateSettleTime = 300;
 
@@ -552,24 +554,29 @@ export class DownloadStepExecutor {
    * コンテンツスクリプトへの疎通を確認する
    *
    * 単純なメッセージを送り、応答があるかどうかで判定する。
+   * 入れ替わり中の無応答は不在扱いにして、呼び出し側の再読み込みへ進む。
    * エラーが「Receiving end does not exist」なら false を返す。
    */
   private async checkContentScriptConnection(tabId: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message ?? '';
-          if (isContentScriptMissingError(errorMessage)) {
-            resolve(false);
-            return;
+    return withTimeout(
+      new Promise<boolean>((resolve) => {
+        chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message ?? '';
+            if (isContentScriptMissingError(errorMessage)) {
+              resolve(false);
+              return;
+            }
+            // その他のエラーは「接続できたが失敗した」とみなす
+            resolve(true);
+          } else {
+            resolve(true);
           }
-          // その他のエラーは「接続できたが失敗した」とみなす
-          resolve(true);
-        } else {
-          resolve(true);
-        }
-      });
-    });
+        });
+      }),
+      this.connectionQueryTimeout,
+      'コンテンツスクリプトの応答がありません'
+    ).catch(() => false);
   }
 
   /**
