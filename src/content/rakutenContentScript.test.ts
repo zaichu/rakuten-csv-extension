@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import type { ChromeMessage, CsvDownloadStep, DownloadResponse } from '../types'
 import { RakutenUtils, DomUtils } from '../utils'
+import { silenceConsole, resetTestDoubles } from '../tests/fixtures'
 import { onExecute } from './rakutenContentScript'
 
 /**
@@ -49,16 +50,13 @@ describe('rakutenContentScript ステップ実行', () => {
   })
 
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
     document.body.innerHTML = ''
     vi.spyOn(RakutenUtils, 'isRakutenSecurities').mockReturnValue(true)
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   describe('セレクター未指定時のエラーメッセージ', () => {

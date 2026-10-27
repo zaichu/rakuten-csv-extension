@@ -1,9 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { CsvDownloadMessage, DownloadResponse } from '../types'
+import type { CsvDownloadMessage } from '../types'
+import { type StepTiming } from './downloadStepExecutor'
 import {
-  DownloadStepExecutor,
-  type StepTiming,
-} from './downloadStepExecutor'
+  TEST_TAB_ID as TAB_ID,
+  createTestExecutor as createExecutor,
+  failWithChannelClosed,
+  failWithContentScriptMissing,
+  fireDownloadCreatedByUrl as fireDownloadCreated,
+  firePageTransition,
+  fireTabReload,
+  resetTestDoubles,
+  sentSteps,
+  silenceConsole,
+  stubTabsSendMessage as setTabsSendMessageImpl,
+} from '../tests/fixtures'
 
 /**
  * downloadStepExecutor の通信失敗時の扱いを固定する。
@@ -11,21 +21,6 @@ import {
  * クリック後にページが破棄されると content script の応答が届かないが、
  * ダウンロードが始まっていれば取得は成立している。
  */
-
-const TAB_ID = 42
-
-type SendMessageImpl = (
-  tabId: number,
-  message: { action: string; payload?: Record<string, unknown> },
-  callback?: (response: DownloadResponse) => void
-) => void
-
-function createExecutor(): DownloadStepExecutor {
-  return new DownloadStepExecutor({
-    hasRakutenTab: () => true,
-    getActiveTabId: () => TAB_ID,
-  })
-}
 
 function downloadRequest(): CsvDownloadMessage {
   return {
@@ -41,80 +36,13 @@ function domesticStockRequest(): CsvDownloadMessage {
   }
 }
 
-function setTabsSendMessageImpl(impl: SendMessageImpl): void {
-  const mock = chrome.tabs.sendMessage as unknown as {
-    mockImplementation: (fn: SendMessageImpl) => void
-  }
-  mock.mockImplementation(impl)
-}
-
-function sentSteps(message: { payload?: Record<string, unknown> }): readonly string[] {
-  return (message.payload?.['downloadSteps'] as readonly string[] | undefined) ?? []
-}
-
-/** ページ遷移完了イベントを発火させ、waitForPageTransition の待ちを解消する */
-function firePageTransition(tabId: number): void {
-  const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (id: number, changeInfo: { status?: string }) => void
-    listener(tabId, { status: 'complete' })
-  }
-}
-
-/** ダウンロード開始イベントを発火させ、waitForDownloadStart の待ちを解消する */
-function fireDownloadCreated(url = 'https://www.rakuten-sec.co.jp/download.csv'): void {
-  const addListener = chrome.downloads.onCreated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
-    listener({ url })
-  }
-}
-
-/** content script がページ破棄で応答を返せなかった状況を再現する */
-function failWithChannelClosed(callback?: (response: DownloadResponse) => void): void {
-  const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
-  runtime.lastError = {
-    message: 'A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received',
-  }
-  callback?.({ success: false, error: 'レスポンスがありません' })
-  delete runtime.lastError
-}
-
-/** コンテンツスクリプトが存在しないエラーを再現する */
-function failWithContentScriptMissing(callback?: (response: DownloadResponse) => void): void {
-  const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
-  runtime.lastError = {
-    message: 'Could not establish connection. Receiving end does not exist',
-  }
-  callback?.({ success: false, error: 'レスポンスがありません' })
-  delete runtime.lastError
-}
-
-/** タブ再読み込み完了イベントを発火させる */
-function fireTabReload(tabId: number): void {
-  const addListener = chrome.tabs.onUpdated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (id: number, changeInfo: { status?: string }) => void
-    listener(tabId, { status: 'complete' })
-  }
-}
-
 describe('downloadStepExecutor の通信失敗時の扱い', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   it('成功応答でもダウンロード開始を観測できなければ失敗を返す', async () => {
@@ -293,14 +221,11 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
 describe('待ちの短縮とステップごとの計測', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   /** display-data が画面内の更新だけで済む（ページ遷移しない）国内株式の応答を返す */
@@ -381,14 +306,11 @@ describe('待ちの短縮とステップごとの計測', () => {
 
 describe('コンテンツスクリプト不在時の再読み込み処理', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   function setupReloadMock(reloadCount: { current: number }): void {

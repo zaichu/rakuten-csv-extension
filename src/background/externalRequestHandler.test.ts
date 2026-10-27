@@ -94,6 +94,7 @@ function createFileReader(
   }
 }
 
+import { createTestExecutor, resetTestDoubles, silenceConsole } from '../tests/fixtures'
 /**
  * ハンドラと、ダウンロード手順を実行するランナーを用意する
  *
@@ -102,10 +103,7 @@ function createFileReader(
  * 通知してからダウンロードを発生させる
  */
 function createDownloadExecutor(): DownloadStepExecutor {
-  return new DownloadStepExecutor({
-    hasRakutenTab: () => true,
-    getActiveTabId: () => TARGET_TAB_ID,
-  })
+  return createTestExecutor(TARGET_TAB_ID)
 }
 function createHandler(
   responses: Partial<Record<CsvDownloadType, DownloadResponse>> = {},
@@ -220,9 +218,7 @@ function isProgress(message: PostedMessage): message is FetchLatestCsvProgress {
 
 describe('externalRequestHandler', () => {
   beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    silenceConsole()
     vi.mocked(chrome.tabs.query).mockResolvedValue([
       { id: TARGET_TAB_ID, windowId: 3, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
     ])
@@ -239,8 +235,7 @@ describe('externalRequestHandler', () => {
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.useRealTimers()
+    resetTestDoubles()
   })
 
   describe('送信元の検査', () => {
