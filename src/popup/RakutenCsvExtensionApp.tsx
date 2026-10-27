@@ -9,13 +9,12 @@ import {
   SelectionSummary,
   DOWNLOAD_OPTIONS,
   CATEGORIZED_OPTIONS,
-  getCategoryLabel,
-  getCategoryIcon,
+  CATEGORY_META,
 } from '../components';
 import { useApplicationMessage, useCsvDownload } from '../hooks';
 import { RakutenUtils } from '../utils';
 import type { CsvDownloadType } from '../types';
-import { openShokenWebPage } from './shokenWeb';
+import type { DownloadCategory } from '../components/downloadOptions';
 
 /**
  * 楽天証券CSV拡張機能のメインアプリケーション
@@ -125,7 +124,7 @@ const RakutenCsvExtensionApp: React.FC = () => {
    */
   const handleOpenShokenWebPage = useCallback(async (): Promise<void> => {
     try {
-      await openShokenWebPage();
+      await RakutenUtils.openShokenWebPage();
     } catch (error) {
       console.error('証券Webページを開く際にエラーが発生しました:', error);
     }
@@ -208,13 +207,14 @@ const RakutenCsvExtensionApp: React.FC = () => {
         {/* カテゴリ別オプション */}
         {Object.entries(CATEGORIZED_OPTIONS).map(([category, options]) => {
           const selectedInCategory = options.filter(opt => selectedOptions.has(opt.id)).length;
+          const meta = CATEGORY_META[category as DownloadCategory];
           return (
             <CategorySection
               key={category}
               category={category}
               options={options}
-              categoryLabel={getCategoryLabel(category)}
-              categoryIcon={getCategoryIcon(category)}
+              categoryLabel={meta?.label || category}
+              categoryIcon={meta?.icon || '📋'}
               selectedInCategory={selectedInCategory}
               allInCategorySelected={selectedInCategory === options.length}
               selectedOptions={selectedOptions}

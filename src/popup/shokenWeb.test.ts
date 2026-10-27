@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { openShokenWebPage } from './shokenWeb';
+import { RakutenUtils } from '../utils/rakutenUtils';
+
+const openShokenWebPage = (): Promise<void> => RakutenUtils.openShokenWebPage();
 
 describe('openShokenWebPage', () => {
   const mockChromeTabsCreate = vi.fn();
