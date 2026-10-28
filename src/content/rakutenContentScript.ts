@@ -25,6 +25,8 @@ class RakutenCsvExtension {
   private readonly elementTimeout = 15000;
   private readonly elementPollInterval = 50;
   private readonly notifyTimeout = 2000;
+  // documentの読み込みごとに作り直す識別子。backgroundが遷移前後の応答を見分けるために使う
+  private readonly documentId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
   /** このページでログイン画面を検出済みか */
   private loginScreenDetected = false;
@@ -133,7 +135,7 @@ class RakutenCsvExtension {
       const element = document.querySelector(candidate.trim());
       return element && (!requireInteractable || DomUtils.isElementInteractable(element));
     }));
-    return { success: found };
+    return { success: found, documentId: this.documentId };
   }
 
   /**
@@ -258,6 +260,7 @@ class RakutenCsvExtension {
       message: 'ステップ群の実行が完了しました',
       receivedAt,
       contentTimings: contentTimings.length > 0 ? contentTimings : undefined,
+      documentId: this.documentId,
     };
   }
 

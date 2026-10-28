@@ -159,6 +159,13 @@ export interface DownloadResponse extends BaseResponse {
   readonly step?: CsvDownloadStep;
   readonly code?: string;
   /**
+   * 応答したページ(document)の識別子
+   *
+   * 遷移前と同じIDの応答は古いページのものとして無視するために使う。
+   * documentの読み込みごとに作り直すため、遷移後は必ず変わる。
+   */
+  readonly documentId?: string;
+  /**
    * コンテンツスクリプトが受け取った時刻（service worker 側で送信からの時間を計算するため）
    */
   readonly receivedAt?: number;
