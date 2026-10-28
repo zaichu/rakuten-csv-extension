@@ -76,6 +76,9 @@ export class DownloadStepExecutor {
   private readonly elementPollInterval = 100;
   // 問い合わせの送出間隔と1件の応答期限を分ける。配送遅延で150msかかる正常応答を捨てないため
   private readonly elementQueryTimeout = 2000;
+  // 同時滞留する要素問い合わせ数の上限。送出間隔100ms・1件の上限2sのため定常で20件滞留する。
+  // これより小さくすると未応答時に送出が詰まり、要素出現後の反応が100ms以内に収まらなくなる
+  private readonly maxInFlightStepQueries = Math.ceil(this.elementQueryTimeout / this.elementPollInterval);
   // 入れ替わり中の無応答で止まらないよう、疎通確認にも要素の問い合わせと同じ上限を付ける
   private readonly connectionQueryTimeout = 2000;
   // 表示更新中も旧CSVボタンが残るため、更新前の結果を保存しないよう表示直後に待つ
@@ -369,6 +372,13 @@ export class DownloadStepExecutor {
     return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
   }
 
+  /**
+   * 次のステップの要素が出るまで問い合わせを重ねる
+   *
+   * 100msごとに送り、1件は2sで区切るため最大20件が同時に滞留する。
+   * 上限に達したらいずれか1件の確定を待ってから次を送り、上限を超えない。
+   * 要素検出は次の区切り(100ms以内)で返し、期限を過ぎたら失敗にする。
+   */
   private async waitForStepElement(
     tabId: number,
     step: CsvDownloadStep,
@@ -379,17 +389,30 @@ export class DownloadStepExecutor {
       action: 'check-csv-download-step',
       payload: { step, selectors }
     };
+    const inFlight = new Set<Promise<boolean>>();
     let found = false;
-    // 次の問い合わせを100msで送りつつ、期限内の遅い成功も拾うため問い合わせを重ねる
-    while (Date.now() < deadline && !found) {
-      const iterStartedAt = Date.now();
+    const sendQuery = (): Promise<boolean> => {
       const query = this.queryStepElement(tabId, instruction, deadline);
-      void query.then(ok => {
+      inFlight.add(query);
+      void query.then((ok) => {
         if (ok && Date.now() < deadline) {
           found = true;
         }
+      }).finally(() => {
+        inFlight.delete(query);
       });
-      const raced = await Promise.race([query, sleep(this.elementPollInterval)]);
+      return query;
+    };
+    while (Date.now() < deadline && !found) {
+      if (inFlight.size >= this.maxInFlightStepQueries) {
+        await Promise.race(inFlight);
+        if (found) {
+          return Date.now() < deadline;
+        }
+        continue;
+      }
+      const iterStartedAt = Date.now();
+      const raced = await Promise.race([sendQuery(), sleep(this.elementPollInterval)]);
       if (found || raced === true) {
         return Date.now() < deadline;
       }
