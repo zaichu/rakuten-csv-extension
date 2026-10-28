@@ -176,7 +176,7 @@ class RakutenCsvExtension {
     }
 
     this.passkeyLoginClicked = true;
-    this.clickElementSafely(button, 'パスキーログイン');
+    this.clickElementSafely(button, 'パスキーログイン', 'button#login-passkey');
   }
 
   private isLoginScreen(): boolean {
@@ -339,7 +339,7 @@ class RakutenCsvExtension {
         } catch {
           // 通知できなくてもクリックは続行する
         }
-        const result = this.clickElementSafely(element, actionName);
+        const result = this.clickElementSafely(element, actionName, selector);
         if (!result.success) {
           console.warn(result.error);
         }
@@ -353,7 +353,7 @@ class RakutenCsvExtension {
       };
     }
 
-    return this.clickElementSafely(element, actionName);
+    return this.clickElementSafely(element, actionName, selector);
   }
 
   /**
@@ -423,7 +423,7 @@ class RakutenCsvExtension {
   /**
    * 要素を安全にクリック
    */
-  private clickElementSafely(element: Element | null, actionName: string): DownloadResponse {
+  private clickElementSafely(element: Element | null, actionName: string, selector?: string): DownloadResponse {
     if (!element) {
       return { 
         success: false, 
@@ -431,7 +431,7 @@ class RakutenCsvExtension {
       };
     }
 
-    console.log(`${actionName}を実行中...`, element);
+    console.log(`${actionName}を実行中: ${selector ?? actionName}`);
 
     if (DomUtils.safeClick(element)) {
       return { 

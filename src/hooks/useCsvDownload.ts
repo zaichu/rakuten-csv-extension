@@ -7,6 +7,16 @@ function isDownloadResponse(value: unknown): value is DownloadResponse {
   return typeof (value as Record<string, unknown>).success === 'boolean';
 }
 
+function toLogUrl(url: string | undefined): string {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '';
+  }
+}
+
 /**
  * CSVダウンロード状態
  */
@@ -41,7 +51,7 @@ export const useCsvDownload = () => {
       throw new Error('アクティブなタブが見つかりません');
     }
 
-    console.log('アクティブなタブ:', { id: tab.id, url: tab.url });
+    console.log('アクティブなタブ:', { id: tab.id, url: toLogUrl(tab.url) });
     return { id: tab.id, url: tab.url };
   };
 
@@ -50,7 +60,7 @@ export const useCsvDownload = () => {
    */
   const validateRakutenSite = (url?: string): void => {
     if (!url || !RakutenUtils.isRakutenSecurities(url)) {
-      console.log('現在のURL:', url);
+      console.log('現在のURL:', toLogUrl(url));
       throw new Error('楽天証券のサイトで使用してください');
     }
   };

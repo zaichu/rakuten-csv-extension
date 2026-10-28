@@ -503,4 +503,23 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(safeClick).toHaveBeenCalledTimes(1)
     })
   })
+
+  describe('ログの衛生', () => {
+    it('クリック時のログは要素参照ではなくセレクター名だけを出す', async () => {
+      const el = document.createElement('a')
+      el.id = 'menu-link'
+      document.body.appendChild(el)
+
+      await singleStep('navigate-to-page', { menuLink: '#menu-link' })
+
+      const calls = vi.mocked(console.log).mock.calls
+      expect(calls.length).toBeGreaterThan(0)
+      for (const args of calls) {
+        for (const arg of args) {
+          expect(arg instanceof Element).toBe(false)
+        }
+      }
+      expect(calls.some((args) => args.some((arg) => typeof arg === 'string' && arg.includes('#menu-link')))).toBe(true)
+    })
+  })
 })
