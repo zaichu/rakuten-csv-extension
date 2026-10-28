@@ -726,6 +726,94 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
 
 })
 
+describe('ダウンロード開始待ちの上限', () => {
+  beforeEach(() => {
+    silenceConsole()
+  })
+
+  afterEach(() => {
+    resetTestDoubles()
+  })
+
+  function stubWithDelayedStart(delayMs: number, url?: string): void {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        setTimeout(() => fireDownloadCreated(url), delayMs)
+        callback?.({ success: true })
+        return
+      }
+      callback?.({ success: true })
+    })
+  }
+
+  it('開始が5秒以内なら成功する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(4000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(5000)
+      expect((await pending).success).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('開始が5〜10秒でも成功する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(7000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(8000)
+      expect((await pending).success).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('開始が10秒を超えると失敗する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(11000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+      expect(response.success).toBe(false)
+      expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('別ファイルの開始では成功にしない', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(1000, 'https://example.com/unrelated.zip')
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+      expect(response.success).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('groupSteps のグルーピングロジック', () => {
   it('navigate-to-page/select-tab/display-data は単独の page-transition グループになる', () => {
     const executor = createExecutor()

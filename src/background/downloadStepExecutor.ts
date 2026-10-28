@@ -10,7 +10,7 @@ import type {
 } from '../types';
 import { isPageTransitionStep } from '../types';
 import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
-import { isRakutenDownloadSource } from './downloadedFile';
+import { isRakutenDownloadSource, DOWNLOAD_START_TIMEOUT_MS } from './downloadedFile';
 
 /** コンテンツスクリプト不在エラーの判定用 */
 const CONTENT_SCRIPT_MISSING_ERRORS = [
@@ -85,7 +85,7 @@ export class DownloadStepExecutor {
    * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
    * downloads APIが使えない場合のハング防止タイムアウト
    */
-  private readonly downloadStartTimeout = 5000;
+  private readonly downloadStartTimeout = DOWNLOAD_START_TIMEOUT_MS;
 
   /** 実クリック直前通知を待っているtabIdごとのコールバック集合 */
   private readonly downloadClickWaiters: Map<
