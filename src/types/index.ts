@@ -22,8 +22,10 @@ export type {
   ContentScriptResponse,
   BackgroundMessage,
   CsvDownloadStep,
+  CsvDownloadStepDefinition,
   CsvDownloadConfig,
   CsvSelectors,
+  CsvSelectorKey,
   DownloadResponse,
   DownloadStepTiming,
   LoginStateResponse,
@@ -43,7 +45,7 @@ export type {
   CsvDownloadWillStartMessage,
   CsvDownloadClickedMessage
 } from './extension';
-export { PAGE_TRANSITION_STEPS, isPageTransitionStep } from './extension';
+export { PAGE_TRANSITION_STEPS, isPageTransitionStep, CSV_DOWNLOAD_STEP_DEFINITIONS } from './extension';
 
 // 楽天証券関連の型
 export type {

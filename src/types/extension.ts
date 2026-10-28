@@ -21,20 +21,31 @@ export type CsvDownloadStep =
   | 'display-data'          // データ表示
   | 'download-csv';         // CSV保存
 
-/**
- * ページ遷移・ページ更新を伴い得るステップ
- *
- * 単独実行の対象。ステップ種の知識はここに寄せる。
- * 追加時はこの集合だけを変える。
- */
-export const PAGE_TRANSITION_STEPS: ReadonlySet<CsvDownloadStep> = new Set([
-  'navigate-to-page',
-  'select-tab',
-  'display-data'
-]);
+export type CsvSelectorKey = keyof CsvSelectors;
+
+export interface CsvDownloadStepDefinition {
+  readonly selectorKey: CsvSelectorKey;
+  readonly actionName: string;
+  readonly requireInteractable: boolean;
+  readonly isPageTransition: boolean;
+}
+
+export const CSV_DOWNLOAD_STEP_DEFINITIONS: Record<CsvDownloadStep, CsvDownloadStepDefinition> = {
+  'navigate-to-page': { selectorKey: 'menuLink', actionName: 'ページ遷移', requireInteractable: false, isPageTransition: true },
+  'select-tab': { selectorKey: 'tabSelector', actionName: 'タブ選択', requireInteractable: false, isPageTransition: true },
+  'select-period': { selectorKey: 'periodRadio', actionName: '期間選択', requireInteractable: false, isPageTransition: false },
+  'display-data': { selectorKey: 'displayButton', actionName: 'データ表示', requireInteractable: true, isPageTransition: true },
+  'download-csv': { selectorKey: 'csvButton', actionName: 'CSVダウンロード', requireInteractable: true, isPageTransition: false },
+};
+
+export const PAGE_TRANSITION_STEPS: ReadonlySet<CsvDownloadStep> = new Set(
+  (Object.keys(CSV_DOWNLOAD_STEP_DEFINITIONS) as CsvDownloadStep[]).filter(
+    (step) => CSV_DOWNLOAD_STEP_DEFINITIONS[step].isPageTransition
+  )
+);
 
 export function isPageTransitionStep(step: CsvDownloadStep): boolean {
-  return PAGE_TRANSITION_STEPS.has(step);
+  return CSV_DOWNLOAD_STEP_DEFINITIONS[step]?.isPageTransition ?? false;
 }
 
 /**
