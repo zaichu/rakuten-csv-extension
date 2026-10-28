@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ChromeMessage, CsvDownloadMessage, DownloadResponse } from '../types'
+import { isPageTransitionStep } from '../types'
 import { type StepTiming } from './downloadStepExecutor'
 import {
   TEST_TAB_ID as TAB_ID,
@@ -7,7 +8,6 @@ import {
   failWithChannelClosed,
   failWithContentScriptMissing,
   fireDownloadCreatedByUrl as fireDownloadCreated,
-  firePageTransition,
   fireTabReload,
   resetTestDoubles,
   sentSteps,
@@ -121,6 +121,66 @@ describe('次の要素の問い合わせ', () => {
     expect(chrome.tabs.reload).not.toHaveBeenCalled()
   })
 
+  it('問い合わせが返らなくても重ね打ちの同時滞留は上限以内で30秒で失敗する', async () => {
+    const executor = createExecutor()
+    const queriedAt: number[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        queriedAt.push(Date.now())
+        return
+      }
+      callback?.({ success: true })
+    })
+    const pending = executor.executeDownloadRequest(downloadRequest())
+
+    await vi.advanceTimersByTimeAsync(30000)
+    expect((await pending).success).toBe(false)
+    // 100ms間隔の送出を保つ
+    expect(queriedAt.length).toBe(300)
+    // 問い合わせ上限2sに対し100ms間隔のため同時滞留は20件以内
+    let concurrent = 0
+    for (const at of queriedAt) {
+      const inWindow = queriedAt.filter((other) => other >= at && other - at < 2000).length
+      concurrent = Math.max(concurrent, inWindow)
+    }
+    expect(concurrent).toBeLessThanOrEqual(20)
+  })
+
+  it('長く無応答が続いた後に要素が出ても100ms以内に進む', async () => {
+    const executor = createExecutor()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        if (message.payload?.step === 'download-csv') {
+          if (Date.now() >= 2500) {
+            callback?.({ success: true })
+          }
+          return
+        }
+        callback?.({ success: true })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    let settled = false
+    const pending = executor.executeDownloadRequest(downloadRequest()).then((response) => {
+      settled = true
+      return response
+    })
+    await vi.advanceTimersByTimeAsync(2600)
+    expect(settled).toBe(true)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+
   it('問い合わせの応答が150msかかっても期限内の成功を見逃さない', async () => {
     const executor = createExecutor()
     const executed: string[] = []
@@ -188,11 +248,9 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         downloadAttempts += 1
-      } else {
-        firePageTransition(tabId)
       }
       callback?.({ success: true })
     })
@@ -215,7 +273,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         downloadAttempts += 1
         fireDownloadCreated('https://example.com/unrelated.zip')
@@ -228,7 +286,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
         }
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -245,7 +302,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     vi.useFakeTimers()
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated('https://example.com/unrelated.zip')
@@ -253,7 +310,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
         setTimeout(() => fireDownloadCreated(url), 1000)
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -274,14 +330,13 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
   it('通信に失敗してもダウンロード開始を観測していれば成功になる', async () => {
     const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).includes('download-csv')) {
         executor.notifyDownloadClicked(TAB_ID, 0)
         fireDownloadCreated()
         failWithChannelClosed(callback)
         return
       }
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -295,19 +350,41 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     expect(vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => (call[1] as ChromeMessage).action === 'execute-csv-download-steps')).toHaveLength(2)
   })
 
+  it('送信で例外が起きてもダウンロード開始を観測していれば成功になる', async () => {
+    const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        throw new Error('送信に失敗しました')
+      }
+      callback?.({ success: true })
+    })
+
+    const response = await executor.executeDownloadRequest(downloadRequest())
+
+    expect(response).toEqual({
+      success: true,
+      message: 'すべてのCSVダウンロードが完了しました',
+    })
+    expect(downloadAttempts).toBe(1)
+  })
+
   it('通信に失敗しダウンロードも始まらなければ再クリックせず失敗を返す', async () => {
     vi.useFakeTimers()
     try {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           failWithChannelClosed(callback)
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -329,13 +406,12 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           callback?.(undefined as unknown as DownloadResponse)
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -357,7 +433,7 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
       const executor = createExecutor()
     executor.notifyDownloadClicked(TAB_ID, 0)
     let downloadAttempts = 0
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         if (sentSteps(message).includes('download-csv')) {
           downloadAttempts += 1
           executor.notifyDownloadClicked(TAB_ID, 0)
@@ -369,7 +445,6 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
           })
           return
         }
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -388,12 +463,11 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
 
   it('要素未検出の失敗では手順を送り直さない', async () => {
     const executor = createExecutor()
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       if (sentSteps(message).length === 0) {
         callback?.({ success: true })
         return
       }
-      firePageTransition(tabId)
       callback?.({
         success: false,
         error: '要素が見つかりませんでした: #missing',
@@ -421,7 +495,7 @@ describe('待ちの短縮とステップごとの計測', () => {
   /** display-data が画面内の更新だけで済む（ページ遷移しない）国内株式の応答を返す */
   function stubDomesticStockWithoutDisplayTransition(): string[][] {
     const sent: string[][] = []
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       const steps = sentSteps(message)
       if (steps.length === 0) {
         callback?.({ success: true })
@@ -430,8 +504,6 @@ describe('待ちの短縮とステップごとの計測', () => {
       sent.push([...steps])
       if (steps.includes('download-csv')) {
         fireDownloadCreated()
-      } else if (steps.includes('navigate-to-page')) {
-        firePageTransition(tabId)
       }
       callback?.({
         success: true,
@@ -524,7 +596,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
       let stepAttempts = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -548,7 +620,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -577,7 +648,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
       let stepAttempts = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -597,7 +668,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -624,7 +694,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     let connectionCheckCount = 0
       const reloadCount = { current: 0 }
 
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
 
         if (message.action === 'check-connection') {
@@ -641,7 +711,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
           return
         }
 
-        firePageTransition(tabId)
         callback?.({ success: true })
       })
 
@@ -667,7 +736,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     let connectionCheckCount = 0
     const reloadCount = { current: 0 }
 
-    setTabsSendMessageImpl((tabId, message, callback) => {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
       const steps = sentSteps(message)
 
       if (message.action === 'check-connection') {
@@ -684,7 +753,6 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
         return
       }
 
-      firePageTransition(tabId)
       callback?.({ success: true })
     })
 
@@ -697,26 +765,257 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     expect(reloadCount.current).toBe(0)
   })
 
-  it.each([false, true])('実行送信時にcontentが不在でも再読み込み・再クリックしない（開始通知: %s）', async (started) => {
+  it.each(['display-data', 'download-csv'])('要素検出後の%sの実行指示が未達なら、要素を待ち直して再送する', async (step) => {
+    vi.useFakeTimers()
     const executor = createExecutor()
-    let downloadAttempts = 0
+    const events: string[] = []
+    let attempts = 0
+    let elementChecks = 0
     setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === step) {
+        elementChecks += 1
+        events.push('check')
+        callback?.({ success: attempts === 0 || elementChecks >= 3 })
+        return
+      }
+      if (sentSteps(message).includes(step)) {
+        attempts += 1
+        events.push('execute')
+        if (attempts === 1) {
+          failWithContentScriptMissing(callback)
+          return
+        }
+      }
       if (sentSteps(message).includes('download-csv')) {
-        downloadAttempts += 1
-        if (started) fireDownloadCreated()
-        failWithContentScriptMissing(callback)
+        expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(domesticStockRequest())
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect((await pending).success).toBe(true)
+    expect(attempts).toBe(2)
+    expect(events).toEqual(['check', 'execute', 'check', 'check', 'execute'])
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    expect(chrome.tabs.reload).not.toHaveBeenCalled()
+  })
+
+  it.each(['display-data', 'download-csv'])('%sの実行指示でmessage port closedが返ったら再送しない', async (step) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let attempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (sentSteps(message).includes(step)) {
+        attempts += 1
+        const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
+        runtime.lastError = { message: 'The message port closed before a response was received.' }
+        callback?.({ success: false })
+        delete runtime.lastError
         return
       }
       callback?.({ success: true })
     })
 
-    const response = await executor.executeDownloadRequest(downloadRequest())
+    const pending = executor.executeDownloadRequest(domesticStockRequest())
+    await vi.advanceTimersByTimeAsync(30000)
+    const response = await pending
+
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('message port closed before a response was received')
+    expect(response.code).toBeUndefined()
+    expect(attempts).toBe(1)
+  })
+
+  it.each([
+    { retryDelay: 11000, communicationFailed: false, startDelay: 0, success: true },
+    { retryDelay: 11000, communicationFailed: false, startDelay: 7000, success: true },
+    { retryDelay: 11000, communicationFailed: false, startDelay: 11000, success: false },
+    { retryDelay: 11000, communicationFailed: true, startDelay: 0, success: true },
+    { retryDelay: 28000, communicationFailed: false, startDelay: 7000, success: true },
+  ])('未達後$retryDelay msで再送したCSVの開始を監視する（通信切れ: $communicationFailed、開始遅延: $startDelay）', async ({ retryDelay, communicationFailed, startDelay, success }) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    const startedAt = Date.now()
+    const listeners = new Set<(item: chrome.downloads.DownloadItem) => void>()
+    vi.spyOn(chrome.downloads.onCreated, 'addListener').mockImplementation(listener => {
+      listeners.add(listener)
+    })
+    vi.spyOn(chrome.downloads.onCreated, 'removeListener').mockImplementation(listener => {
+      listeners.delete(listener)
+    })
+    let attempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === 'download-csv') {
+        callback?.({ success: attempts === 0 || Date.now() - startedAt >= retryDelay })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        attempts += 1
+        if (attempts === 1) {
+          failWithContentScriptMissing(callback)
+          return
+        }
+        expect(listeners.size).toBe(1)
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        setTimeout(() => {
+          for (const listener of listeners) {
+            listener({ url: 'https://www.rakuten-sec.co.jp/download.csv' } as chrome.downloads.DownloadItem)
+          }
+        }, startDelay)
+        if (communicationFailed) {
+          failWithChannelClosed(callback)
+          return
+        }
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(10001)
+    expect(listeners.size).toBe(1)
+    await vi.advanceTimersByTimeAsync(retryDelay + 11000 - 10001)
+    const response = await pending
+
+    expect(response.success).toBe(success)
+    if (!success) expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+    expect(attempts).toBe(2)
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    expect(listeners.size).toBe(0)
+  })
+
+  it.each(['要素あり', '要素なし'])('実行指示が期限まで未達ならcontent-script-missingを返す（再確認: %s）', async (elementState) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let downloadAttempts = 0
+    let settled = false
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === 'download-csv') {
+        callback?.({ success: downloadAttempts === 0 || elementState === '要素あり' })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+        setTimeout(() => failWithContentScriptMissing(callback), 100)
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest()).then(response => {
+      settled = true
+      return response
+    })
+    await vi.advanceTimersByTimeAsync(29999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    const response = await pending
+
     expect(response.success).toBe(false)
     expect(response.code).toBe('content-script-missing')
-    expect(downloadAttempts).toBe(1)
+    expect(response.error).toContain('Receiving end does not exist')
+    expect(downloadAttempts).toBe(elementState === '要素あり' ? 300 : 1)
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    const attemptsAtDeadline = downloadAttempts
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(downloadAttempts).toBe(attemptsAtDeadline)
     expect(chrome.tabs.reload).not.toHaveBeenCalled()
   })
 
+})
+
+describe('ダウンロード開始待ちの上限', () => {
+  beforeEach(() => {
+    silenceConsole()
+  })
+
+  afterEach(() => {
+    resetTestDoubles()
+  })
+
+  function stubWithDelayedStart(delayMs: number, url?: string): void {
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        setTimeout(() => fireDownloadCreated(url), delayMs)
+        callback?.({ success: true })
+        return
+      }
+      callback?.({ success: true })
+    })
+  }
+
+  it('開始が5秒以内なら成功する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(4000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(5000)
+      expect((await pending).success).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('開始が5〜10秒でも成功する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(7000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(8000)
+      expect((await pending).success).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('開始が10秒を超えると失敗する', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(11000)
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+      expect(response.success).toBe(false)
+      expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('別ファイルの開始では成功にしない', async () => {
+    vi.useFakeTimers()
+    try {
+      const executor = createExecutor()
+      executor.notifyDownloadClicked(TAB_ID, 0)
+      stubWithDelayedStart(1000, 'https://example.com/unrelated.zip')
+
+      const pending = executor.executeDownloadRequest(downloadRequest())
+      await vi.advanceTimersByTimeAsync(30000)
+      const response = await pending
+      expect(response.success).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('groupSteps のグルーピングロジック', () => {
@@ -770,5 +1069,24 @@ describe('groupSteps のグルーピングロジック', () => {
 
   it('空のステップ列は空のグループ列になる', () => {
     expect(createExecutor().groupSteps([])).toEqual([])
+  })
+
+  it('全ステップで単独グルーピングと isPageTransitionStep が一致する', () => {
+    const steps = ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'] as const
+    for (const step of steps) {
+      if (isPageTransitionStep(step)) {
+        expect(createExecutor().groupSteps([step])).toEqual([{ kind: 'page-transition', step }])
+      } else {
+        expect(createExecutor().groupSteps([step])).toEqual([{ kind: 'batch', steps: [step] }])
+      }
+    }
+  })
+
+  it('遷移系は navigate-to-page と select-tab と display-data', () => {
+    expect(isPageTransitionStep('navigate-to-page')).toBe(true)
+    expect(isPageTransitionStep('select-tab')).toBe(true)
+    expect(isPageTransitionStep('display-data')).toBe(true)
+    expect(isPageTransitionStep('select-period')).toBe(false)
+    expect(isPageTransitionStep('download-csv')).toBe(false)
   })
 })

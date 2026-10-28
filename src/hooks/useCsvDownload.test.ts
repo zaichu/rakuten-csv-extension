@@ -50,4 +50,47 @@ describe('useCsvDownload', () => {
 
     expect(response).toMatchObject({ success: false })
   })
+
+  it('アクティブタブのログはクエリを含まない', async () => {
+    const fullUrl = 'https://member.rakuten-sec.co.jp/app/?BV_SessionID=abc123&eventType=init'
+    mockTabsQuery.mockResolvedValue([{ id: 1, url: fullUrl }])
+    mockSendMessage.mockResolvedValue({ success: true, message: '完了' })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      const { result } = renderHook(() => useCsvDownload())
+      await act(async () => {
+        await result.current.downloadCsv(new Set(['dividend'] as const))
+      })
+
+      const logged = logSpy.mock.calls.flat()
+      expect(logged.some((arg) => typeof arg === 'string' && arg.includes(fullUrl))).toBe(false)
+      expect(logged.some((arg) => typeof arg === 'string' && arg.includes('BV_SessionID'))).toBe(false)
+      const activeTabCall = logSpy.mock.calls.find((args) => args[0] === 'アクティブなタブ:')
+      expect(activeTabCall?.[1]).toEqual({ id: 1, url: 'https://member.rakuten-sec.co.jp/app/' })
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+
+  it('サイト検証のログはクエリを含まない', async () => {
+    const fullUrl = 'https://example.com/page?token=secret'
+    mockTabsQuery.mockResolvedValue([{ id: 1, url: fullUrl }])
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    try {
+      const { result } = renderHook(() => useCsvDownload())
+      let response
+      await act(async () => {
+        response = await result.current.downloadCsv(new Set(['dividend'] as const))
+      })
+
+      expect(response).toMatchObject({ success: false })
+      const logged = logSpy.mock.calls.flat()
+      expect(logged.some((arg) => typeof arg === 'string' && arg.includes(fullUrl))).toBe(false)
+      expect(logged.some((arg) => typeof arg === 'string' && arg.includes('token=secret'))).toBe(false)
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
 })

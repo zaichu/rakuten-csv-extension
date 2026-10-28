@@ -51,8 +51,8 @@ export function createTestExecutor(tabId: number = TEST_TAB_ID): DownloadStepExe
   })
 }
 
-/** ページ遷移完了イベントを発火させ、遷移待ちを解消する */
-export function firePageTransition(tabId: number): void {
+/** タブ再読み込みの完了イベントを発火させる */
+export function fireTabReload(tabId: number): void {
   const addListener = chrome.tabs.onUpdated.addListener as unknown as {
     mock: { calls: unknown[][] }
   }
@@ -96,9 +96,4 @@ export function failWithContentScriptMissing(callback?: (response: DownloadRespo
   }
   callback?.({ success: false, error: 'レスポンスがありません' })
   delete runtime.lastError
-}
-
-/** タブ再読み込みの完了イベントを発火させる */
-export function fireTabReload(tabId: number): void {
-  firePageTransition(tabId)
 }

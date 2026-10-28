@@ -18,10 +18,11 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep, createOneShotWait, withTimeout } from '../utils';
+import { RakutenUtils, sleep, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
+  DOWNLOAD_START_TIMEOUT_MS,
   readDownloadedCsv,
   waitForCompletedDownload,
   type DownloadCapture,
@@ -55,7 +56,7 @@ const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
 /** content script の入れ替わり中は応答もエラーも届かないことがあるため、要素の問い合わせと同じ上限で区切る */
 const DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS = 2_000;
-const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
+const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = DOWNLOAD_START_TIMEOUT_MS;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
 
@@ -465,32 +466,7 @@ export class ExternalRequestHandler {
    * タブの読み込み完了を待つ
    */
   private waitForTabLoad(tabId: number): Promise<void> {
-    return new Promise((resolve) => {
-      let cleanup: () => void = () => {};
-      const wait = createOneShotWait(this.tabLoadTimeoutMs, () => {
-        cleanup();
-        resolve();
-      });
-      const finish = (): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve();
-        });
-      };
-      const listener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          finish();
-        }
-      };
-      cleanup = () => {
-        chrome.tabs.onUpdated.removeListener(listener);
-      };
-
-      chrome.tabs.onUpdated.addListener(listener);
-    });
+    return waitForTabComplete(tabId, this.tabLoadTimeoutMs);
   }
 
   /**
@@ -501,19 +477,14 @@ export class ExternalRequestHandler {
    * 次の確認へ進む（上限自体はログイン待ちの全体期限とは別）。
    */
   private sendToContentScript(tabId: number, message: ChromeMessage): Promise<unknown> {
-    return withTimeout(
-      new Promise((resolve) => {
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-          if (chrome.runtime.lastError) {
-            resolve(undefined);
-            return;
-          }
-          resolve(response);
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      message,
       this.loginStateQueryTimeoutMs,
-      'コンテンツスクリプトの応答がありません'
-    ).catch(() => undefined);
+      'コンテンツスクリプトの応答がありません',
+      (response, lastError) => (lastError ? undefined : response),
+      undefined
+    );
   }
 
   private isAllowedOrigin(origin: string): boolean {

@@ -9,8 +9,8 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { isPageTransitionStep } from '../types';
-import { RakutenUtils, withTimeout, sleep, createOneShotWait } from '../utils';
-import { isRakutenDownloadSource } from './downloadedFile';
+import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
+import { isRakutenDownloadSource, DOWNLOAD_START_TIMEOUT_MS } from './downloadedFile';
 
 /** コンテンツスクリプト不在エラーの判定用 */
 const CONTENT_SCRIPT_MISSING_ERRORS = [
@@ -71,11 +71,20 @@ interface StepExecutionOutcome {
   readonly timing?: StepExecutionTiming;
 }
 
+interface DownloadStartWait {
+  readonly promise: Promise<boolean>;
+  readonly resetTimeout: (timeoutMs: number) => void;
+  readonly cancel: () => void;
+}
+
 export class DownloadStepExecutor {
   private readonly stepTimeout = 30000;
   private readonly elementPollInterval = 100;
   // 問い合わせの送出間隔と1件の応答期限を分ける。配送遅延で150msかかる正常応答を捨てないため
   private readonly elementQueryTimeout = 2000;
+  // 同時滞留する要素問い合わせ数の上限。送出間隔100ms・1件の上限2sのため定常で20件滞留する。
+  // これより小さくすると未応答時に送出が詰まり、要素出現後の反応が100ms以内に収まらなくなる
+  private readonly maxInFlightStepQueries = Math.ceil(this.elementQueryTimeout / this.elementPollInterval);
   // 入れ替わり中の無応答で止まらないよう、疎通確認にも要素の問い合わせと同じ上限を付ける
   private readonly connectionQueryTimeout = 2000;
   // 表示更新中も旧CSVボタンが残るため、更新前の結果を保存しないよう表示直後に待つ
@@ -85,7 +94,7 @@ export class DownloadStepExecutor {
    * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
    * downloads APIが使えない場合のハング防止タイムアウト
    */
-  private readonly downloadStartTimeout = 5000;
+  private readonly downloadStartTimeout = DOWNLOAD_START_TIMEOUT_MS;
 
   /** 実クリック直前通知を待っているtabIdごとのコールバック集合 */
   private readonly downloadClickWaiters: Map<
@@ -277,71 +286,117 @@ export class DownloadStepExecutor {
   ): Promise<StepExecutionOutcome> {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
-    if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
-      return {
-        response: {
-          success: false,
-          error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
-          step: steps[0]
-        }
-      };
-    }
-
-    const downloadStart = waitForDownloadStart
-      ? this.waitForDownloadStart(this.downloadStartTimeout)
-      : undefined;
+    let undeliveredResult: StepExecutionResponse | undefined;
+    let downloadStartWait: DownloadStartWait | undefined;
     try {
-      const sendStartedAt = Date.now();
-      const result = await this.executeSteps(
-        tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
-      );
-      const actionCompletedAt = Date.now();
-      if (result.success) {
-        const clickResult = waitForDownloadStart && steps.includes('download-csv')
-          ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
-          : undefined;
-        if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
+      while (true) {
+        if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
           return {
-            response: result,
-            downloadStart,
-            timing: {
-              startedAt,
-              sendStartedAt,
-              actionCompletedAt,
-              receivedAt: result.receivedAt,
-              contentTimings: result.contentTimings,
-              clickStartedAt: clickResult?.clickedAt,
-              clickDurationMs: clickResult?.durationMs,
-              downloadStartedAt: downloadStart ? Date.now() : undefined
+            response: undeliveredResult ?? {
+              success: false,
+              error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
+              step: steps[0]
             }
           };
         }
-        return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
-      }
 
-      if (result.code === 'content-script-missing') {
-        return { response: result };
-      }
+        downloadStartWait?.resetTimeout(this.downloadStartTimeout);
+        downloadStartWait ??= waitForDownloadStart
+          ? this.waitForDownloadStart(this.downloadStartTimeout)
+          : undefined;
+        const downloadStart = downloadStartWait?.promise;
+        try {
+          const sendStartedAt = Date.now();
+          const result = await this.executeSteps(
+            tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
+          );
+          const actionCompletedAt = Date.now();
+          if (result.success) {
+            return await this.completeSuccessfulResult(
+              tabId, steps, waitForDownloadStart, downloadStart, result,
+              startedAt, sendStartedAt, actionCompletedAt
+            );
+          }
 
-      // クリック後の通信切れでも開始を観測済みなら、再クリックせず成功とする。
-      // content が確定させた失敗は成功にしない。
-      if (result.communicationFailed && await this.isDownloadStarted(downloadStart)) {
-        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
-      }
-      return { response: result };
-    } catch (error) {
-      if (await this.isDownloadStarted(downloadStart)) {
-        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
-      }
-      return {
-        response: {
-          success: false,
-          error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
+          if (result.code === 'content-script-missing') {
+            undeliveredResult = result;
+            downloadStartWait?.resetTimeout(Math.max(0, deadline - Date.now()));
+            continue;
+          }
+
+          if (result.communicationFailed) {
+            const started = await this.resolveStartedFallback(downloadStart);
+            if (started) {
+              return started;
+            }
+          }
+          return { response: result };
+        } catch (error) {
+          const started = await this.resolveStartedFallback(downloadStart);
+          if (started) {
+            return started;
+          }
+          return {
+            response: {
+              success: false,
+              error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
+            }
+          };
         }
-      };
+      }
+    } finally {
+      downloadStartWait?.cancel();
     }
   }
 
+  private async resolveStartedFallback(
+    downloadStart: Promise<boolean> | undefined
+  ): Promise<StepExecutionOutcome | undefined> {
+    if (await this.isDownloadStarted(downloadStart)) {
+      return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+    }
+    return undefined;
+  }
+
+  private async completeSuccessfulResult(
+    tabId: number,
+    steps: readonly CsvDownloadStep[],
+    waitForDownloadStart: boolean,
+    downloadStart: Promise<boolean> | undefined,
+    result: StepExecutionResponse,
+    startedAt: number,
+    sendStartedAt: number,
+    actionCompletedAt: number
+  ): Promise<StepExecutionOutcome> {
+    const clickResult = waitForDownloadStart && steps.includes('download-csv')
+      ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
+      : undefined;
+    if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
+      return {
+        response: result,
+        downloadStart,
+        timing: {
+          startedAt,
+          sendStartedAt,
+          actionCompletedAt,
+          receivedAt: result.receivedAt,
+          contentTimings: result.contentTimings,
+          clickStartedAt: clickResult?.clickedAt,
+          clickDurationMs: clickResult?.durationMs,
+          downloadStartedAt: downloadStart ? Date.now() : undefined
+        }
+      };
+    }
+    return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
+  }
+
+  /**
+   * 次のステップの要素が出るまで問い合わせを重ねる
+   *
+   * 100msごとに送り、1件は2sで区切るため最大20件が同時に滞留する。
+   * 上限に達したらいずれか1件の確定を待ってから次を送り、上限を超えない。
+   * 要素検出は次の区切り(100ms以内)で返し、期限を過ぎたら失敗にする。
+   */
   private async waitForStepElement(
     tabId: number,
     step: CsvDownloadStep,
@@ -352,17 +407,30 @@ export class DownloadStepExecutor {
       action: 'check-csv-download-step',
       payload: { step, selectors }
     };
+    const inFlight = new Set<Promise<boolean>>();
     let found = false;
-    // 次の問い合わせを100msで送りつつ、期限内の遅い成功も拾うため問い合わせを重ねる
-    while (Date.now() < deadline && !found) {
-      const iterStartedAt = Date.now();
+    const sendQuery = (): Promise<boolean> => {
       const query = this.queryStepElement(tabId, instruction, deadline);
-      void query.then(ok => {
+      inFlight.add(query);
+      void query.then((ok) => {
         if (ok && Date.now() < deadline) {
           found = true;
         }
+      }).finally(() => {
+        inFlight.delete(query);
       });
-      const raced = await Promise.race([query, sleep(this.elementPollInterval)]);
+      return query;
+    };
+    while (Date.now() < deadline && !found) {
+      if (inFlight.size >= this.maxInFlightStepQueries) {
+        await Promise.race(inFlight);
+        if (found) {
+          return Date.now() < deadline;
+        }
+        continue;
+      }
+      const iterStartedAt = Date.now();
+      const raced = await Promise.race([sendQuery(), sleep(this.elementPollInterval)]);
       if (found || raced === true) {
         return Date.now() < deadline;
       }
@@ -390,15 +458,15 @@ export class DownloadStepExecutor {
     if (remaining <= 0) {
       return Promise.resolve(false);
     }
-    return withTimeout(
-      new Promise<boolean>(resolve => {
-        chrome.tabs.sendMessage(tabId, instruction, (response: DownloadResponse | undefined) => {
-          resolve(!chrome.runtime.lastError && response?.success === true);
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      instruction,
       Math.min(this.elementQueryTimeout, remaining),
-      '要素の問い合わせに応答がありません'
-    ).catch(() => false);
+      '要素の問い合わせに応答がありません',
+      (response, lastError) =>
+        !lastError && (response as DownloadResponse | undefined)?.success === true,
+      false
+    );
   }
 
   /**
@@ -520,34 +588,9 @@ export class DownloadStepExecutor {
    * status: 'complete' になるまで待機する。
    */
   private async reloadTabAndWait(tabId: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let cleanup: () => void = () => {};
-      const wait = createOneShotWait(30000, () => {
-        cleanup();
-        reject(new Error('タブの再読み込みがタイムアウトしました'));
-      });
-      const finish = (): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve();
-        });
-      };
-      const onUpdatedListener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          finish();
-        }
-      };
-      cleanup = () => {
-        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-      };
-
-      chrome.tabs.onUpdated.addListener(onUpdatedListener);
-
-      chrome.tabs.reload(tabId);
-    });
+    const pending = waitForTabComplete(tabId, 30000, new Error('タブの再読み込みがタイムアウトしました'));
+    chrome.tabs.reload(tabId);
+    return pending;
   }
 
   /**
@@ -558,25 +601,23 @@ export class DownloadStepExecutor {
    * エラーが「Receiving end does not exist」なら false を返す。
    */
   private async checkContentScriptConnection(tabId: number): Promise<boolean> {
-    return withTimeout(
-      new Promise<boolean>((resolve) => {
-        chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
-          if (chrome.runtime.lastError) {
-            const errorMessage = chrome.runtime.lastError.message ?? '';
-            if (isContentScriptMissingError(errorMessage)) {
-              resolve(false);
-              return;
-            }
-            // その他のエラーは「接続できたが失敗した」とみなす
-            resolve(true);
-          } else {
-            resolve(true);
-          }
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      { action: 'check-connection' },
       this.connectionQueryTimeout,
-      'コンテンツスクリプトの応答がありません'
-    ).catch(() => false);
+      'コンテンツスクリプトの応答がありません',
+      (_response, lastError) => {
+        if (lastError) {
+          const errorMessage = lastError.message ?? '';
+          if (isContentScriptMissingError(errorMessage)) {
+            return false;
+          }
+          return true;
+        }
+        return true;
+      },
+      false
+    );
   }
 
   /**
@@ -612,24 +653,35 @@ export class DownloadStepExecutor {
    * 事象を防ぐ。開始を観測できたら true、downloads APIが使えない場合や
    * イベントを取りこぼした場合は timeoutMs 経過後に false を返す（ハング防止）。
    */
-  private waitForDownloadStart(timeoutMs: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
+  private waitForDownloadStart(timeoutMs: number): DownloadStartWait {
+    let resetTimeout: DownloadStartWait['resetTimeout'] = () => {};
+    let cancel: DownloadStartWait['cancel'] = () => {};
+    const promise = new Promise<boolean>((resolve) => {
       if (!chrome.downloads?.onCreated) {
         resolve(false);
         return;
       }
 
+      let settled = false;
       let cleanup: () => void = () => {};
-      const wait = createOneShotWait(timeoutMs, () => {
-        cleanup();
-        resolve(false);
-      });
+      let wait = createOneShotWait(timeoutMs, () => finish(false));
       const finish = (started: boolean): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve(started);
-        });
+        if (settled) {
+          return;
+        }
+        settled = true;
+        wait.cancel();
+        cleanup();
+        resolve(started);
       };
+      resetTimeout = (timeoutMs) => {
+        if (settled) {
+          return;
+        }
+        wait.cancel();
+        wait = createOneShotWait(timeoutMs, () => finish(false));
+      };
+      cancel = () => finish(false);
       const listener = (item: chrome.downloads.DownloadItem): void => {
         // blob: は内側のオリジンまで見る判定を使い、別タブの無関係な
         // blob/data ダウンロードを開始済みと誤認しない
@@ -644,6 +696,7 @@ export class DownloadStepExecutor {
 
       chrome.downloads.onCreated.addListener(listener);
     });
+    return { promise, resetTimeout, cancel };
   }
 
   /**

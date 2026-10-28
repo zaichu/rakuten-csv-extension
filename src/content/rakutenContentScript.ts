@@ -9,8 +9,10 @@ import type {
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
+  CsvDownloadStepDefinition,
   CsvSelectors
 } from '../types';
+import { CSV_DOWNLOAD_STEP_DEFINITIONS } from '../types';
 import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
 
 /**
@@ -28,6 +30,7 @@ class RakutenCsvExtension {
   private loginScreenDetected = false;
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
+  private static readonly passkeyLoginButtonSelector = 'button#login-passkey';
 
   private constructor() {
     this.initialize();
@@ -123,14 +126,9 @@ class RakutenCsvExtension {
 
   private checkCsvDownloadStep(message: CheckCsvDownloadStepInstruction): DownloadResponse {
     const { step, selectors } = message.payload;
-    const selector = {
-      'navigate-to-page': selectors.menuLink,
-      'select-tab': selectors.tabSelector,
-      'select-period': selectors.periodRadio,
-      'display-data': selectors.displayButton,
-      'download-csv': selectors.csvButton
-    }[step];
-    const requireInteractable = step === 'display-data' || step === 'download-csv';
+    const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
+    const selector = definition ? selectors[definition.selectorKey] : undefined;
+    const requireInteractable = definition?.requireInteractable ?? false;
     const found = Boolean(selector && selector.split(',').some(candidate => {
       const element = document.querySelector(candidate.trim());
       return element && (!requireInteractable || DomUtils.isElementInteractable(element));
@@ -146,17 +144,25 @@ class RakutenCsvExtension {
   private handleCheckLoginState(): LoginStateResponse {
     const loggedIn = !this.isLoginScreen();
 
-    // 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
-    // 読み込み直し前のページで押すとクリックが無駄になる。
-    // 同じページで2回検出してから押すことで、開き直した側だけに絞る
     if (!loggedIn) {
-      if (this.loginScreenDetected) {
-        this.clickPasskeyLoginButtonOnce();
-      }
-      this.loginScreenDetected = true;
+      this.clickPasskeyOnSecondDetection();
     }
 
     return { success: true, loggedIn };
+  }
+
+  /**
+   * 2回目の検出でパスキーボタンを押す
+   *
+   * 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
+   * 読み込み直し前のページで押すとクリックが無駄になる。
+   * 同じページで2回検出してから押すことで、開き直した側だけに絞る
+   */
+  private clickPasskeyOnSecondDetection(): void {
+    if (this.loginScreenDetected) {
+      this.clickPasskeyLoginButtonOnce();
+    }
+    this.loginScreenDetected = true;
   }
 
   /**
@@ -170,13 +176,15 @@ class RakutenCsvExtension {
       return;
     }
 
-    const button = document.querySelector('button#login-passkey');
+    const selector = RakutenCsvExtension.passkeyLoginButtonSelector;
+    const button = document.querySelector(selector);
     if (!button) {
+      console.log(`パスキーログインボタンが見つかりません: ${selector}`);
       return;
     }
 
     this.passkeyLoginClicked = true;
-    this.clickElementSafely(button, 'パスキーログイン');
+    this.clickElementSafely(button, 'パスキーログイン', selector);
   }
 
   private isLoginScreen(): boolean {
@@ -261,33 +269,28 @@ class RakutenCsvExtension {
     selectors: CsvSelectors,
     captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
-    switch (step) {
-      case 'navigate-to-page':
-        return this.runClickStep(selectors.menuLink, 'ページ遷移');
-
-      case 'select-tab':
-        return this.runClickStep(selectors.tabSelector, 'タブ選択');
-
-      case 'select-period':
-        return this.runClickStep(selectors.periodRadio, '期間選択');
-
-      case 'display-data':
-        return this.runClickStep(selectors.displayButton, 'データ表示', { requireInteractable: true });
-
-      case 'download-csv':
-        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
-          requireInteractable: true,
-          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
-          clickAfterResponse: true
-        });
-
-      default:
-        return { 
-          success: false, 
-          error: `未対応のダウンロードステップです: ${step}`,
-          step
-        };
+    const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
+    if (!definition) {
+      return {
+        success: false,
+        error: `未対応のダウンロードステップです: ${step}`,
+        step
+      };
     }
+
+    if (step === 'download-csv') {
+      return this.runClickStep(selectors[definition.selectorKey], definition.actionName, {
+        requireInteractable: definition.requireInteractable,
+        beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
+        clickAfterResponse: true
+      });
+    }
+
+    return this.runClickStep(
+      selectors[definition.selectorKey],
+      definition.actionName,
+      definition.requireInteractable ? { requireInteractable: true } : undefined
+    );
   }
 
   /**
@@ -339,7 +342,7 @@ class RakutenCsvExtension {
         } catch {
           // 通知できなくてもクリックは続行する
         }
-        const result = this.clickElementSafely(element, actionName);
+        const result = this.clickElementSafely(element, actionName, selector);
         if (!result.success) {
           console.warn(result.error);
         }
@@ -353,7 +356,7 @@ class RakutenCsvExtension {
       };
     }
 
-    return this.clickElementSafely(element, actionName);
+    return this.clickElementSafely(element, actionName, selector);
   }
 
   /**
@@ -423,7 +426,7 @@ class RakutenCsvExtension {
   /**
    * 要素を安全にクリック
    */
-  private clickElementSafely(element: Element | null, actionName: string): DownloadResponse {
+  private clickElementSafely(element: Element | null, actionName: string, selector?: string): DownloadResponse {
     if (!element) {
       return { 
         success: false, 
@@ -431,7 +434,7 @@ class RakutenCsvExtension {
       };
     }
 
-    console.log(`${actionName}を実行中...`, element);
+    console.log(`${actionName}を実行中: ${selector ?? actionName}`);
 
     if (DomUtils.safeClick(element)) {
       return { 

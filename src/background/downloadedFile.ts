@@ -10,6 +10,13 @@ import { decodeCsvBytes } from '../utils';
 /** 読み込むCSVの最大サイズ(20MB) */
 export const MAX_CSV_FILE_SIZE = 20 * 1024 * 1024;
 
+/**
+ * ダウンロード開始を待つ上限(10秒)
+ *
+ * Executor側の開始確認と外部取得の捕捉でそろえ、5〜10秒の開始を誤失敗にしない
+ */
+export const DOWNLOAD_START_TIMEOUT_MS = 10_000;
+
 /** ファイルへのアクセスが許可されていないときの失敗コード */
 export const FILE_ACCESS_DISABLED_CODE = 'file-access-disabled';
 
