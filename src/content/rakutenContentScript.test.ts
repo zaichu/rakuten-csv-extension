@@ -98,6 +98,50 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
+  describe('確認系と実行系のセレクター欄の一致', () => {
+    const stepToSelectorKey = {
+      'navigate-to-page': 'menuLink',
+      'select-tab': 'tabSelector',
+      'select-period': 'periodRadio',
+      'display-data': 'displayButton',
+      'download-csv': 'csvButton',
+    } as const satisfies Record<CsvDownloadStep, string>
+
+    function addTarget() {
+      const el = document.createElement('button')
+      el.id = 'target'
+      document.body.appendChild(el)
+      makeInteractable(el)
+    }
+
+    it.each(Object.entries(stepToSelectorKey))('%s は対応欄だけで確認も実行も成功する', async (step, key) => {
+      addTarget()
+      const check = await sendMessage({
+        action: 'check-csv-download-step',
+        payload: { step: step as CsvDownloadStep, selectors: { [key]: '#target' } },
+      })
+      expect(check.success).toBe(true)
+      const exec = await singleStep(step as CsvDownloadStep, { [key]: '#target' })
+      expect(exec.success).toBe(true)
+    })
+
+    it.each(Object.entries(stepToSelectorKey))('%s は対応欄が無いと確認も実行も失敗する', async (step, key) => {
+      addTarget()
+      const others = Object.fromEntries(
+        Object.entries(stepToSelectorKey)
+          .filter(([, k]) => k !== key)
+          .map(([, k]) => [k, '#target'])
+      )
+      const check = await sendMessage({
+        action: 'check-csv-download-step',
+        payload: { step: step as CsvDownloadStep, selectors: others },
+      })
+      expect(check.success).toBe(false)
+      const exec = await singleStep(step as CsvDownloadStep, others)
+      expect(exec.success).toBe(false)
+    })
+  })
+
   describe('セレクター未指定時のエラーメッセージ', () => {
     it('navigate-to-page', async () => {
       const res = await singleStep('navigate-to-page', {})

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ChromeMessage, CsvDownloadMessage, DownloadResponse } from '../types'
+import { isPageTransitionStep } from '../types'
 import { type StepTiming } from './downloadStepExecutor'
 import {
   TEST_TAB_ID as TAB_ID,
@@ -865,5 +866,24 @@ describe('groupSteps のグルーピングロジック', () => {
 
   it('空のステップ列は空のグループ列になる', () => {
     expect(createExecutor().groupSteps([])).toEqual([])
+  })
+
+  it('全ステップで単独グルーピングと isPageTransitionStep が一致する', () => {
+    const steps = ['navigate-to-page', 'select-tab', 'select-period', 'display-data', 'download-csv'] as const
+    for (const step of steps) {
+      if (isPageTransitionStep(step)) {
+        expect(createExecutor().groupSteps([step])).toEqual([{ kind: 'page-transition', step }])
+      } else {
+        expect(createExecutor().groupSteps([step])).toEqual([{ kind: 'batch', steps: [step] }])
+      }
+    }
+  })
+
+  it('遷移系は navigate-to-page と select-tab と display-data', () => {
+    expect(isPageTransitionStep('navigate-to-page')).toBe(true)
+    expect(isPageTransitionStep('select-tab')).toBe(true)
+    expect(isPageTransitionStep('display-data')).toBe(true)
+    expect(isPageTransitionStep('select-period')).toBe(false)
+    expect(isPageTransitionStep('download-csv')).toBe(false)
   })
 })
