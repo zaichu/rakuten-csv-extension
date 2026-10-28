@@ -30,6 +30,7 @@ class RakutenCsvExtension {
   private loginScreenDetected = false;
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
+  private static readonly passkeyLoginButtonSelector = 'button#login-passkey';
 
   private constructor() {
     this.initialize();
@@ -143,17 +144,25 @@ class RakutenCsvExtension {
   private handleCheckLoginState(): LoginStateResponse {
     const loggedIn = !this.isLoginScreen();
 
-    // 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
-    // 読み込み直し前のページで押すとクリックが無駄になる。
-    // 同じページで2回検出してから押すことで、開き直した側だけに絞る
     if (!loggedIn) {
-      if (this.loginScreenDetected) {
-        this.clickPasskeyLoginButtonOnce();
-      }
-      this.loginScreenDetected = true;
+      this.clickPasskeyOnSecondDetection();
     }
 
     return { success: true, loggedIn };
+  }
+
+  /**
+   * 2回目の検出でパスキーボタンを押す
+   *
+   * 取得フローのログイン待ちは最初の検出直後にページを開き直すため、
+   * 読み込み直し前のページで押すとクリックが無駄になる。
+   * 同じページで2回検出してから押すことで、開き直した側だけに絞る
+   */
+  private clickPasskeyOnSecondDetection(): void {
+    if (this.loginScreenDetected) {
+      this.clickPasskeyLoginButtonOnce();
+    }
+    this.loginScreenDetected = true;
   }
 
   /**
@@ -167,13 +176,15 @@ class RakutenCsvExtension {
       return;
     }
 
-    const button = document.querySelector('button#login-passkey');
+    const selector = RakutenCsvExtension.passkeyLoginButtonSelector;
+    const button = document.querySelector(selector);
     if (!button) {
+      console.log(`パスキーログインボタンが見つかりません: ${selector}`);
       return;
     }
 
     this.passkeyLoginClicked = true;
-    this.clickElementSafely(button, 'パスキーログイン', 'button#login-passkey');
+    this.clickElementSafely(button, 'パスキーログイン', selector);
   }
 
   private isLoginScreen(): boolean {
