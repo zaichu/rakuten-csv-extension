@@ -18,7 +18,7 @@ import type {
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
-import { RakutenUtils, sleep, withTimeout, waitForTabComplete } from '../utils';
+import { RakutenUtils, sleep, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
 import {
   createDownloadCapture,
   createDownloadedFileReader,
@@ -476,19 +476,14 @@ export class ExternalRequestHandler {
    * 次の確認へ進む（上限自体はログイン待ちの全体期限とは別）。
    */
   private sendToContentScript(tabId: number, message: ChromeMessage): Promise<unknown> {
-    return withTimeout(
-      new Promise((resolve) => {
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-          if (chrome.runtime.lastError) {
-            resolve(undefined);
-            return;
-          }
-          resolve(response);
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      message,
       this.loginStateQueryTimeoutMs,
-      'コンテンツスクリプトの応答がありません'
-    ).catch(() => undefined);
+      'コンテンツスクリプトの応答がありません',
+      (response, lastError) => (lastError ? undefined : response),
+      undefined
+    );
   }
 
   private isAllowedOrigin(origin: string): boolean {
