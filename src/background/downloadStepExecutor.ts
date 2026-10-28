@@ -69,6 +69,13 @@ interface StepExecutionOutcome {
   readonly response: DownloadResponse;
   readonly downloadStart?: Promise<boolean>;
   readonly timing?: StepExecutionTiming;
+  /**
+   * 実行指示を送る直前の要素問い合わせで見つけたページのID
+   *
+   * 遷移系ステップの実行応答がページ破棄で届かない場合に、
+   * 直後の問い合わせで古いページを見分けるために使う
+   */
+  readonly queriedDocumentId?: string;
 }
 
 interface DownloadStartWait {
@@ -82,6 +89,9 @@ export class DownloadStepExecutor {
   private readonly elementPollInterval = 100;
   // 問い合わせの送出間隔と1件の応答期限を分ける。配送遅延で150msかかる正常応答を捨てないため
   private readonly elementQueryTimeout = 2000;
+  // 遷移を起こすステップの直後は、同じdocument IDの応答を古いページとして無視する。
+  // 同一documentの更新では新しいIDが来ないため、上限で古いIDも受け付けて進む
+  private readonly transitionDocumentTimeout = 3000;
   // 同時滞留する要素問い合わせ数の上限。送出間隔100ms・1件の上限2sのため定常で20件滞留する。
   // これより小さくすると未応答時に送出が詰まり、要素出現後の反応が100ms以内に収まらなくなる
   private readonly maxInFlightStepQueries = Math.ceil(this.elementQueryTimeout / this.elementPollInterval);
@@ -240,6 +250,7 @@ export class DownloadStepExecutor {
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
     const groups = this.groupSteps(steps);
+    let previousDocumentId: string | undefined;
 
     for (const group of groups) {
       const steps: readonly CsvDownloadStep[] =
@@ -250,7 +261,8 @@ export class DownloadStepExecutor {
         steps,
         selectors,
         captureDownloadStart,
-        group.kind === 'batch' && group.steps.includes('download-csv')
+        group.kind === 'batch' && group.steps.includes('download-csv'),
+        previousDocumentId
       );
       const result = outcome.response;
 
@@ -262,6 +274,10 @@ export class DownloadStepExecutor {
           code: result.code
         };
       }
+
+      previousDocumentId = group.kind === 'page-transition'
+        ? result.documentId ?? outcome.queriedDocumentId
+        : undefined;
 
       this.reportStepTiming(reportStep, steps, outcome);
       await outcome.downloadStart;
@@ -282,7 +298,8 @@ export class DownloadStepExecutor {
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
     captureDownloadStart: boolean | undefined,
-    waitForDownloadStart: boolean
+    waitForDownloadStart: boolean,
+    previousDocumentId?: string
   ): Promise<StepExecutionOutcome> {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
@@ -290,7 +307,8 @@ export class DownloadStepExecutor {
     let downloadStartWait: DownloadStartWait | undefined;
     try {
       while (true) {
-        if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
+        const waited = await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId);
+        if (!waited.found) {
           return {
             response: undeliveredResult ?? {
               success: false,
@@ -299,6 +317,7 @@ export class DownloadStepExecutor {
             }
           };
         }
+        const queriedDocumentId = waited.documentId;
 
         downloadStartWait?.resetTimeout(this.downloadStartTimeout);
         downloadStartWait ??= waitForDownloadStart
@@ -312,10 +331,11 @@ export class DownloadStepExecutor {
           );
           const actionCompletedAt = Date.now();
           if (result.success) {
-            return await this.completeSuccessfulResult(
+            const completed = await this.completeSuccessfulResult(
               tabId, steps, waitForDownloadStart, downloadStart, result,
               startedAt, sendStartedAt, actionCompletedAt
             );
+            return { ...completed, queriedDocumentId };
           }
 
           if (result.code === 'content-script-missing') {
@@ -327,14 +347,14 @@ export class DownloadStepExecutor {
           if (result.communicationFailed) {
             const started = await this.resolveStartedFallback(downloadStart);
             if (started) {
-              return started;
+              return { ...started, queriedDocumentId };
             }
           }
           return { response: result };
         } catch (error) {
           const started = await this.resolveStartedFallback(downloadStart);
           if (started) {
-            return started;
+            return { ...started, queriedDocumentId };
           }
           return {
             response: {
@@ -401,20 +421,33 @@ export class DownloadStepExecutor {
     tabId: number,
     step: CsvDownloadStep,
     selectors: CsvDownloadConfig['selectors'],
-    deadline: number
-  ): Promise<boolean> {
+    deadline: number,
+    previousDocumentId?: string
+  ): Promise<{ readonly found: boolean; readonly documentId?: string }> {
     const instruction: CheckCsvDownloadStepInstruction = {
       action: 'check-csv-download-step',
       payload: { step, selectors }
     };
-    const inFlight = new Set<Promise<boolean>>();
+    const waitStartedAt = Date.now();
+    const inFlight = new Set<Promise<{ readonly found: boolean; readonly documentId?: string }>>();
     let found = false;
-    const sendQuery = (): Promise<boolean> => {
+    let foundDocumentId: string | undefined;
+    const isFresh = (documentId: string | undefined): boolean => {
+      if (previousDocumentId === undefined || documentId === undefined) {
+        return true;
+      }
+      if (documentId !== previousDocumentId) {
+        return true;
+      }
+      return Date.now() - waitStartedAt >= this.transitionDocumentTimeout;
+    };
+    const sendQuery = (): Promise<{ readonly found: boolean; readonly documentId?: string }> => {
       const query = this.queryStepElement(tabId, instruction, deadline);
       inFlight.add(query);
-      void query.then((ok) => {
-        if (ok && Date.now() < deadline) {
+      void query.then((result) => {
+        if (result.found && isFresh(result.documentId) && Date.now() < deadline) {
           found = true;
+          foundDocumentId = result.documentId;
         }
       }).finally(() => {
         inFlight.delete(query);
@@ -425,14 +458,17 @@ export class DownloadStepExecutor {
       if (inFlight.size >= this.maxInFlightStepQueries) {
         await Promise.race(inFlight);
         if (found) {
-          return Date.now() < deadline;
+          return { found: Date.now() < deadline, documentId: foundDocumentId };
         }
         continue;
       }
       const iterStartedAt = Date.now();
       const raced = await Promise.race([sendQuery(), sleep(this.elementPollInterval)]);
-      if (found || raced === true) {
-        return Date.now() < deadline;
+      if (typeof raced === 'object' && raced.found && isFresh(raced.documentId)) {
+        return { found: Date.now() < deadline, documentId: raced.documentId };
+      }
+      if (found) {
+        return { found: Date.now() < deadline, documentId: foundDocumentId };
       }
       const elapsed = Date.now() - iterStartedAt;
       const remain = Math.min(
@@ -443,29 +479,34 @@ export class DownloadStepExecutor {
         await sleep(remain);
       }
       if (found && Date.now() < deadline) {
-        return true;
+        return { found: true, documentId: foundDocumentId };
       }
     }
-    return false;
+    return { found: false };
   }
 
   private queryStepElement(
     tabId: number,
     instruction: CheckCsvDownloadStepInstruction,
     deadline: number
-  ): Promise<boolean> {
+  ): Promise<{ readonly found: boolean; readonly documentId?: string }> {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      return Promise.resolve(false);
+      return Promise.resolve({ found: false });
     }
     return sendTabMessageWithTimeout(
       tabId,
       instruction,
       Math.min(this.elementQueryTimeout, remaining),
       '要素の問い合わせに応答がありません',
-      (response, lastError) =>
-        !lastError && (response as DownloadResponse | undefined)?.success === true,
-      false
+      (response, lastError) => {
+        const typed = response as DownloadResponse | undefined;
+        if (lastError || typed?.success !== true) {
+          return { found: false as const };
+        }
+        return { found: true as const, documentId: typed?.documentId };
+      },
+      { found: false as const }
     );
   }
 
