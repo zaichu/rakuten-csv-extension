@@ -831,6 +831,63 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     expect(attempts).toBe(1)
   })
 
+  it.each([
+    { communicationFailed: false, startDelay: 0, success: true },
+    { communicationFailed: false, startDelay: 7000, success: true },
+    { communicationFailed: false, startDelay: 11000, success: false },
+    { communicationFailed: true, startDelay: 0, success: true },
+  ])('未達後11秒で再送したCSVの開始を監視する（通信切れ: $communicationFailed、開始遅延: $startDelay）', async ({ communicationFailed, startDelay, success }) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    const startedAt = Date.now()
+    const listeners = new Set<(item: chrome.downloads.DownloadItem) => void>()
+    vi.spyOn(chrome.downloads.onCreated, 'addListener').mockImplementation(listener => {
+      listeners.add(listener)
+    })
+    vi.spyOn(chrome.downloads.onCreated, 'removeListener').mockImplementation(listener => {
+      listeners.delete(listener)
+    })
+    let attempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === 'download-csv') {
+        callback?.({ success: attempts === 0 || Date.now() - startedAt >= 11000 })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        attempts += 1
+        if (attempts === 1) {
+          failWithContentScriptMissing(callback)
+          return
+        }
+        expect(listeners.size).toBe(1)
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        setTimeout(() => {
+          for (const listener of listeners) {
+            listener({ url: 'https://www.rakuten-sec.co.jp/download.csv' } as chrome.downloads.DownloadItem)
+          }
+        }, startDelay)
+        if (communicationFailed) {
+          failWithChannelClosed(callback)
+          return
+        }
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(10001)
+    expect(listeners.size).toBe(1)
+    await vi.advanceTimersByTimeAsync(19999)
+    const response = await pending
+
+    expect(response.success).toBe(success)
+    if (!success) expect(response.error).toContain('ダウンロード開始を確認できませんでした')
+    expect(attempts).toBe(2)
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    expect(listeners.size).toBe(0)
+  })
+
   it.each(['要素あり', '要素なし'])('実行指示が期限まで未達ならcontent-script-missingを返す（再確認: %s）', async (elementState) => {
     vi.useFakeTimers()
     const executor = createExecutor()

@@ -71,6 +71,12 @@ interface StepExecutionOutcome {
   readonly timing?: StepExecutionTiming;
 }
 
+interface DownloadStartWait {
+  readonly promise: Promise<boolean>;
+  readonly resetTimeout: (timeoutMs: number) => void;
+  readonly cancel: () => void;
+}
+
 export class DownloadStepExecutor {
   private readonly stepTimeout = 30000;
   private readonly elementPollInterval = 100;
@@ -281,58 +287,65 @@ export class DownloadStepExecutor {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
     let undeliveredResult: StepExecutionResponse | undefined;
-    let downloadStart: Promise<boolean> | undefined;
-    while (true) {
-      if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
-        return {
-          response: undeliveredResult ?? {
-            success: false,
-            error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
-            step: steps[0]
-          }
-        };
-      }
+    let downloadStartWait: DownloadStartWait | undefined;
+    try {
+      while (true) {
+        if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
+          return {
+            response: undeliveredResult ?? {
+              success: false,
+              error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
+              step: steps[0]
+            }
+          };
+        }
 
-      downloadStart ??= waitForDownloadStart
-        ? this.waitForDownloadStart(this.downloadStartTimeout)
-        : undefined;
-      try {
-        const sendStartedAt = Date.now();
-        const result = await this.executeSteps(
-          tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
-        );
-        const actionCompletedAt = Date.now();
-        if (result.success) {
-          return this.completeSuccessfulResult(
-            tabId, steps, waitForDownloadStart, downloadStart, result,
-            startedAt, sendStartedAt, actionCompletedAt
+        downloadStartWait?.resetTimeout(this.downloadStartTimeout);
+        downloadStartWait ??= waitForDownloadStart
+          ? this.waitForDownloadStart(this.downloadStartTimeout)
+          : undefined;
+        const downloadStart = downloadStartWait?.promise;
+        try {
+          const sendStartedAt = Date.now();
+          const result = await this.executeSteps(
+            tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
           );
-        }
+          const actionCompletedAt = Date.now();
+          if (result.success) {
+            return await this.completeSuccessfulResult(
+              tabId, steps, waitForDownloadStart, downloadStart, result,
+              startedAt, sendStartedAt, actionCompletedAt
+            );
+          }
 
-        if (result.code === 'content-script-missing') {
-          undeliveredResult = result;
-          continue;
-        }
+          if (result.code === 'content-script-missing') {
+            undeliveredResult = result;
+            downloadStartWait?.resetTimeout(Math.max(0, deadline - Date.now()));
+            continue;
+          }
 
-        if (result.communicationFailed) {
+          if (result.communicationFailed) {
+            const started = await this.resolveStartedFallback(downloadStart);
+            if (started) {
+              return started;
+            }
+          }
+          return { response: result };
+        } catch (error) {
           const started = await this.resolveStartedFallback(downloadStart);
           if (started) {
             return started;
           }
+          return {
+            response: {
+              success: false,
+              error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
+            }
+          };
         }
-        return { response: result };
-      } catch (error) {
-        const started = await this.resolveStartedFallback(downloadStart);
-        if (started) {
-          return started;
-        }
-        return {
-          response: {
-            success: false,
-            error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
-          }
-        };
       }
+    } finally {
+      downloadStartWait?.cancel();
     }
   }
 
@@ -640,24 +653,35 @@ export class DownloadStepExecutor {
    * 事象を防ぐ。開始を観測できたら true、downloads APIが使えない場合や
    * イベントを取りこぼした場合は timeoutMs 経過後に false を返す（ハング防止）。
    */
-  private waitForDownloadStart(timeoutMs: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
+  private waitForDownloadStart(timeoutMs: number): DownloadStartWait {
+    let resetTimeout: DownloadStartWait['resetTimeout'] = () => {};
+    let cancel: DownloadStartWait['cancel'] = () => {};
+    const promise = new Promise<boolean>((resolve) => {
       if (!chrome.downloads?.onCreated) {
         resolve(false);
         return;
       }
 
+      let settled = false;
       let cleanup: () => void = () => {};
-      const wait = createOneShotWait(timeoutMs, () => {
-        cleanup();
-        resolve(false);
-      });
+      let wait = createOneShotWait(timeoutMs, () => finish(false));
       const finish = (started: boolean): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve(started);
-        });
+        if (settled) {
+          return;
+        }
+        settled = true;
+        wait.cancel();
+        cleanup();
+        resolve(started);
       };
+      resetTimeout = (timeoutMs) => {
+        if (settled) {
+          return;
+        }
+        wait.cancel();
+        wait = createOneShotWait(timeoutMs, () => finish(false));
+      };
+      cancel = () => finish(false);
       const listener = (item: chrome.downloads.DownloadItem): void => {
         // blob: は内側のオリジンまで見る判定を使い、別タブの無関係な
         // blob/data ダウンロードを開始済みと誤認しない
@@ -672,6 +696,7 @@ export class DownloadStepExecutor {
 
       chrome.downloads.onCreated.addListener(listener);
     });
+    return { promise, resetTimeout, cancel };
   }
 
   /**
