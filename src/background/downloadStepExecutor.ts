@@ -280,54 +280,59 @@ export class DownloadStepExecutor {
   ): Promise<StepExecutionOutcome> {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
-    if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
-      return {
-        response: {
-          success: false,
-          error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
-          step: steps[0]
-        }
-      };
-    }
+    let undeliveredResult: StepExecutionResponse | undefined;
+    let downloadStart: Promise<boolean> | undefined;
+    while (true) {
+      if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline)) {
+        return {
+          response: undeliveredResult ?? {
+            success: false,
+            error: `ステップ ${steps[0]} の要素待ちがタイムアウトしました（${this.stepTimeout}ms）`,
+            step: steps[0]
+          }
+        };
+      }
 
-    const downloadStart = waitForDownloadStart
-      ? this.waitForDownloadStart(this.downloadStartTimeout)
-      : undefined;
-    try {
-      const sendStartedAt = Date.now();
-      const result = await this.executeSteps(
-        tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
-      );
-      const actionCompletedAt = Date.now();
-      if (result.success) {
-        return this.completeSuccessfulResult(
-          tabId, steps, waitForDownloadStart, downloadStart, result,
-          startedAt, sendStartedAt, actionCompletedAt
+      downloadStart ??= waitForDownloadStart
+        ? this.waitForDownloadStart(this.downloadStartTimeout)
+        : undefined;
+      try {
+        const sendStartedAt = Date.now();
+        const result = await this.executeSteps(
+          tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
         );
-      }
+        const actionCompletedAt = Date.now();
+        if (result.success) {
+          return this.completeSuccessfulResult(
+            tabId, steps, waitForDownloadStart, downloadStart, result,
+            startedAt, sendStartedAt, actionCompletedAt
+          );
+        }
 
-      if (result.code === 'content-script-missing') {
+        if (result.code === 'content-script-missing') {
+          undeliveredResult = result;
+          continue;
+        }
+
+        if (result.communicationFailed) {
+          const started = await this.resolveStartedFallback(downloadStart);
+          if (started) {
+            return started;
+          }
+        }
         return { response: result };
-      }
-
-      if (result.communicationFailed) {
+      } catch (error) {
         const started = await this.resolveStartedFallback(downloadStart);
         if (started) {
           return started;
         }
+        return {
+          response: {
+            success: false,
+            error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
+          }
+        };
       }
-      return { response: result };
-    } catch (error) {
-      const started = await this.resolveStartedFallback(downloadStart);
-      if (started) {
-        return started;
-      }
-      return {
-        response: {
-          success: false,
-          error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
-        }
-      };
     }
   }
 

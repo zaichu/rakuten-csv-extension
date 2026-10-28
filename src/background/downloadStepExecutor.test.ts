@@ -765,23 +765,107 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     expect(reloadCount.current).toBe(0)
   })
 
-  it.each([false, true])('実行送信時にcontentが不在でも再読み込み・再クリックしない（開始通知: %s）', async (started) => {
+  it.each(['display-data', 'download-csv'])('要素検出後の%sの実行指示が未達なら、要素を待ち直して再送する', async (step) => {
+    vi.useFakeTimers()
     const executor = createExecutor()
-    let downloadAttempts = 0
+    const events: string[] = []
+    let attempts = 0
+    let elementChecks = 0
     setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === step) {
+        elementChecks += 1
+        events.push('check')
+        callback?.({ success: attempts === 0 || elementChecks >= 3 })
+        return
+      }
+      if (sentSteps(message).includes(step)) {
+        attempts += 1
+        events.push('execute')
+        if (attempts === 1) {
+          failWithContentScriptMissing(callback)
+          return
+        }
+      }
       if (sentSteps(message).includes('download-csv')) {
-        downloadAttempts += 1
-        if (started) fireDownloadCreated()
-        failWithContentScriptMissing(callback)
+        expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(domesticStockRequest())
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect((await pending).success).toBe(true)
+    expect(attempts).toBe(2)
+    expect(events).toEqual(['check', 'execute', 'check', 'check', 'execute'])
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
+    expect(chrome.tabs.reload).not.toHaveBeenCalled()
+  })
+
+  it.each(['display-data', 'download-csv'])('%sの実行指示でmessage port closedが返ったら再送しない', async (step) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let attempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (sentSteps(message).includes(step)) {
+        attempts += 1
+        const runtime = chrome.runtime as unknown as { lastError?: { message: string } }
+        runtime.lastError = { message: 'The message port closed before a response was received.' }
+        callback?.({ success: false })
+        delete runtime.lastError
         return
       }
       callback?.({ success: true })
     })
 
-    const response = await executor.executeDownloadRequest(downloadRequest())
+    const pending = executor.executeDownloadRequest(domesticStockRequest())
+    await vi.advanceTimersByTimeAsync(30000)
+    const response = await pending
+
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('message port closed before a response was received')
+    expect(response.code).toBeUndefined()
+    expect(attempts).toBe(1)
+  })
+
+  it.each(['要素あり', '要素なし'])('実行指示が期限まで未達ならcontent-script-missingを返す（再確認: %s）', async (elementState) => {
+    vi.useFakeTimers()
+    const executor = createExecutor()
+    let downloadAttempts = 0
+    let settled = false
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step' && message.payload?.step === 'download-csv') {
+        callback?.({ success: downloadAttempts === 0 || elementState === '要素あり' })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+        setTimeout(() => failWithContentScriptMissing(callback), 100)
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest()).then(response => {
+      settled = true
+      return response
+    })
+    await vi.advanceTimersByTimeAsync(29999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    const response = await pending
+
     expect(response.success).toBe(false)
     expect(response.code).toBe('content-script-missing')
-    expect(downloadAttempts).toBe(1)
+    expect(response.error).toContain('Receiving end does not exist')
+    expect(downloadAttempts).toBe(elementState === '要素あり' ? 300 : 1)
+    expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    const attemptsAtDeadline = downloadAttempts
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(downloadAttempts).toBe(attemptsAtDeadline)
     expect(chrome.tabs.reload).not.toHaveBeenCalled()
   })
 
