@@ -9,7 +9,7 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { isPageTransitionStep } from '../types';
-import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete } from '../utils';
+import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
 import { isRakutenDownloadSource } from './downloadedFile';
 
 /** コンテンツスクリプト不在エラーの判定用 */
@@ -390,15 +390,15 @@ export class DownloadStepExecutor {
     if (remaining <= 0) {
       return Promise.resolve(false);
     }
-    return withTimeout(
-      new Promise<boolean>(resolve => {
-        chrome.tabs.sendMessage(tabId, instruction, (response: DownloadResponse | undefined) => {
-          resolve(!chrome.runtime.lastError && response?.success === true);
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      instruction,
       Math.min(this.elementQueryTimeout, remaining),
-      '要素の問い合わせに応答がありません'
-    ).catch(() => false);
+      '要素の問い合わせに応答がありません',
+      (response, lastError) =>
+        !lastError && (response as DownloadResponse | undefined)?.success === true,
+      false
+    );
   }
 
   /**
@@ -533,25 +533,23 @@ export class DownloadStepExecutor {
    * エラーが「Receiving end does not exist」なら false を返す。
    */
   private async checkContentScriptConnection(tabId: number): Promise<boolean> {
-    return withTimeout(
-      new Promise<boolean>((resolve) => {
-        chrome.tabs.sendMessage(tabId, { action: 'check-connection' }, () => {
-          if (chrome.runtime.lastError) {
-            const errorMessage = chrome.runtime.lastError.message ?? '';
-            if (isContentScriptMissingError(errorMessage)) {
-              resolve(false);
-              return;
-            }
-            // その他のエラーは「接続できたが失敗した」とみなす
-            resolve(true);
-          } else {
-            resolve(true);
-          }
-        });
-      }),
+    return sendTabMessageWithTimeout(
+      tabId,
+      { action: 'check-connection' },
       this.connectionQueryTimeout,
-      'コンテンツスクリプトの応答がありません'
-    ).catch(() => false);
+      'コンテンツスクリプトの応答がありません',
+      (_response, lastError) => {
+        if (lastError) {
+          const errorMessage = lastError.message ?? '';
+          if (isContentScriptMissingError(errorMessage)) {
+            return false;
+          }
+          return true;
+        }
+        return true;
+      },
+      false
+    );
   }
 
   /**

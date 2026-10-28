@@ -27,6 +27,25 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMe
  * リスナー登録→先に届いた通知を拾う順序は呼び出し側で保つこと。
  * 上限時間の定数（300/3000/5000ms等）は呼び出し側のまま変えない。
  */
+export function sendTabMessageWithTimeout<T>(
+  tabId: number,
+  message: unknown,
+  timeoutMs: number,
+  timeoutMessage: string,
+  settle: (response: unknown, lastError: typeof chrome.runtime.lastError) => T,
+  fallback: T
+): Promise<T> {
+  return withTimeout(
+    new Promise<T>((resolve) => {
+      chrome.tabs.sendMessage(tabId, message, (response: unknown) => {
+        resolve(settle(response, chrome.runtime.lastError));
+      });
+    }),
+    timeoutMs,
+    timeoutMessage
+  ).catch(() => fallback);
+}
+
 export function createOneShotWait(
   timeoutMs: number,
   onTimeout: () => void
