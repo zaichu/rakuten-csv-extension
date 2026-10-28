@@ -36,6 +36,84 @@ function domesticStockRequest(): CsvDownloadMessage {
   }
 }
 
+describe('遷移直後の古いページの応答', () => {
+  beforeEach(() => {
+    silenceConsole()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    resetTestDoubles()
+  })
+
+  it('古いdocument IDの応答では実行せず、新しいIDで実行する', async () => {
+    const executor = createExecutor()
+    const startedAt = Date.now()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        if (message.payload?.step === 'download-csv') {
+          callback?.({ success: true, documentId: Date.now() - startedAt < 500 ? 'doc-old' : 'doc-new' })
+          return
+        }
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('navigate-to-page')) {
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true, documentId: 'doc-new' })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(400)
+    expect(executed).toEqual(['navigate-to-page'])
+    await vi.advanceTimersByTimeAsync(200)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+
+  it('遷移が起きないときは上限で同じIDでも進む', async () => {
+    const executor = createExecutor()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('navigate-to-page')) {
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(2900)
+    expect(executed).toEqual(['navigate-to-page'])
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+})
+
 describe('次の要素の問い合わせ', () => {
   beforeEach(() => {
     silenceConsole()
