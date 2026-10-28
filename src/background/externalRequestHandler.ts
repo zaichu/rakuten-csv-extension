@@ -22,6 +22,7 @@ import { RakutenUtils, sleep, waitForTabComplete, sendTabMessageWithTimeout } fr
 import {
   createDownloadCapture,
   createDownloadedFileReader,
+  DOWNLOAD_START_TIMEOUT_MS,
   readDownloadedCsv,
   waitForCompletedDownload,
   type DownloadCapture,
@@ -55,7 +56,7 @@ const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
 /** content script の入れ替わり中は応答もエラーも届かないことがあるため、要素の問い合わせと同じ上限で区切る */
 const DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS = 2_000;
-const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = 10_000;
+const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = DOWNLOAD_START_TIMEOUT_MS;
 const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
 
