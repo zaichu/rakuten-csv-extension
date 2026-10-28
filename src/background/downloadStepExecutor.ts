@@ -9,7 +9,7 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { isPageTransitionStep } from '../types';
-import { RakutenUtils, withTimeout, sleep, createOneShotWait } from '../utils';
+import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete } from '../utils';
 import { isRakutenDownloadSource } from './downloadedFile';
 
 /** コンテンツスクリプト不在エラーの判定用 */
@@ -520,34 +520,9 @@ export class DownloadStepExecutor {
    * status: 'complete' になるまで待機する。
    */
   private async reloadTabAndWait(tabId: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let cleanup: () => void = () => {};
-      const wait = createOneShotWait(30000, () => {
-        cleanup();
-        reject(new Error('タブの再読み込みがタイムアウトしました'));
-      });
-      const finish = (): void => {
-        wait.finish(() => {
-          cleanup();
-          resolve();
-        });
-      };
-      const onUpdatedListener = (
-        updatedTabId: number,
-        changeInfo: chrome.tabs.OnUpdatedInfo
-      ): void => {
-        if (updatedTabId === tabId && changeInfo.status === 'complete') {
-          finish();
-        }
-      };
-      cleanup = () => {
-        chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-      };
-
-      chrome.tabs.onUpdated.addListener(onUpdatedListener);
-
-      chrome.tabs.reload(tabId);
-    });
+    const pending = waitForTabComplete(tabId, 30000, new Error('タブの再読み込みがタイムアウトしました'));
+    chrome.tabs.reload(tabId);
+    return pending;
   }
 
   /**

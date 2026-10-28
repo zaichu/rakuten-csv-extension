@@ -57,3 +57,32 @@ export function createOneShotWait(
     }
   };
 }
+
+export function waitForTabComplete(tabId: number, timeoutMs: number, timeoutError?: Error): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let cleanup: () => void = () => {};
+    const wait = createOneShotWait(timeoutMs, () => {
+      cleanup();
+      if (timeoutError) {
+        reject(timeoutError);
+      } else {
+        resolve();
+      }
+    });
+    const finish = (): void => {
+      wait.finish(() => {
+        cleanup();
+        resolve();
+      });
+    };
+    const listener = (updatedTabId: number, changeInfo: chrome.tabs.OnUpdatedInfo): void => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        finish();
+      }
+    };
+    cleanup = () => {
+      chrome.tabs.onUpdated.removeListener(listener);
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sleep, withTimeout, createOneShotWait } from './asyncUtils';
+import { sleep, withTimeout, createOneShotWait, waitForTabComplete } from './asyncUtils';
 
 describe('sleep', () => {
   beforeEach(() => {
@@ -96,5 +96,78 @@ describe('createOneShotWait', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(done).toHaveBeenCalledTimes(1);
     expect(onTimeout).not.toHaveBeenCalled();
+  });
+});
+
+describe('waitForTabComplete', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function currentListener(): (tabId: number, info: chrome.tabs.OnUpdatedInfo) => void {
+    const calls = vi.mocked(chrome.tabs.onUpdated.addListener).mock.calls;
+    return calls[calls.length - 1][0] as (tabId: number, info: chrome.tabs.OnUpdatedInfo) => void;
+  }
+
+  it('対象タブの読み込み完了で解決する', async () => {
+    const pending = waitForTabComplete(42, 1000);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    currentListener()(42, { status: 'complete' } as chrome.tabs.OnUpdatedInfo);
+    await pending;
+    expect(settled).toBe(true);
+    expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('別タブや未完了の通知では解決しない', async () => {
+    const pending = waitForTabComplete(42, 1000);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    const listener = currentListener();
+    listener(99, { status: 'complete' } as chrome.tabs.OnUpdatedInfo);
+    listener(42, { status: 'loading' } as chrome.tabs.OnUpdatedInfo);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(settled).toBe(false);
+    listener(42, { status: 'complete' } as chrome.tabs.OnUpdatedInfo);
+    await pending;
+    expect(settled).toBe(true);
+  });
+
+  it('上限超過で解決する', async () => {
+    const pending = waitForTabComplete(42, 1000);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    await pending;
+    expect(settled).toBe(true);
+    expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('上限超過で渡された理由で拒否する', async () => {
+    const reason = new Error('タブの再読み込みがタイムアウトしました');
+    const pending = waitForTabComplete(42, 1000, reason);
+    const assertion = expect(pending).rejects.toBe(reason);
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('解決後は上限超過しても何もしない', async () => {
+    const reason = new Error('タブの再読み込みがタイムアウトしました');
+    const pending = waitForTabComplete(42, 1000, reason);
+    currentListener()(42, { status: 'complete' } as chrome.tabs.OnUpdatedInfo);
+    await pending;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledTimes(1);
   });
 });
