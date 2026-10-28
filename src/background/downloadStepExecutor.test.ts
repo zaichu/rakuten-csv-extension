@@ -112,6 +112,69 @@ describe('遷移直後の古いページの応答', () => {
     expect((await pending).success).toBe(true)
     expect(executed).toEqual(['navigate-to-page', 'download-csv'])
   })
+
+  it('遷移系ステップの実行応答にIDがなくても問い合わせのIDで古いページを見分ける', async () => {
+    const executor = createExecutor()
+    const startedAt = Date.now()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        if (message.payload?.step === 'download-csv') {
+          callback?.({ success: true, documentId: Date.now() - startedAt < 500 ? 'doc-old' : 'doc-new' })
+          return
+        }
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('navigate-to-page')) {
+        callback?.({ success: true })
+        return
+      }
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true, documentId: 'doc-new' })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(400)
+    expect(executed).toEqual(['navigate-to-page'])
+    await vi.advanceTimersByTimeAsync(200)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+
+  it('遷移系ステップの実行応答が通信切れでも次の実行指示を送らず失敗する', async () => {
+    const executor = createExecutor()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true, documentId: 'doc-old' })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('navigate-to-page')) {
+        failWithChannelClosed(callback)
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    const pending = executor.executeDownloadRequest(downloadRequest())
+    await vi.advanceTimersByTimeAsync(1000)
+    const response = await pending
+    expect(response.success).toBe(false)
+    expect(response.error).toContain('コンテンツスクリプトとの通信に失敗')
+    expect(executed).toEqual(['navigate-to-page'])
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(executed).toEqual(['navigate-to-page'])
+  })
 })
 
 describe('次の要素の問い合わせ', () => {

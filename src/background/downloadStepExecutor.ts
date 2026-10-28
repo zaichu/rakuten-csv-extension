@@ -69,6 +69,13 @@ interface StepExecutionOutcome {
   readonly response: DownloadResponse;
   readonly downloadStart?: Promise<boolean>;
   readonly timing?: StepExecutionTiming;
+  /**
+   * 実行指示を送る直前の要素問い合わせで見つけたページのID
+   *
+   * 遷移系ステップの実行応答がページ破棄で届かない場合に、
+   * 直後の問い合わせで古いページを見分けるために使う
+   */
+  readonly queriedDocumentId?: string;
 }
 
 interface DownloadStartWait {
@@ -269,7 +276,7 @@ export class DownloadStepExecutor {
       }
 
       previousDocumentId = group.kind === 'page-transition'
-        ? result.documentId ?? undefined
+        ? result.documentId ?? outcome.queriedDocumentId
         : undefined;
 
       this.reportStepTiming(reportStep, steps, outcome);
@@ -300,7 +307,8 @@ export class DownloadStepExecutor {
     let downloadStartWait: DownloadStartWait | undefined;
     try {
       while (true) {
-        if (!await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId)) {
+        const waited = await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId);
+        if (!waited.found) {
           return {
             response: undeliveredResult ?? {
               success: false,
@@ -309,6 +317,7 @@ export class DownloadStepExecutor {
             }
           };
         }
+        const queriedDocumentId = waited.documentId;
 
         downloadStartWait?.resetTimeout(this.downloadStartTimeout);
         downloadStartWait ??= waitForDownloadStart
@@ -322,10 +331,11 @@ export class DownloadStepExecutor {
           );
           const actionCompletedAt = Date.now();
           if (result.success) {
-            return await this.completeSuccessfulResult(
+            const completed = await this.completeSuccessfulResult(
               tabId, steps, waitForDownloadStart, downloadStart, result,
               startedAt, sendStartedAt, actionCompletedAt
             );
+            return { ...completed, queriedDocumentId };
           }
 
           if (result.code === 'content-script-missing') {
@@ -337,14 +347,14 @@ export class DownloadStepExecutor {
           if (result.communicationFailed) {
             const started = await this.resolveStartedFallback(downloadStart);
             if (started) {
-              return started;
+              return { ...started, queriedDocumentId };
             }
           }
           return { response: result };
         } catch (error) {
           const started = await this.resolveStartedFallback(downloadStart);
           if (started) {
-            return started;
+            return { ...started, queriedDocumentId };
           }
           return {
             response: {
@@ -413,7 +423,7 @@ export class DownloadStepExecutor {
     selectors: CsvDownloadConfig['selectors'],
     deadline: number,
     previousDocumentId?: string
-  ): Promise<boolean> {
+  ): Promise<{ readonly found: boolean; readonly documentId?: string }> {
     const instruction: CheckCsvDownloadStepInstruction = {
       action: 'check-csv-download-step',
       payload: { step, selectors }
@@ -421,6 +431,7 @@ export class DownloadStepExecutor {
     const waitStartedAt = Date.now();
     const inFlight = new Set<Promise<{ readonly found: boolean; readonly documentId?: string }>>();
     let found = false;
+    let foundDocumentId: string | undefined;
     const isFresh = (documentId: string | undefined): boolean => {
       if (previousDocumentId === undefined || documentId === undefined) {
         return true;
@@ -436,6 +447,7 @@ export class DownloadStepExecutor {
       void query.then((result) => {
         if (result.found && isFresh(result.documentId) && Date.now() < deadline) {
           found = true;
+          foundDocumentId = result.documentId;
         }
       }).finally(() => {
         inFlight.delete(query);
@@ -446,14 +458,17 @@ export class DownloadStepExecutor {
       if (inFlight.size >= this.maxInFlightStepQueries) {
         await Promise.race(inFlight);
         if (found) {
-          return Date.now() < deadline;
+          return { found: Date.now() < deadline, documentId: foundDocumentId };
         }
         continue;
       }
       const iterStartedAt = Date.now();
       const raced = await Promise.race([sendQuery(), sleep(this.elementPollInterval)]);
-      if (found || (typeof raced === 'object' && raced.found && isFresh(raced.documentId))) {
-        return Date.now() < deadline;
+      if (typeof raced === 'object' && raced.found && isFresh(raced.documentId)) {
+        return { found: Date.now() < deadline, documentId: raced.documentId };
+      }
+      if (found) {
+        return { found: Date.now() < deadline, documentId: foundDocumentId };
       }
       const elapsed = Date.now() - iterStartedAt;
       const remain = Math.min(
@@ -464,10 +479,10 @@ export class DownloadStepExecutor {
         await sleep(remain);
       }
       if (found && Date.now() < deadline) {
-        return true;
+        return { found: true, documentId: foundDocumentId };
       }
     }
-    return false;
+    return { found: false };
   }
 
   private queryStepElement(
