@@ -289,6 +289,29 @@ describe('downloadStepExecutor の通信失敗時の扱い', () => {
     expect(vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => (call[1] as ChromeMessage).action === 'execute-csv-download-steps')).toHaveLength(2)
   })
 
+  it('送信で例外が起きてもダウンロード開始を観測していれば成功になる', async () => {
+    const executor = createExecutor()
+    executor.notifyDownloadClicked(TAB_ID, 0)
+    let downloadAttempts = 0
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (sentSteps(message).includes('download-csv')) {
+        downloadAttempts += 1
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        throw new Error('送信に失敗しました')
+      }
+      callback?.({ success: true })
+    })
+
+    const response = await executor.executeDownloadRequest(downloadRequest())
+
+    expect(response).toEqual({
+      success: true,
+      message: 'すべてのCSVダウンロードが完了しました',
+    })
+    expect(downloadAttempts).toBe(1)
+  })
+
   it('通信に失敗しダウンロードも始まらなければ再クリックせず失敗を返す', async () => {
     vi.useFakeTimers()
     try {

@@ -297,41 +297,27 @@ export class DownloadStepExecutor {
       );
       const actionCompletedAt = Date.now();
       if (result.success) {
-        const clickResult = waitForDownloadStart && steps.includes('download-csv')
-          ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
-          : undefined;
-        if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
-          return {
-            response: result,
-            downloadStart,
-            timing: {
-              startedAt,
-              sendStartedAt,
-              actionCompletedAt,
-              receivedAt: result.receivedAt,
-              contentTimings: result.contentTimings,
-              clickStartedAt: clickResult?.clickedAt,
-              clickDurationMs: clickResult?.durationMs,
-              downloadStartedAt: downloadStart ? Date.now() : undefined
-            }
-          };
-        }
-        return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
+        return this.completeSuccessfulResult(
+          tabId, steps, waitForDownloadStart, downloadStart, result,
+          startedAt, sendStartedAt, actionCompletedAt
+        );
       }
 
       if (result.code === 'content-script-missing') {
         return { response: result };
       }
 
-      // クリック後の通信切れでも開始を観測済みなら、再クリックせず成功とする。
-      // content が確定させた失敗は成功にしない。
-      if (result.communicationFailed && await this.isDownloadStarted(downloadStart)) {
-        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+      if (result.communicationFailed) {
+        const started = await this.resolveStartedFallback(downloadStart);
+        if (started) {
+          return started;
+        }
       }
       return { response: result };
     } catch (error) {
-      if (await this.isDownloadStarted(downloadStart)) {
-        return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+      const started = await this.resolveStartedFallback(downloadStart);
+      if (started) {
+        return started;
       }
       return {
         response: {
@@ -340,6 +326,47 @@ export class DownloadStepExecutor {
         }
       };
     }
+  }
+
+  private async resolveStartedFallback(
+    downloadStart: Promise<boolean> | undefined
+  ): Promise<StepExecutionOutcome | undefined> {
+    if (await this.isDownloadStarted(downloadStart)) {
+      return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
+    }
+    return undefined;
+  }
+
+  private async completeSuccessfulResult(
+    tabId: number,
+    steps: readonly CsvDownloadStep[],
+    waitForDownloadStart: boolean,
+    downloadStart: Promise<boolean> | undefined,
+    result: StepExecutionResponse,
+    startedAt: number,
+    sendStartedAt: number,
+    actionCompletedAt: number
+  ): Promise<StepExecutionOutcome> {
+    const clickResult = waitForDownloadStart && steps.includes('download-csv')
+      ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
+      : undefined;
+    if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
+      return {
+        response: result,
+        downloadStart,
+        timing: {
+          startedAt,
+          sendStartedAt,
+          actionCompletedAt,
+          receivedAt: result.receivedAt,
+          contentTimings: result.contentTimings,
+          clickStartedAt: clickResult?.clickedAt,
+          clickDurationMs: clickResult?.durationMs,
+          downloadStartedAt: downloadStart ? Date.now() : undefined
+        }
+      };
+    }
+    return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
   }
 
   private async waitForStepElement(
