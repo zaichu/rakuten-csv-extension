@@ -9,8 +9,10 @@ import type {
   PageReadyMessage,
   ChromeMessage,
   CsvDownloadStep,
+  CsvDownloadStepDefinition,
   CsvSelectors
 } from '../types';
+import { CSV_DOWNLOAD_STEP_DEFINITIONS } from '../types';
 import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
 
 /**
@@ -123,14 +125,9 @@ class RakutenCsvExtension {
 
   private checkCsvDownloadStep(message: CheckCsvDownloadStepInstruction): DownloadResponse {
     const { step, selectors } = message.payload;
-    const selector = {
-      'navigate-to-page': selectors.menuLink,
-      'select-tab': selectors.tabSelector,
-      'select-period': selectors.periodRadio,
-      'display-data': selectors.displayButton,
-      'download-csv': selectors.csvButton
-    }[step];
-    const requireInteractable = step === 'display-data' || step === 'download-csv';
+    const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
+    const selector = definition ? selectors[definition.selectorKey] : undefined;
+    const requireInteractable = definition?.requireInteractable ?? false;
     const found = Boolean(selector && selector.split(',').some(candidate => {
       const element = document.querySelector(candidate.trim());
       return element && (!requireInteractable || DomUtils.isElementInteractable(element));
@@ -261,33 +258,28 @@ class RakutenCsvExtension {
     selectors: CsvSelectors,
     captureDownloadStart?: boolean
   ): Promise<DownloadResponse> {
-    switch (step) {
-      case 'navigate-to-page':
-        return this.runClickStep(selectors.menuLink, 'ページ遷移');
-
-      case 'select-tab':
-        return this.runClickStep(selectors.tabSelector, 'タブ選択');
-
-      case 'select-period':
-        return this.runClickStep(selectors.periodRadio, '期間選択');
-
-      case 'display-data':
-        return this.runClickStep(selectors.displayButton, 'データ表示', { requireInteractable: true });
-
-      case 'download-csv':
-        return this.runClickStep(selectors.csvButton, 'CSVダウンロード', {
-          requireInteractable: true,
-          beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
-          clickAfterResponse: true
-        });
-
-      default:
-        return { 
-          success: false, 
-          error: `未対応のダウンロードステップです: ${step}`,
-          step
-        };
+    const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
+    if (!definition) {
+      return {
+        success: false,
+        error: `未対応のダウンロードステップです: ${step}`,
+        step
+      };
     }
+
+    if (step === 'download-csv') {
+      return this.runClickStep(selectors[definition.selectorKey], definition.actionName, {
+        requireInteractable: definition.requireInteractable,
+        beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
+        clickAfterResponse: true
+      });
+    }
+
+    return this.runClickStep(
+      selectors[definition.selectorKey],
+      definition.actionName,
+      definition.requireInteractable ? { requireInteractable: true } : undefined
+    );
   }
 
   /**
