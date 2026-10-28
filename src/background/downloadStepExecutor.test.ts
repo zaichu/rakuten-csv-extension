@@ -832,11 +832,12 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
   })
 
   it.each([
-    { communicationFailed: false, startDelay: 0, success: true },
-    { communicationFailed: false, startDelay: 7000, success: true },
-    { communicationFailed: false, startDelay: 11000, success: false },
-    { communicationFailed: true, startDelay: 0, success: true },
-  ])('未達後11秒で再送したCSVの開始を監視する（通信切れ: $communicationFailed、開始遅延: $startDelay）', async ({ communicationFailed, startDelay, success }) => {
+    { retryDelay: 11000, communicationFailed: false, startDelay: 0, success: true },
+    { retryDelay: 11000, communicationFailed: false, startDelay: 7000, success: true },
+    { retryDelay: 11000, communicationFailed: false, startDelay: 11000, success: false },
+    { retryDelay: 11000, communicationFailed: true, startDelay: 0, success: true },
+    { retryDelay: 28000, communicationFailed: false, startDelay: 7000, success: true },
+  ])('未達後$retryDelay msで再送したCSVの開始を監視する（通信切れ: $communicationFailed、開始遅延: $startDelay）', async ({ retryDelay, communicationFailed, startDelay, success }) => {
     vi.useFakeTimers()
     const executor = createExecutor()
     const startedAt = Date.now()
@@ -850,7 +851,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     let attempts = 0
     setTabsSendMessageImpl((_tabId, message, callback) => {
       if (message.action === 'check-csv-download-step' && message.payload?.step === 'download-csv') {
-        callback?.({ success: attempts === 0 || Date.now() - startedAt >= 11000 })
+        callback?.({ success: attempts === 0 || Date.now() - startedAt >= retryDelay })
         return
       }
       if (sentSteps(message).includes('download-csv')) {
@@ -877,7 +878,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     const pending = executor.executeDownloadRequest(downloadRequest())
     await vi.advanceTimersByTimeAsync(10001)
     expect(listeners.size).toBe(1)
-    await vi.advanceTimersByTimeAsync(19999)
+    await vi.advanceTimersByTimeAsync(retryDelay + 11000 - 10001)
     const response = await pending
 
     expect(response.success).toBe(success)
@@ -920,6 +921,7 @@ describe('コンテンツスクリプト不在時の再読み込み処理', () =
     expect(response.error).toContain('Receiving end does not exist')
     expect(downloadAttempts).toBe(elementState === '要素あり' ? 300 : 1)
     expect(chrome.downloads.onCreated.addListener).toHaveBeenCalledTimes(1)
+    expect(chrome.downloads.onCreated.removeListener).toHaveBeenCalledTimes(1)
     const attemptsAtDeadline = downloadAttempts
     await vi.advanceTimersByTimeAsync(30000)
     expect(downloadAttempts).toBe(attemptsAtDeadline)
