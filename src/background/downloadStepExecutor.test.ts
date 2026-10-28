@@ -121,6 +121,66 @@ describe('次の要素の問い合わせ', () => {
     expect(chrome.tabs.reload).not.toHaveBeenCalled()
   })
 
+  it('問い合わせが返らなくても重ね打ちの同時滞留は上限以内で30秒で失敗する', async () => {
+    const executor = createExecutor()
+    const queriedAt: number[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        queriedAt.push(Date.now())
+        return
+      }
+      callback?.({ success: true })
+    })
+    const pending = executor.executeDownloadRequest(downloadRequest())
+
+    await vi.advanceTimersByTimeAsync(30000)
+    expect((await pending).success).toBe(false)
+    // 100ms間隔の送出を保つ
+    expect(queriedAt.length).toBe(300)
+    // 問い合わせ上限2sに対し100ms間隔のため同時滞留は20件以内
+    let concurrent = 0
+    for (const at of queriedAt) {
+      const inWindow = queriedAt.filter((other) => other >= at && other - at < 2000).length
+      concurrent = Math.max(concurrent, inWindow)
+    }
+    expect(concurrent).toBeLessThanOrEqual(20)
+  })
+
+  it('長く無応答が続いた後に要素が出ても100ms以内に進む', async () => {
+    const executor = createExecutor()
+    const executed: string[] = []
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        if (message.payload?.step === 'download-csv') {
+          if (Date.now() >= 2500) {
+            callback?.({ success: true })
+          }
+          return
+        }
+        callback?.({ success: true })
+        return
+      }
+      executed.push(...sentSteps(message))
+      if (sentSteps(message).includes('download-csv')) {
+        executor.notifyDownloadClicked(TAB_ID, 0)
+        fireDownloadCreated()
+        callback?.({ success: true })
+        return
+      }
+      callback?.({ success: true })
+    })
+
+    let settled = false
+    const pending = executor.executeDownloadRequest(downloadRequest()).then((response) => {
+      settled = true
+      return response
+    })
+    await vi.advanceTimersByTimeAsync(2600)
+    expect(settled).toBe(true)
+    expect((await pending).success).toBe(true)
+    expect(executed).toEqual(['navigate-to-page', 'download-csv'])
+  })
+
   it('問い合わせの応答が150msかかっても期限内の成功を見逃さない', async () => {
     const executor = createExecutor()
     const executed: string[] = []
