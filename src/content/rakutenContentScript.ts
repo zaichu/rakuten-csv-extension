@@ -114,6 +114,10 @@ class RakutenCsvExtension {
       case 'arm-android-csv-intercept':
         return this.armAndroidCsvIntercept(message.payload?.nonce);
 
+      case 'disarm-android-csv-intercept':
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: message.payload?.nonce }, '*');
+        return { success: true, message: 'disarmed' };
+
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };

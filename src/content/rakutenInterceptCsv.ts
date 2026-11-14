@@ -27,7 +27,14 @@ let originals: {
   locationAssign: (url: string) => void;
   locationReplace: (url: string) => void;
   locationHref: PropertyDescriptor | undefined;
+  locationAssignDesc: PropertyDescriptor | undefined;
+  locationReplaceDesc: PropertyDescriptor | undefined;
+  locationAssignOwn: boolean;
+  locationReplaceOwn: boolean;
+  locationHrefOwn: boolean;
   windowOpen: typeof window.open;
+  windowOpenDesc: PropertyDescriptor | undefined;
+  windowOpenOwn: boolean;
 } | undefined;
 let submitListener: ((event: Event) => void) | undefined;
 let clickListener: ((event: MouseEvent) => void) | undefined;
@@ -64,15 +71,34 @@ function resolveUrl(value: string | null | undefined): string {
   }
 }
 
-function formBody(form: HTMLFormElement, method: string, enctype: string): BodyInit | undefined {
+function serializeTextPlain(form: HTMLFormElement): string {
+  const formData = new FormData(form);
+  const pairs: string[] = [];
+  formData.forEach((value, key) => {
+    pairs.push(`${key}=${typeof value === 'string' ? value : ''}`);
+  });
+  return pairs.join('\r\n');
+}
+
+function buildRequest(form: HTMLFormElement, method: string, enctype: string): { url: string; body: BodyInit | undefined } {
+  const base = resolveUrl(form.getAttribute('action'));
   if (method === 'GET' || method === 'HEAD') {
-    return undefined;
+    const params = new URLSearchParams(new FormData(form) as unknown as ConstructorParameters<typeof URLSearchParams>[0]);
+    const url = new URL(base);
+    params.forEach((value, key) => {
+      url.searchParams.append(key, value);
+    });
+    return { url: url.href, body: undefined };
   }
   const formData = new FormData(form);
-  if (enctype.toLowerCase().includes('urlencoded')) {
-    return new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]);
+  const lower = enctype.toLowerCase();
+  if (lower.includes('urlencoded')) {
+    return { url: base, body: new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]) };
   }
-  return formData;
+  if (lower.includes('text/plain')) {
+    return { url: base, body: serializeTextPlain(form) };
+  }
+  return { url: base, body: formData };
 }
 
 async function runFetch(
@@ -98,7 +124,15 @@ async function runFetch(
     status = response.status;
     contentType = response.headers.get('content-type') ?? '';
     const buffer = await response.arrayBuffer();
-    const first = buffer.byteLength > 0 ? new Uint8Array(buffer)[0] : 0;
+    const bytes = new Uint8Array(buffer);
+    let offset = 0;
+    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      offset = 3;
+    }
+    while (offset < bytes.length && (bytes[offset] === 0x20 || bytes[offset] === 0x09 || bytes[offset] === 0x0a || bytes[offset] === 0x0d)) {
+      offset += 1;
+    }
+    const first = offset < bytes.length ? bytes[offset] : 0;
     const html = contentType.toLowerCase().includes('text/html') || first === 0x3c;
     if (!response.ok) {
       throw new Error(buildFailure(requestType, upperMethod, status, contentType));
@@ -117,12 +151,11 @@ async function runFetch(
       },
       nonce
     );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : buildFailure(requestType, upperMethod, status, contentType);
+  } catch {
     postResult(
       {
         ok: false,
-        error: message.includes('/') ? message : buildFailure(requestType, upperMethod, status, contentType),
+        error: buildFailure(requestType, upperMethod, status, contentType),
         contentType,
         status,
         requestType,
@@ -136,36 +169,48 @@ async function runFetch(
 }
 
 export function disarm(): void {
-  if (!armed || !originals) {
-    armed = false;
-    return;
+  if (originals) {
+    try { HTMLFormElement.prototype.submit = originals.formSubmit; } catch { /* ignore */ }
+    try { HTMLFormElement.prototype.requestSubmit = originals.formRequestSubmit; } catch { /* ignore */ }
+
+    try {
+      if (originals.locationAssignOwn && originals.locationAssignDesc) {
+        Object.defineProperty(window.location, 'assign', originals.locationAssignDesc);
+      } else {
+        try { delete (window.location as { assign?: unknown }).assign; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (originals.locationReplaceOwn && originals.locationReplaceDesc) {
+        Object.defineProperty(window.location, 'replace', originals.locationReplaceDesc);
+      } else {
+        try { delete (window.location as { replace?: unknown }).replace; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (originals.locationHrefOwn && originals.locationHref) {
+        Object.defineProperty(window.location, 'href', originals.locationHref);
+      } else if (!originals.locationHrefOwn) {
+        try { delete (window.location as { href?: unknown }).href; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    try { window.open = originals.windowOpen; } catch { /* ignore */ }
+
+    try {
+      if (submitListener) {
+        document.removeEventListener('submit', submitListener, true);
+      }
+    } catch { /* ignore */ }
+    try {
+      if (clickListener) {
+        document.removeEventListener('click', clickListener, true);
+      }
+    } catch { /* ignore */ }
   }
-  try {
-    HTMLFormElement.prototype.submit = originals.formSubmit;
-    HTMLFormElement.prototype.requestSubmit = originals.formRequestSubmit;
-    Object.defineProperty(window.location, 'assign', {
-      value: originals.locationAssign,
-      writable: true,
-      configurable: true,
-    });
-    Object.defineProperty(window.location, 'replace', {
-      value: originals.locationReplace,
-      writable: true,
-      configurable: true,
-    });
-    if (originals.locationHref) {
-      Object.defineProperty(window.location, 'href', originals.locationHref);
-    }
-    window.open = originals.windowOpen;
-    if (submitListener) {
-      document.removeEventListener('submit', submitListener, true);
-    }
-    if (clickListener) {
-      document.removeEventListener('click', clickListener, true);
-    }
-  } catch {
-    // ignore
-  }
+
   armed = false;
   intercepted = false;
   currentNonce = undefined;
@@ -183,18 +228,25 @@ export function arm(nonce?: string): void {
     formRequestSubmit: HTMLFormElement.prototype.requestSubmit,
     locationAssign: window.location.assign.bind(window.location),
     locationReplace: window.location.replace.bind(window.location),
-    locationHref: Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window.location), 'href'),
+    locationHref: Object.getOwnPropertyDescriptor(window.location, 'href'),
+    locationAssignDesc: Object.getOwnPropertyDescriptor(window.location, 'assign'),
+    locationReplaceDesc: Object.getOwnPropertyDescriptor(window.location, 'replace'),
+    locationAssignOwn: Object.prototype.hasOwnProperty.call(window.location, 'assign'),
+    locationReplaceOwn: Object.prototype.hasOwnProperty.call(window.location, 'replace'),
+    locationHrefOwn: Object.prototype.hasOwnProperty.call(window.location, 'href'),
     windowOpen: window.open.bind(window),
+    windowOpenDesc: Object.getOwnPropertyDescriptor(window, 'open'),
+    windowOpenOwn: Object.prototype.hasOwnProperty.call(window, 'open'),
   };
 
   HTMLFormElement.prototype.submit = function (this: HTMLFormElement) {
     if (!armed) {
       return originals!.formSubmit.call(this);
     }
-    const url = resolveUrl(this.getAttribute('action'));
     const method = (this.getAttribute('method') || 'GET').toUpperCase();
     const enctype = this.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    void runFetch('form-submit', url, method, formBody(this, method, enctype), currentNonce);
+    const request = buildRequest(this, method, enctype);
+    void runFetch('form-submit', request.url, method, request.body, currentNonce);
     return;
   };
 
@@ -202,10 +254,10 @@ export function arm(nonce?: string): void {
     if (!armed) {
       return originals!.formRequestSubmit.call(this, submitter);
     }
-    const url = resolveUrl(this.getAttribute('action'));
     const method = (this.getAttribute('method') || 'GET').toUpperCase();
     const enctype = this.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    void runFetch('requestSubmit', url, method, formBody(this, method, enctype), currentNonce);
+    const request = buildRequest(this, method, enctype);
+    void runFetch('requestSubmit', request.url, method, request.body, currentNonce);
     return;
   };
 
@@ -220,10 +272,10 @@ export function arm(nonce?: string): void {
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    const url = resolveUrl(form.getAttribute('action'));
     const method = (form.getAttribute('method') || 'GET').toUpperCase();
     const enctype = form.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    void runFetch('form-submit', url, method, formBody(form, method, enctype), currentNonce);
+    const request = buildRequest(form, method, enctype);
+    void runFetch('form-submit', request.url, method, request.body, currentNonce);
   };
   document.addEventListener('submit', submitListener, true);
 
@@ -318,10 +370,16 @@ if (typeof window !== 'undefined') {
       return;
     }
     const data = event.data as { type?: string; nonce?: string } | null;
-    if (!data || data.type !== SIGNAL_TYPE) {
+    if (!data) {
       return;
     }
-    arm(data.nonce);
+    if (data.type === SIGNAL_TYPE) {
+      arm(data.nonce);
+      return;
+    }
+    if (data.type === 'rakuten-csv-intercept:disarm') {
+      disarm();
+    }
   });
 }
 

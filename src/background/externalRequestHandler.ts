@@ -48,6 +48,8 @@ export interface ExternalRequestHandlerConfig {
   readonly downloadCompleteTimeoutMs?: number;
   /** タブの読み込み完了を待つ最大時間(ms) */
   readonly tabLoadTimeoutMs?: number;
+  /** Android 経路で横取り結果を待つ最大時間(ms) */
+  readonly androidInterceptTimeoutMs?: number;
   /** ダウンロードされたファイルの読み取り */
   readonly fileReader?: DownloadedFileReader;
 }
@@ -138,6 +140,7 @@ export class ExternalRequestHandler {
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
+  private readonly androidInterceptTimeoutMs: number;
   private readonly fileReader: DownloadedFileReader;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
@@ -155,6 +158,7 @@ export class ExternalRequestHandler {
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
+    this.androidInterceptTimeoutMs = config.androidInterceptTimeoutMs ?? 30_000;
     this.fileReader = config.fileReader ?? createDownloadedFileReader();
   }
 
@@ -398,7 +402,7 @@ export class ExternalRequestHandler {
         stepTimings,
       };
     }
-    const resultPromise = this.waitForAndroidInterceptResult(nonce, 30000);
+    const resultPromise = this.waitForAndroidInterceptResult(nonce, this.androidInterceptTimeoutMs);
 
     let stepResult: DownloadResponse;
     try {
@@ -410,6 +414,7 @@ export class ExternalRequestHandler {
         reportStep
       );
     } catch (error) {
+      this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
         reason: error instanceof Error ? error.message : 'CSVの取得に失敗しました',
@@ -418,6 +423,7 @@ export class ExternalRequestHandler {
     }
 
     if (!stepResult.success) {
+      this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
         reason: stepResult.error ?? 'CSVの取得に失敗しました',
@@ -485,6 +491,21 @@ export class ExternalRequestHandler {
         resolve(result);
       });
     });
+  }
+
+  private cancelAndroidIntercept(tabId: number, nonce: string): void {
+    this.androidInterceptResolvers.delete(nonce);
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        { action: 'disarm-android-csv-intercept', payload: { nonce } },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    } catch {
+      // ignore
+    }
   }
 
   public resolveAndroidIntercept(payload: AndroidCsvInterceptResultMessage['payload']): void {

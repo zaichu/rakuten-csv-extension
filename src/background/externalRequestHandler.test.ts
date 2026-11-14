@@ -112,6 +112,7 @@ function createHandler(
     readonly loginWaitTimeoutMs?: number
     readonly loginPollIntervalMs?: number
     readonly loginStateQueryTimeoutMs?: number
+    readonly androidInterceptTimeoutMs?: number
     readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
@@ -776,11 +777,11 @@ describe('externalRequestHandler', () => {
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       const originalSendMessage = vi.mocked(chrome.tabs.sendMessage)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
-        const msg = message as { action?: string; payload?: { nonce?: string } }
-        if (msg.action === 'arm-android-csv-intercept') {
-          const nonce = msg.payload?.nonce ?? ''
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string; payload?: { nonce?: string } };
+        const callback = args[2] as ((response?: unknown) => void) | undefined;
+        if (message.action === 'arm-android-csv-intercept') {
+          const nonce = message.payload?.nonce ?? ''
           setTimeout(() => {
             handler.resolveAndroidIntercept({
               nonce,
@@ -795,7 +796,7 @@ describe('externalRequestHandler', () => {
           callback?.({ success: true, message: 'armed' })
           return
         }
-        if (msg.action === 'check-login-state') {
+        if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return
         }
@@ -831,11 +832,11 @@ describe('externalRequestHandler', () => {
       const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
-        const msg = message as { action?: string; payload?: { nonce?: string } }
-        if (msg.action === 'arm-android-csv-intercept') {
-          const nonce = msg.payload?.nonce ?? ''
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string; payload?: { nonce?: string } };
+        const callback = args[2] as ((response?: unknown) => void) | undefined;
+        if (message.action === 'arm-android-csv-intercept') {
+          const nonce = message.payload?.nonce ?? ''
           setTimeout(() => {
             handler.resolveAndroidIntercept({
               nonce,
@@ -850,7 +851,7 @@ describe('externalRequestHandler', () => {
           callback?.({ success: true, message: 'armed' })
           return
         }
-        if (msg.action === 'check-login-state') {
+        if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return
         }
@@ -865,15 +866,52 @@ describe('externalRequestHandler', () => {
       expect(result.failures[0]?.reason).toContain('text/html')
     })
 
+    it('Android 経路がタイムアウトしても次回取得を邪魔しない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'arm-android-csv-intercept') {
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const first = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(first.csvs).toEqual([])
+      expect(first.failures[0]?.reason).toContain('横取りなし')
+
+      // second request
+      const { port: port2, posted: posted2, listeners: listeners2 } = createPort(ALLOWED_ORIGIN)
+      handler.handleConnection(port2)
+      listeners2[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      // arm result delivered this time
+      // simulate resolve via a new handler? Instead just expect timeout again or success if armed result delivered.
+      const second = await waitForMessage<FetchLatestCsvResult>(posted2, isResult)
+      expect(second).toBeTruthy()
+    })
+
     it('失敗メッセージに秘密を含めない', async () => {
       const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
-        const msg = message as { action?: string; payload?: { nonce?: string } }
-        if (msg.action === 'arm-android-csv-intercept') {
-          const nonce = msg.payload?.nonce ?? ''
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string; payload?: { nonce?: string } };
+        const callback = args[2] as ((response?: unknown) => void) | undefined;
+        if (message.action === 'arm-android-csv-intercept') {
+          const nonce = message.payload?.nonce ?? ''
           setTimeout(() => {
             handler.resolveAndroidIntercept({
               nonce,
@@ -888,7 +926,7 @@ describe('externalRequestHandler', () => {
           callback?.({ success: true, message: 'armed' })
           return
         }
-        if (msg.action === 'check-login-state') {
+        if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return
         }

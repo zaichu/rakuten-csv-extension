@@ -118,7 +118,8 @@ export type ContentScriptMessage =
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
   | { readonly action: 'check-connection' }
-  | { readonly action: 'arm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } };
+  | { readonly action: 'arm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } }
+  | { readonly action: 'disarm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } };
 
 /**
  * コンテンツスクリプト側で計測したステップの内訳
