@@ -67,6 +67,28 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     expect(messages.some((m) => (m as { ok?: boolean }).ok === true)).toBe(true)
   })
 
+  it('GET form の送信では action の既存 query をフォーム値で置き換える', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    arm('nonce-get-query')
+    const form = document.createElement('form')
+    form.method = 'GET'
+    form.action = 'https://example.com/csv?old=stale&shared=old'
+    const input = document.createElement('input')
+    input.name = 'shared'
+    input.value = 'new'
+    form.appendChild(input)
+    document.body.appendChild(form)
+
+    form.submit()
+    await flush()
+
+    expect(String(fetchSpy.mock.calls[0][0])).toBe('https://example.com/csv?shared=new')
+  })
+
   it('fetch 失敗でも元 API を復元する', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('network down'))
     vi.stubGlobal('fetch', fetchSpy)
@@ -389,6 +411,30 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     const [url, options] = fetchSpy.mock.calls[0]
     expect(String(url)).toBe('https://example.com/form')
     expect(options.method).toBe('POST')
+  })
+
+  it('javascript anchor の既定動作を保ち、href を fetch しない', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    arm('nonce-javascript-anchor')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = 'https://example.com/form'
+    document.body.appendChild(form)
+    const anchor = document.createElement('a')
+    anchor.href = 'javascript:csvOutput()'
+    anchor.onclick = () => form.requestSubmit()
+    document.body.appendChild(anchor)
+
+    anchor.click()
+    await flush()
+    await flush()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(String(fetchSpy.mock.calls[0][0])).toBe('https://example.com/form')
   })
 
   it('Navigation API の navigate で location を捕捉する', async () => {

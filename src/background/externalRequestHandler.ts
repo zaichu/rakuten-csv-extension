@@ -390,7 +390,7 @@ export class ExternalRequestHandler {
     | { success: false; reason: string; code?: string; stepTimings: FetchLatestCsvTiming[] }
   > {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const resultPromise = this.waitForAndroidInterceptResult(nonce, this.androidInterceptTimeoutMs);
+    const resultPromise = this.waitForAndroidInterceptResult(nonce);
 
     let stepResult: DownloadResponse;
     try {
@@ -424,6 +424,8 @@ export class ExternalRequestHandler {
       };
     }
 
+    this.startAndroidInterceptTimeout(nonce, this.androidInterceptTimeoutMs);
+
     const intercepted = await resultPromise;
     if (!intercepted || !intercepted.success || !intercepted.content) {
       this.cancelAndroidIntercept(tabId, nonce);
@@ -455,30 +457,41 @@ export class ExternalRequestHandler {
 
   private androidInterceptResolvers = new Map<
     string,
-    { readonly resolver: (result: DownloadResponse) => void; readonly timer: ReturnType<typeof setTimeout> }
+    { readonly resolver: (result: DownloadResponse) => void; timer?: ReturnType<typeof setTimeout> }
   >();
 
-  private waitForAndroidInterceptResult(nonce: string, timeoutMs: number): Promise<DownloadResponse> {
+  private waitForAndroidInterceptResult(nonce: string): Promise<DownloadResponse> {
     return new Promise<DownloadResponse>((resolve) => {
-      const timer = setTimeout(() => {
-        this.androidInterceptResolvers.delete(nonce);
-        resolve({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
-      }, timeoutMs);
       this.androidInterceptResolvers.set(nonce, {
         resolver: (result) => {
-          clearTimeout(timer);
+          const entry = this.androidInterceptResolvers.get(nonce);
+          if (entry?.timer) {
+            clearTimeout(entry.timer);
+          }
           this.androidInterceptResolvers.delete(nonce);
           resolve(result);
         },
-        timer,
       });
     });
+  }
+
+  private startAndroidInterceptTimeout(nonce: string, timeoutMs: number): void {
+    const entry = this.androidInterceptResolvers.get(nonce);
+    if (!entry || entry.timer) {
+      return;
+    }
+    entry.timer = setTimeout(() => {
+      this.androidInterceptResolvers.delete(nonce);
+      entry.resolver({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
+    }, timeoutMs);
   }
 
   private cancelAndroidIntercept(tabId: number, nonce: string): void {
     const entry = this.androidInterceptResolvers.get(nonce);
     if (entry) {
-      clearTimeout(entry.timer);
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
       this.androidInterceptResolvers.delete(nonce);
     }
     try {
@@ -499,7 +512,9 @@ export class ExternalRequestHandler {
     if (!entry) {
       return;
     }
-    clearTimeout(entry.timer);
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+    }
     this.androidInterceptResolvers.delete(payload.nonce);
     entry.resolver({
       success: payload.ok === true && typeof payload.content === 'string',

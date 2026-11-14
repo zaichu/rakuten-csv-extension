@@ -87,9 +87,7 @@ function buildRequest(form: HTMLFormElement, submitter?: HTMLElement | null): { 
     }
     const params = new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]);
     const url = new URL(base);
-    params.forEach((value, key) => {
-      url.searchParams.append(key, value);
-    });
+    url.search = params.toString();
     return { url: url.href, method, body: undefined };
   }
   const formData = new FormData(form);
@@ -324,6 +322,9 @@ export function arm(nonce?: string): void {
     }
     const target = (event.target as Element | null)?.closest?.('a') as HTMLAnchorElement | null;
     if (!target || !target.href) {
+      return;
+    }
+    if (target.protocol === 'javascript:') {
       return;
     }
     event.preventDefault();

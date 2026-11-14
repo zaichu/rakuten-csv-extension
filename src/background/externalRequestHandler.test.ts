@@ -845,8 +845,8 @@ describe('externalRequestHandler', () => {
     it('Android 経路で HTML が返れば失敗する', async () => {
       const { handler, runner } = createHandler()
       vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
-        const kind = (message as { payload: { selectedOptions: CsvDownloadType[] } }).payload.selectedOptions[0]
-        const nonce = (message as { payload: { androidInterceptNonce?: string } }).payload.androidInterceptNonce
+        const kind = message.payload.selectedOptions[0]
+        const nonce = message.payload.androidInterceptNonce
         if (nonce) {
           setTimeout(() => {
             handler.resolveAndroidIntercept({
@@ -880,6 +880,35 @@ describe('externalRequestHandler', () => {
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.csvs).toEqual([])
       expect(result.failures[0]?.reason).toContain('text/html')
+    })
+
+    it('Android 経路は準備にタイムアウト以上かかっても横取り結果を受け取る', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 20 })
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const nonce = message.payload.androidInterceptNonce
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        if (nonce) {
+          handler.resolveAndroidIntercept({
+            nonce,
+            ok: true,
+            content: CSV_CONTENT,
+            contentType: 'text/csv',
+            status: 200,
+            requestType: 'form-submit',
+            method: 'POST',
+          })
+        }
+        return { success: true, message: 'prepared' }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(result.failures).toEqual([])
     })
 
     it('Android 経路がタイムアウトしても次回取得を邪魔しない', async () => {
@@ -985,8 +1014,8 @@ describe('externalRequestHandler', () => {
     it('失敗メッセージに秘密を含めない', async () => {
       const { handler, runner } = createHandler()
       vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
-        const kind = (message as { payload: { selectedOptions: CsvDownloadType[] } }).payload.selectedOptions[0]
-        const nonce = (message as { payload: { androidInterceptNonce?: string } }).payload.androidInterceptNonce
+        const kind = message.payload.selectedOptions[0]
+        const nonce = message.payload.androidInterceptNonce
         if (nonce) {
           setTimeout(() => {
             handler.resolveAndroidIntercept({
