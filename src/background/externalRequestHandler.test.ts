@@ -765,5 +765,145 @@ describe('externalRequestHandler', () => {
       expect(executed).toEqual(['assetbalance'])
       expect(result.csvs).toHaveLength(1)
     })
+
+  describe('Android 経路', () => {
+    beforeEach(() => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+    })
+
+    it('Android のとき新経路で CSV を取得する', async () => {
+      const { handler, executed } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      const originalSendMessage = vi.mocked(chrome.tabs.sendMessage)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
+        const msg = message as { action?: string; payload?: { nonce?: string } }
+        if (msg.action === 'arm-android-csv-intercept') {
+          const nonce = msg.payload?.nonce ?? ''
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: true,
+              content: CSV_CONTENT,
+              contentType: 'text/csv',
+              status: 200,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (msg.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(result.csvs[0].content).toBe(CSV_CONTENT)
+      expect(result.failures).toEqual([])
+      expect(executed).toEqual(['assetbalance'])
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(originalSendMessage.getMockImplementation()!)
+    })
+
+    it('非 Android では既存経路を使う', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'win' } as never)
+      const { handler, executed } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(executed).toEqual(['assetbalance'])
+    })
+
+    it('Android 経路で HTML が返れば失敗する', async () => {
+      const { handler } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
+        const msg = message as { action?: string; payload?: { nonce?: string } }
+        if (msg.action === 'arm-android-csv-intercept') {
+          const nonce = msg.payload?.nonce ?? ''
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: false,
+              error: 'anchor / method=GET / status=200 / contentType=text/html',
+              contentType: 'text/html',
+              status: 200,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (msg.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toEqual([])
+      expect(result.failures[0]?.reason).toContain('text/html')
+    })
+
+    it('失敗メッセージに秘密を含めない', async () => {
+      const { handler } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((_tabId: any, message: any, callback: any) => {
+        const msg = message as { action?: string; payload?: { nonce?: string } }
+        if (msg.action === 'arm-android-csv-intercept') {
+          const nonce = msg.payload?.nonce ?? ''
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: false,
+              error: 'anchor / method=GET / status=404 / contentType=text/plain',
+              contentType: 'text/plain',
+              status: 404,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (msg.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+  })
+
   })
 })

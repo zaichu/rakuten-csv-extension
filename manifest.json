@@ -26,6 +26,17 @@
             ],
             "run_at": "document_end",
             "all_frames": false
+        },
+        {
+            "js": [
+                "src/content/rakutenInterceptCsv.ts"
+            ],
+            "matches": [
+                "https://*.rakuten-sec.co.jp/*"
+            ],
+            "run_at": "document_start",
+            "all_frames": false,
+            "world": "MAIN"
         }
     ],
     "permissions": [

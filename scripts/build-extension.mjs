@@ -25,11 +25,21 @@ await esbuild.build({
   platform: 'browser',
 })
 
-// content script
+// content script (ISOLATED)
 await esbuild.build({
   ...esbuildBase,
   entryPoints: [join(root, 'src/content/rakutenContentScript.ts')],
   outfile: join(root, 'dist/content.js'),
+  format: 'iife',
+  platform: 'browser',
+  define: { 'import.meta': '{}' },
+})
+
+// content script (MAIN world, Android CSV intercept)
+await esbuild.build({
+  ...esbuildBase,
+  entryPoints: [join(root, 'src/content/rakutenInterceptCsv.ts')],
+  outfile: join(root, 'dist/rakutenInterceptCsv.js'),
   format: 'iife',
   platform: 'browser',
   define: { 'import.meta': '{}' },
@@ -46,9 +56,12 @@ const distManifest = {
     ...manifest.action,
     default_popup: 'src/popup/index.html',
   },
-  content_scripts: (manifest.content_scripts ?? []).map((cs, i) =>
-    i === 0 ? { ...cs, js: ['content.js'] } : cs
-  ),
+  content_scripts: (manifest.content_scripts ?? []).map((cs, i) => {
+    if (i === 0) {
+      return { ...cs, js: ['content.js'] };
+    }
+    return { ...cs, js: cs.js.map((p) => p.split('/').pop()?.replace(/\.ts$/, '.js') ?? p) };
+  }),
 }
 delete distManifest.$schema
 

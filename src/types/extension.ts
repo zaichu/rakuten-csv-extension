@@ -117,7 +117,8 @@ export type ContentScriptMessage =
   | CheckCsvDownloadStepInstruction
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
-  | { readonly action: 'check-connection' };
+  | { readonly action: 'check-connection' }
+  | { readonly action: 'arm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } };
 
 /**
  * コンテンツスクリプト側で計測したステップの内訳
@@ -158,6 +159,13 @@ export interface DownloadResponse extends BaseResponse {
   readonly message?: string;
   readonly step?: CsvDownloadStep;
   readonly code?: string;
+  /** Android経路で取得したCSV本文 */
+  readonly content?: string;
+  /** Android経路の診断情報 */
+  readonly contentType?: string;
+  readonly status?: number;
+  readonly requestType?: string;
+  readonly method?: string;
   /**
    * 応答したページ(document)の識別子
    *
@@ -308,6 +316,20 @@ export interface CsvDownloadClickedMessage extends ChromeMessage {
   readonly clickDurationMs?: number;
 }
 
+export interface AndroidCsvInterceptResultMessage extends ChromeMessage {
+  readonly action: 'android-csv-intercept-result';
+  readonly payload: {
+    readonly nonce: string;
+    readonly ok?: boolean;
+    readonly content?: string;
+    readonly contentType?: string;
+    readonly status?: number;
+    readonly requestType?: string;
+    readonly method?: string;
+    readonly error?: string;
+  };
+}
+
 /**
  * バックグラウンドが受け取るメッセージ
  */
@@ -315,4 +337,5 @@ export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
   | CsvDownloadWillStartMessage
-  | CsvDownloadClickedMessage;
+  | CsvDownloadClickedMessage
+  | AndroidCsvInterceptResultMessage;

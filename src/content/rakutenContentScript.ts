@@ -111,6 +111,9 @@ class RakutenCsvExtension {
       case 'check-login-state':
         return this.handleCheckLoginState();
 
+      case 'arm-android-csv-intercept':
+        return this.armAndroidCsvIntercept(message.payload?.nonce);
+
       case 'extension-updated':
         this.handleExtensionUpdate();
         return { success: true, message: '拡張機能が更新されました' };
@@ -187,6 +190,66 @@ class RakutenCsvExtension {
 
     this.passkeyLoginClicked = true;
     this.clickElementSafely(button, 'パスキーログイン', selector);
+  }
+
+  private armAndroidCsvIntercept(nonce?: string): DownloadResponse {
+    const n = nonce ?? '';
+    const listener = (event: MessageEvent): void => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      if (event.source !== window) {
+        return;
+      }
+      const data = event.data as {
+        type?: string;
+        nonce?: string;
+        ok?: boolean;
+        buffer?: ArrayBuffer;
+        contentType?: string;
+        status?: number;
+        requestType?: string;
+        method?: string;
+        error?: string;
+      } | null;
+      if (!data || data.type !== 'rakuten-csv-intercept:result' || data.nonce !== n) {
+        return;
+      }
+      window.removeEventListener('message', listener);
+      let content: string | undefined;
+      if (data.ok && data.buffer) {
+        try {
+          content = new TextDecoder().decode(data.buffer);
+        } catch {
+          content = undefined;
+        }
+      }
+      try {
+        chrome.runtime.sendMessage(
+          {
+            action: 'android-csv-intercept-result',
+            payload: {
+              nonce: n,
+              ok: data.ok === true && typeof content === 'string',
+              content,
+              contentType: data.contentType,
+              status: data.status,
+              requestType: data.requestType,
+              method: data.method,
+              error: data.error,
+            },
+          },
+          () => {
+            void chrome.runtime.lastError;
+          }
+        );
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('message', listener);
+    window.postMessage({ type: 'rakuten-csv-intercept:arm', nonce: n }, '*');
+    return { success: true, message: 'armed' };
   }
 
   private isLoginScreen(): boolean {
