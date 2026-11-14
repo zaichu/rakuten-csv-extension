@@ -290,8 +290,8 @@ export function validateDownloadedCsv(item: chrome.downloads.DownloadItem): Down
   if (!isRakutenDownloadSource(item.url) && !isRakutenDownloadSource(item.finalUrl)) {
     return invalid('ダウンロード元が楽天証券のファイルではありません');
   }
-  if (!item.filename.toLowerCase().endsWith('.csv')) {
-    return invalid('拡張子がCSVのファイルではありません');
+  if (isHtmlMime(item.mime)) {
+    return invalid('MIMEがHTMLのため読み込めません');
   }
   if (item.fileSize === 0) {
     return invalid('ファイルが空です');
@@ -303,6 +303,32 @@ export function validateDownloadedCsv(item: chrome.downloads.DownloadItem): Down
     return invalid('ファイルが大きすぎます');
   }
   return { ok: true };
+}
+
+/**
+ * MIMEがHTMLか
+ *
+ * Androidではダウンロード時のファイル名に拡張子が付かないことがあるため、
+ * ファイル名ではなくMIMEでHTMLを弾く。空やoctet-streamは許容する。
+ */
+function isHtmlMime(mime: string | undefined): boolean {
+  if (!mime) {
+    return false;
+  }
+  return mime.split(';')[0]?.trim().toLowerCase() === 'text/html';
+}
+
+/**
+ * 失敗理由に添える診断情報
+ *
+ * パスやユーザー名を出さず、拡張子の有無だけを残す。
+ */
+function withDownloadDetails(reason: string, item: chrome.downloads.DownloadItem): string {
+  const basename = item.filename.split(/[/\\]/).pop() ?? '';
+  const dot = basename.lastIndexOf('.');
+  const extension = dot >= 0 && dot < basename.length - 1 ? basename.slice(dot).toLowerCase() : 'なし';
+  const mime = item.mime || '不明';
+  return `${reason}（拡張子: ${extension} / MIME: ${mime} / サイズ: ${String(item.fileSize)}）`;
 }
 
 /**
@@ -324,7 +350,7 @@ export type ReadDownloadedCsvResult =
 /**
  * ダウンロードされたCSVを読み取る
  *
- * 検査(ダウンロード元・拡張子・サイズ)をすべて通ったファイルだけを読む。
+ * 検査(ダウンロード元・MIME・サイズ)をすべて通ったファイルだけを読む。
  * 読み終えたらファイルを削除し、履歴からも消す。削除に失敗しても取得は
  * 成功として扱い、fileRemoved で結果を伝える。
  */
@@ -334,12 +360,15 @@ export async function readDownloadedCsv(
 ): Promise<ReadDownloadedCsvResult> {
   const validation = validateDownloadedCsv(item);
   if (!validation.ok) {
-    return readFail(validation.reason ?? 'CSVファイルを読み取れませんでした');
+    return readFail(withDownloadDetails(validation.reason ?? 'CSVファイルを読み取れませんでした', item));
   }
 
   if (!(await reader.isFileAccessAllowed())) {
     await removeDownloadedFile(reader, item.id);
-    return readFail('ファイルの URL へのアクセスが許可されていません', FILE_ACCESS_DISABLED_CODE);
+    return readFail(
+      withDownloadDetails('ファイルの URL へのアクセスが許可されていません', item),
+      FILE_ACCESS_DISABLED_CODE
+    );
   }
 
   let content: string;
@@ -347,17 +376,19 @@ export async function readDownloadedCsv(
     const bytes = await reader.read(item.filename);
     if (bytes.byteLength > MAX_CSV_FILE_SIZE) {
       await removeDownloadedFile(reader, item.id);
-      return readFail('ファイルが大きすぎます');
+      return readFail(withDownloadDetails('ファイルが大きすぎます', item));
     }
     content = decodeCsvBytes(bytes);
   } catch {
     await removeDownloadedFile(reader, item.id);
-    return readFail('CSVファイルの読み取りに失敗しました');
+    return readFail(withDownloadDetails('CSVファイルの読み取りに失敗しました', item));
   }
 
   if (isHtmlContent(content)) {
     await removeDownloadedFile(reader, item.id);
-    return readFail('CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）');
+    return readFail(
+      withDownloadDetails('CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）', item)
+    );
   }
 
   const fileRemoved = await removeDownloadedFile(reader, item.id);
