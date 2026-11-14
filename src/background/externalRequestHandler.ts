@@ -462,22 +462,6 @@ export class ExternalRequestHandler {
     { readonly resolver: (result: DownloadResponse) => void; readonly timer: ReturnType<typeof setTimeout> }
   >();
 
-  private armAndroidIntercept(tabId: number, nonce: string): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      chrome.tabs.sendMessage(
-        tabId,
-        { action: 'arm-android-csv-intercept', payload: { nonce } },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve(false);
-            return;
-          }
-          resolve((response as DownloadResponse)?.success === true);
-        }
-      );
-    });
-  }
-
   private waitForAndroidInterceptResult(nonce: string, timeoutMs: number): Promise<DownloadResponse> {
     return new Promise<DownloadResponse>((resolve) => {
       const timer = setTimeout(() => {

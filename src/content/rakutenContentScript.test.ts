@@ -554,6 +554,7 @@ describe('rakutenContentScript ステップ実行', () => {
       const armListener = (event: MessageEvent): void => {
         if (event.data?.type === 'rakuten-csv-intercept:arm') {
           armed.push('arm')
+          window.postMessage({ type: 'rakuten-csv-intercept:armed', nonce: event.data?.nonce }, '*')
         }
       }
       window.addEventListener('message', armListener)
@@ -610,11 +611,21 @@ describe('rakutenContentScript ステップ実行', () => {
       })
       chrome.runtime.sendMessage = sendMessageMock as never
 
+      // MAIN の ack を返すため、arm signal を受けたら ack を返す
+      const ackListener = (event: MessageEvent): void => {
+        if (event.data?.type === 'rakuten-csv-intercept:arm' && event.data?.nonce === 'n-decode') {
+          window.postMessage({ type: 'rakuten-csv-intercept:armed', nonce: 'n-decode' }, '*')
+        }
+      }
+      window.addEventListener('message', ackListener)
+
       const res = await sendMessage({
         action: 'arm-android-csv-intercept',
         payload: { nonce: 'n-decode' },
       } as unknown as ChromeMessage)
       expect(res.success).toBe(true)
+
+      window.removeEventListener('message', ackListener)
 
       const bytes = new Uint8Array([0x82, 0xa0])
       window.postMessage(
