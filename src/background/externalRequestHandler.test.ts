@@ -903,6 +903,75 @@ describe('externalRequestHandler', () => {
       expect(second).toBeTruthy()
     })
 
+    it('ステップ失敗理由に query を含めない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const executor = createDownloadExecutor()
+      const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      // override runner
+      ;(handler as unknown as { downloadRunner: unknown }).downloadRunner = executor
+      vi.spyOn(executor, 'executeDownloadRequest').mockResolvedValue({
+        success: false,
+        error: 'https://example.com/csv?secret=leak failed',
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'arm-android-csv-intercept') {
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+
+    it('例外時も失敗理由に query を含めない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const executor = createDownloadExecutor()
+      const handler = new ExternalRequestHandler({
+        downloadRunner: executor,
+        allowedOrigins: ALLOWED_PATTERNS,
+        androidInterceptTimeoutMs: 50,
+      })
+      vi.spyOn(executor, 'executeDownloadRequest').mockRejectedValue(new Error('https://example.com/csv?secret=leak'))
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'arm-android-csv-intercept') {
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+
     it('失敗メッセージに秘密を含めない', async () => {
       const { handler } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)

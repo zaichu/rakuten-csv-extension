@@ -413,11 +413,11 @@ export class ExternalRequestHandler {
         },
         reportStep
       );
-    } catch (error) {
+    } catch {
       this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
-        reason: error instanceof Error ? error.message : 'CSVの取得に失敗しました',
+        reason: 'CSVの取得に失敗しました',
         stepTimings,
       };
     }
@@ -426,7 +426,7 @@ export class ExternalRequestHandler {
       this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
-        reason: stepResult.error ?? 'CSVの取得に失敗しました',
+        reason: 'CSVの取得に失敗しました',
         stepTimings,
       };
     }

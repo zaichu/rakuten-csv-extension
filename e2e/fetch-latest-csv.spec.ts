@@ -139,6 +139,47 @@ test('画面から依頼するとCSV本文と取得時刻が返る', async () =>
   }
 });
 
+test('Android経路でもCSV本文が返る', async () => {
+  const { context, extensionId } = await launchExtension();
+  try {
+    const [serviceWorker] = context.serviceWorkers();
+    await serviceWorker.evaluate(() => {
+      chrome.runtime.getPlatformInfo = async () => ({ os: 'android' }) as chrome.runtime.PlatformInfo;
+    });
+
+    await openRakutenMock(context);
+
+    const appPage = await context.newPage();
+    await appPage.route('http://localhost:4173/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<html></html>' });
+    });
+    await requestFromApp(appPage, extensionId, ['assetbalance']);
+
+    await appPage.waitForFunction(
+      () => {
+        const messages = (window as unknown as { __messages?: AppMessage[] }).__messages ?? [];
+        return messages.some((message) => message.type === 'result' || message.type === 'error');
+      },
+      undefined,
+      { timeout: 45_000 }
+    );
+
+    const messages = await appPage.evaluate(
+      () => (window as unknown as { __messages: AppMessage[] }).__messages
+    );
+
+    const error = messages.find((message) => message.type === 'error');
+    expect(error, error?.error).toBeUndefined();
+
+    const result = messages.find((message) => message.type === 'result');
+    expect(result?.failures).toEqual([]);
+    expect(result?.csvs?.[0].kind).toBe('assetbalance');
+    expect(result?.csvs?.[0].content).toBe(EXPECTED_CSV);
+  } finally {
+    await context.close();
+  }
+});
+
 test('未ログインならパスキーボタンを1回だけ押してから取得を続ける', async () => {
   const { context, extensionId } = await launchExtension();
   try {

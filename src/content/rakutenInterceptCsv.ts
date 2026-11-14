@@ -197,7 +197,16 @@ export function disarm(): void {
       }
     } catch { /* ignore */ }
 
-    try { window.open = originals.windowOpen; } catch { /* ignore */ }
+    try {
+      if (originals.windowOpenOwn && originals.windowOpenDesc) {
+        Object.defineProperty(window, 'open', originals.windowOpenDesc);
+      } else {
+        try { delete (window as { open?: unknown }).open; } catch { /* ignore */ }
+        try { window.open = originals.windowOpen; } catch { /* ignore */ }
+      }
+    } catch {
+      try { window.open = originals.windowOpen; } catch { /* ignore */ }
+    }
 
     try {
       if (submitListener) {

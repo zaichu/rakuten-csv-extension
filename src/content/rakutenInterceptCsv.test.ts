@@ -314,6 +314,25 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     expect(result?.ok).toBe(false)
   })
 
+  it('requestSubmit でも fetch は1回だけ', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    arm('nonce-reqsubmit-once')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = 'https://example.com/csv'
+    document.body.appendChild(form)
+
+    form.requestSubmit()
+    await flush()
+    await flush()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('disarm 後に armed が false になる', () => {
     arm('nonce-disarm')
     expect(isArmed()).toBe(true)
