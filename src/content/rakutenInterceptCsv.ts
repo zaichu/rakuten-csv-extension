@@ -202,7 +202,6 @@ export function disarm(): void {
         Object.defineProperty(window, 'open', originals.windowOpenDesc);
       } else {
         try { delete (window as { open?: unknown }).open; } catch { /* ignore */ }
-        try { window.open = originals.windowOpen; } catch { /* ignore */ }
       }
     } catch {
       try { window.open = originals.windowOpen; } catch { /* ignore */ }

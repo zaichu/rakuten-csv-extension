@@ -890,7 +890,7 @@ describe('externalRequestHandler', () => {
 
       const first = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(first.csvs).toEqual([])
-      expect(first.failures[0]?.reason).toContain('横取りなし')
+      expect(first.failures[0]?.reason).toBe('横取りなし / method=不明 / status=なし / contentType=不明')
 
       // second request
       const { port: port2, posted: posted2, listeners: listeners2 } = createPort(ALLOWED_ORIGIN)

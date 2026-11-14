@@ -456,7 +456,6 @@ export class ExternalRequestHandler {
         kind,
         content,
         fetchedAt: new Date().toISOString(),
-        fileRemoved: true,
       },
       stepTimings,
     };
@@ -487,7 +486,7 @@ export class ExternalRequestHandler {
     return new Promise<DownloadResponse>((resolve) => {
       const timer = setTimeout(() => {
         this.androidInterceptResolvers.delete(nonce);
-        resolve({ success: false, error: '横取りなし' });
+        resolve({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
       }, timeoutMs);
       this.androidInterceptResolvers.set(nonce, {
         resolver: (result) => {
