@@ -82,7 +82,6 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     await flush()
 
     expect(isArmed()).toBe(false)
-    // restored submit should be original function
     expect(typeof HTMLFormElement.prototype.submit).toBe('function')
   })
 
@@ -122,7 +121,6 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     )
     vi.stubGlobal('fetch', fetchSpy)
 
-    // requestSubmit
     arm('n1')
     const form = document.createElement('form')
     form.method = 'POST'
@@ -133,7 +131,6 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     await flush()
     expect(fetchSpy).toHaveBeenCalled()
 
-    // anchor
     disarm()
     arm('n2')
     fetchSpy.mockClear()
@@ -144,7 +141,6 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(fetchSpy).toHaveBeenCalled()
 
-    // window.open
     disarm()
     arm('n4')
     fetchSpy.mockClear()

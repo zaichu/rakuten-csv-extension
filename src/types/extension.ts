@@ -14,7 +14,7 @@ export interface CsvSelectors {
 /**
  * CSVダウンロードのステップ定義
  */
-export type CsvDownloadStep = 
+export type CsvDownloadStep =
   | 'navigate-to-page'       // ページに遷移
   | 'select-tab'            // タブ選択（実現損益用）
   | 'select-period'         // 期間選択
@@ -70,9 +70,6 @@ export interface CsvDownloadMessage extends ChromeMessage {
      * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
      */
     readonly captureDownloadStart?: boolean;
-   /**
-    * Android 経路で Main world の横取り結果を突き合わせる nonce
-    */
    readonly androidInterceptNonce?: string;
   };
 }
@@ -88,9 +85,6 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
     readonly captureDownloadStart?: boolean;
-   /**
-    * Android 経路で Main world の横取り結果を突き合わせる nonce
-    */
    readonly androidInterceptNonce?: string;
   };
 }
@@ -168,9 +162,7 @@ export interface DownloadResponse extends BaseResponse {
   readonly message?: string;
   readonly step?: CsvDownloadStep;
   readonly code?: string;
-  /** Android経路で取得したCSV本文 */
   readonly content?: string;
-  /** Android経路の診断情報 */
   readonly contentType?: string;
   readonly status?: number;
   readonly requestType?: string;

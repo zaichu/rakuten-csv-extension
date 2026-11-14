@@ -905,12 +905,10 @@ describe('externalRequestHandler', () => {
       expect(first.csvs).toEqual([])
       expect(first.failures[0]?.reason).toBe('横取りなし / method=不明 / status=なし / contentType=不明')
 
-      // second request
       const { port: port2, posted: posted2, listeners: listeners2 } = createPort(ALLOWED_ORIGIN)
       handler.handleConnection(port2)
       listeners2[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
 
-      // arm result delivered this time
       // simulate resolve via a new handler? Instead just expect timeout again or success if armed result delivered.
       const second = await waitForMessage<FetchLatestCsvResult>(posted2, isResult)
       expect(second).toBeTruthy()
@@ -920,7 +918,6 @@ describe('externalRequestHandler', () => {
       vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
       const executor = createDownloadExecutor()
       const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
-      // override runner
       ;(handler as unknown as { downloadRunner: unknown }).downloadRunner = executor
       vi.spyOn(executor, 'executeDownloadRequest').mockResolvedValue({
         success: false,

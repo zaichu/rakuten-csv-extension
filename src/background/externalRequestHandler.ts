@@ -48,7 +48,6 @@ export interface ExternalRequestHandlerConfig {
   readonly downloadCompleteTimeoutMs?: number;
   /** タブの読み込み完了を待つ最大時間(ms) */
   readonly tabLoadTimeoutMs?: number;
-  /** Android 経路で横取り結果を待つ最大時間(ms) */
   readonly androidInterceptTimeoutMs?: number;
   /** ダウンロードされたファイルの読み取り */
   readonly fileReader?: DownloadedFileReader;
@@ -381,9 +380,6 @@ export class ExternalRequestHandler {
     }
   }
 
-  /**
-   * Android 経路: ページ内で横取りした CSV を取得する
-   */
   private async fetchKindAndroid(
     tabId: number,
     kind: CsvDownloadType,

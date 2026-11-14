@@ -25,7 +25,6 @@ await esbuild.build({
   platform: 'browser',
 })
 
-// content script (ISOLATED)
 await esbuild.build({
   ...esbuildBase,
   entryPoints: [join(root, 'src/content/rakutenContentScript.ts')],
@@ -35,7 +34,6 @@ await esbuild.build({
   define: { 'import.meta': '{}' },
 })
 
-// content script (MAIN world, Android CSV intercept)
 await esbuild.build({
   ...esbuildBase,
   entryPoints: [join(root, 'src/content/rakutenInterceptCsv.ts')],

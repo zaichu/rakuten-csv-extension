@@ -70,6 +70,7 @@ function resolveUrl(value: string | null | undefined): string {
   try {
     return new URL(value ?? '', window.location.href).href;
   } catch {
+      void 0;
     return value ?? '';
   }
 }
@@ -161,6 +162,7 @@ async function runFetch(
       nonce
     );
   } catch {
+      void 0;
     postResult(
       {
         ok: false,
@@ -213,6 +215,7 @@ export function disarm(): void {
         try { delete (window as { open?: unknown }).open; } catch { /* ignore */ }
       }
     } catch {
+      void 0;
       try { window.open = originals.windowOpen; } catch { /* ignore */ }
     }
 
@@ -290,7 +293,6 @@ export function arm(nonce?: string): void {
     }
   };
 
-  // form submit event (capture)
   submitListener = (event: Event): void => {
     if (!armed) {
       return;
@@ -316,7 +318,6 @@ export function arm(nonce?: string): void {
   };
   document.addEventListener('submit', submitListener, true);
 
-  // anchor click (capture)
   clickListener = (event: MouseEvent): void => {
     if (!armed) {
       return;
@@ -354,7 +355,7 @@ export function arm(nonce?: string): void {
       configurable: true,
     });
   } catch {
-    // ignore
+      void 0;
   }
   try {
     Object.defineProperty(window.location, 'replace', {
@@ -369,7 +370,7 @@ export function arm(nonce?: string): void {
       configurable: true,
     });
   } catch {
-    // ignore
+      void 0;
   }
   try {
     Object.defineProperty(window.location, 'href', {
@@ -388,7 +389,7 @@ export function arm(nonce?: string): void {
       configurable: true,
     });
   } catch {
-    // ignore
+      void 0;
   }
 
   window.open = ((url?: string | URL) => {
@@ -416,19 +417,20 @@ export function arm(nonce?: string): void {
             return;
           }
         } catch {
+      void 0;
           return;
         }
         try {
           (event as { preventDefault?: () => void }).preventDefault?.();
         } catch {
-          // ignore
-        }
+      void 0;
+              }
         void runFetch('location', resolveUrl(url), 'GET', undefined, currentNonce);
       };
       nav.addEventListener('navigate', navigationListener);
     }
   } catch {
-    // ignore
+      void 0;
   }
 
   armed = true;
