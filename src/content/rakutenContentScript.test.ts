@@ -566,4 +566,41 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(calls.some((args) => args.some((arg) => typeof arg === 'string' && arg.includes('#menu-link')))).toBe(true)
     })
   })
+  describe('Android CSV横取りのデコード', () => {
+    it('Shift_JIS の本文をデコードして転送する', async () => {
+      const sendMessageMock = vi.fn((_message: unknown, callback?: (response: unknown) => void) => {
+        callback?.({ success: true })
+        return Promise.resolve({ success: true })
+      })
+      chrome.runtime.sendMessage = sendMessageMock as never
+
+      const res = await sendMessage({
+        action: 'arm-android-csv-intercept',
+        payload: { nonce: 'n-decode' },
+      } as unknown as ChromeMessage)
+      expect(res.success).toBe(true)
+
+      const bytes = new Uint8Array([0x82, 0xa0])
+      window.postMessage(
+        {
+          type: 'rakuten-csv-intercept:result',
+          nonce: 'n-decode',
+          ok: true,
+          buffer: bytes.buffer,
+          contentType: 'text/csv',
+          status: 200,
+        },
+        '*'
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const call = sendMessageMock.mock.calls.find(
+        (entry) => (entry[0] as { action?: string })?.action === 'android-csv-intercept-result'
+      )
+      expect(call).toBeTruthy()
+      expect((call?.[0] as { payload?: { content?: string } })?.payload?.content).toBe('あ')
+    })
+  })
+
 })

@@ -13,7 +13,7 @@ import type {
   CsvSelectors
 } from '../types';
 import { CSV_DOWNLOAD_STEP_DEFINITIONS } from '../types';
-import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
+import { RakutenUtils, DomUtils, sleep, withTimeout, decodeCsvBytes } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -199,10 +199,10 @@ class RakutenCsvExtension {
   private armAndroidCsvIntercept(nonce?: string): DownloadResponse {
     const n = nonce ?? '';
     const listener = (event: MessageEvent): void => {
-      if (event.origin !== window.location.origin) {
+      if (event.origin !== '' && event.origin !== window.location.origin) {
         return;
       }
-      if (event.source !== window) {
+      if (event.source !== null && event.source !== window) {
         return;
       }
       const data = event.data as {
@@ -223,7 +223,7 @@ class RakutenCsvExtension {
       let content: string | undefined;
       if (data.ok && data.buffer) {
         try {
-          content = new TextDecoder().decode(data.buffer);
+          content = decodeCsvBytes(new Uint8Array(data.buffer));
         } catch {
           content = undefined;
         }

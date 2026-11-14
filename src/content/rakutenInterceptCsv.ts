@@ -363,10 +363,10 @@ export function arm(nonce?: string): void {
 // signal listener
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (event: MessageEvent) => {
-    if (event.origin !== window.location.origin) {
+    if (event.origin !== '' && event.origin !== window.location.origin) {
       return;
     }
-    if (event.source !== window) {
+    if (event.source !== null && event.source !== window) {
       return;
     }
     const data = event.data as { type?: string; nonce?: string } | null;
