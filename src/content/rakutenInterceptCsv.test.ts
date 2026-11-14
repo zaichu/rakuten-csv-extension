@@ -141,8 +141,7 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     a.href = 'https://example.com/csv'
     document.body.appendChild(a)
     a.click()
-    await flush()
-    await flush()
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(fetchSpy).toHaveBeenCalled()
 
     // window.open
@@ -361,6 +360,39 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     expect(String(url)).toBe('https://example.com/other')
     expect(options.method).toBe('POST')
     expect(options.body).toBe('btn=go')
+  })
+
+  it('anchor の onclick が requestSubmit しても fetch は1回でフォーム要求を使う', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    arm('nonce-anchor-onclick')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = 'https://example.com/form'
+    const input = document.createElement('input')
+    input.name = 'q'
+    input.value = 'v'
+    form.appendChild(input)
+    document.body.appendChild(form)
+
+    const anchor = document.createElement('a')
+    anchor.href = 'https://example.com/anchor'
+    anchor.onclick = () => {
+      form.requestSubmit()
+    }
+    document.body.appendChild(anchor)
+
+    anchor.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const [url, options] = fetchSpy.mock.calls[0]
+    expect(String(url)).toBe('https://example.com/form')
+    expect(options.method).toBe('POST')
   })
 
   it('disarm 後に armed が false になる', () => {

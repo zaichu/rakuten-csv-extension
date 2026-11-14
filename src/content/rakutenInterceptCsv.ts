@@ -39,6 +39,7 @@ let originals: {
 let submitListener: ((event: Event) => void) | undefined;
 let clickListener: ((event: MouseEvent) => void) | undefined;
 let pendingRequestType: 'form-submit' | 'requestSubmit' = 'form-submit';
+let submitScheduled = false;
 
 function isArmed(): boolean {
   return armed;
@@ -232,6 +233,8 @@ export function disarm(): void {
   originals = undefined;
   submitListener = undefined;
   clickListener = undefined;
+  submitScheduled = false;
+  pendingRequestType = 'form-submit';
 }
 
 export function arm(nonce?: string): void {
@@ -269,7 +272,13 @@ export function arm(nonce?: string): void {
       return originals!.formRequestSubmit.call(this, submitter);
     }
     pendingRequestType = 'requestSubmit';
-    return originals!.formRequestSubmit.call(this, submitter);
+    try {
+      return originals!.formRequestSubmit.call(this, submitter);
+    } finally {
+      queueMicrotask(() => {
+        pendingRequestType = 'form-submit';
+      });
+    }
   };
 
   // form submit event (capture)
@@ -285,12 +294,15 @@ export function arm(nonce?: string): void {
     const submitter = (event as SubmitEvent).submitter as HTMLElement | null;
     const requestType = pendingRequestType;
     pendingRequestType = 'form-submit';
+    submitScheduled = true;
     queueMicrotask(() => {
       if (intercepted) {
+        submitScheduled = false;
         return;
       }
       const request = buildRequest(form, submitter);
       void runFetch(requestType, request.url, request.method, request.body, currentNonce);
+      submitScheduled = false;
     });
   };
   document.addEventListener('submit', submitListener, true);
@@ -306,12 +318,17 @@ export function arm(nonce?: string): void {
     }
     event.preventDefault();
     const href = target.href;
-    queueMicrotask(() => {
-      if (intercepted) {
+    const tryFetchAnchor = (attempts: number): void => {
+      if (intercepted || submitScheduled) {
+        return;
+      }
+      if (attempts < 5) {
+        setTimeout(() => tryFetchAnchor(attempts + 1), 0);
         return;
       }
       void runFetch('anchor', href, 'GET', undefined, currentNonce);
-    });
+    };
+    setTimeout(() => tryFetchAnchor(0), 0);
   };
   document.addEventListener('click', clickListener, true);
 
