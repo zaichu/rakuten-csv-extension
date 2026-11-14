@@ -14,7 +14,7 @@ import {
 
 /**
  * ダウンロードされたファイルの捕捉・検査・読み取りの挙動を固定する。
- * 取り違え防止(対象タブ以外からの通知)、検査(ダウンロード元・拡張子・サイズ)、
+ * 取り違え防止(対象タブ以外からの通知)、検査(ダウンロード元・MIME・サイズ)、
  * 読み取り(成功・HTML・読めない)、削除の成否、ファイルアクセス不可の返却を検証する。
  */
 
@@ -29,6 +29,7 @@ function createDownloadItem(overrides: Partial<chrome.downloads.DownloadItem> = 
     finalUrl: 'https://www.rakuten-sec.co.jp/web/csv/assetbalance.csv',
     filename: '/home/user/Downloads/rakuten_assetbalance.csv',
     fileSize: 128,
+    mime: 'text/csv',
     state: 'complete',
     ...overrides,
   } as chrome.downloads.DownloadItem
@@ -248,10 +249,29 @@ describe('downloadedFile', () => {
       expect(result.reason).toBe('ダウンロード元が楽天証券のファイルではありません')
     })
 
-    it('拡張子がCSVでなければ読み込まない', () => {
-      const result = validateDownloadedCsv(createDownloadItem({ filename: '/home/user/Downloads/a.txt' }))
+    it('拡張子がなくても楽天証券のCSVは読み込んでよい', () => {
+      expect(
+        validateDownloadedCsv(createDownloadItem({ filename: '/storage/emulated/0/Download/12345' }))
+      ).toEqual({ ok: true })
+    })
+
+    it('MIMEが空でも楽天証券のCSVは読み込んでよい', () => {
+      expect(validateDownloadedCsv(createDownloadItem({ mime: '' }))).toEqual({ ok: true })
+      expect(validateDownloadedCsv(createDownloadItem({ mime: 'application/octet-stream' }))).toEqual({
+        ok: true,
+      })
+    })
+
+    it('MIMEがHTMLなら読み込まない', () => {
+      const result = validateDownloadedCsv(createDownloadItem({ mime: 'text/html' }))
       expect(result.ok).toBe(false)
-      expect(result.reason).toBe('拡張子がCSVのファイルではありません')
+      expect(result.reason).toBe('MIMEがHTMLのため読み込めません')
+    })
+
+    it('MIMEがパラメータ付きHTMLなら読み込まない', () => {
+      const result = validateDownloadedCsv(createDownloadItem({ mime: 'text/html; charset=UTF-8' }))
+      expect(result.ok).toBe(false)
+      expect(result.reason).toBe('MIMEがHTMLのため読み込めません')
     })
 
     it('空のファイルは読み込まない', () => {
@@ -325,6 +345,30 @@ describe('downloadedFile', () => {
       expect(result).toEqual({ success: true, content: '銘柄コード,数量\n', fileRemoved: false })
     })
 
+    it('拡張子がなくてもMIMEがCSVなら読み進める', async () => {
+      const reader = createFileReader()
+      const item = createDownloadItem({
+        filename: '/storage/emulated/0/Download/12345',
+        mime: 'text/csv',
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result).toEqual({ success: true, content: '銘柄コード,数量\n', fileRemoved: true })
+    })
+
+    it('拡張子がなくMIMEが空でも読み進める', async () => {
+      const reader = createFileReader()
+      const item = createDownloadItem({
+        filename: '/storage/emulated/0/Download/12345',
+        mime: '',
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result).toEqual({ success: true, content: '銘柄コード,数量\n', fileRemoved: true })
+    })
+
     it('HTMLの中身は失敗として扱う', async () => {
       const reader = createFileReader({
         content: new TextEncoder().encode('<html><body>ログイン</body></html>'),
@@ -332,11 +376,32 @@ describe('downloadedFile', () => {
 
       const result = await readDownloadedCsv(reader, createDownloadItem())
 
-      expect(result).toEqual({
-        success: false,
-        reason: 'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）',
-      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain(
+          'CSVの代わりにHTMLが返されました（ログインが必要な可能性があります）'
+        )
+        expect(result.reason).toContain('MIME: text/csv')
+      }
       expect(reader.removeFile).toHaveBeenCalledWith(DOWNLOAD_ID)
+    })
+
+    it('MIMEがHTMLなら読み進めない', async () => {
+      const reader = createFileReader()
+
+      const result = await readDownloadedCsv(
+        reader,
+        createDownloadItem({ mime: 'text/html', fileSize: 512 })
+      )
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('MIMEがHTMLのため読み込めません')
+        expect(result.reason).toContain('MIME: text/html')
+        expect(result.reason).toContain('サイズ: 512')
+      }
+      expect(reader.read).not.toHaveBeenCalled()
+      expect(reader.removeFile).not.toHaveBeenCalled()
     })
 
     it('読めない場合は失敗として扱う', async () => {
@@ -344,7 +409,12 @@ describe('downloadedFile', () => {
 
       const result = await readDownloadedCsv(reader, createDownloadItem())
 
-      expect(result).toEqual({ success: false, reason: 'CSVファイルの読み取りに失敗しました' })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('CSVファイルの読み取りに失敗しました')
+        expect(result.reason).toContain('MIME: text/csv')
+        expect(result.reason).toContain('サイズ: 128')
+      }
       expect(reader.removeFile).toHaveBeenCalledWith(DOWNLOAD_ID)
     })
 
@@ -353,11 +423,11 @@ describe('downloadedFile', () => {
 
       const result = await readDownloadedCsv(reader, createDownloadItem())
 
-      expect(result).toEqual({
-        success: false,
-        reason: 'ファイルの URL へのアクセスが許可されていません',
-        code: 'file-access-disabled',
-      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('ファイルの URL へのアクセスが許可されていません')
+        expect(result.code).toBe('file-access-disabled')
+      }
       expect(reader.read).not.toHaveBeenCalled()
       expect(reader.removeFile).toHaveBeenCalledWith(DOWNLOAD_ID)
     })
@@ -373,12 +443,32 @@ describe('downloadedFile', () => {
         })
       )
 
-      expect(result).toEqual({
-        success: false,
-        reason: 'ダウンロード元が楽天証券のファイルではありません',
-      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('ダウンロード元が楽天証券のファイルではありません')
+      }
       expect(reader.read).not.toHaveBeenCalled()
       expect(reader.removeFile).not.toHaveBeenCalled()
+    })
+
+    it('失敗理由にはパスを出さず拡張子・MIME・サイズを添える', async () => {
+      const reader = createFileReader({ readError: new Error('read failed') })
+      const item = createDownloadItem({
+        filename: 'C:\\Users\\some-user\\Downloads\\data',
+        mime: 'application/octet-stream',
+        fileSize: 42,
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('拡張子: なし')
+        expect(result.reason).toContain('MIME: application/octet-stream')
+        expect(result.reason).toContain('サイズ: 42')
+        expect(result.reason).not.toContain('some-user')
+        expect(result.reason).not.toContain('C:\\')
+      }
     })
   })
 })

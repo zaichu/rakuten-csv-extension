@@ -521,9 +521,9 @@ describe('externalRequestHandler', () => {
       listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVファイルの読み取りに失敗しました' },
-      ])
+      expect(result.failures).toHaveLength(1)
+      expect(result.failures[0]?.kind).toBe('assetbalance')
+      expect(result.failures[0]?.reason).toContain('CSVファイルの読み取りに失敗しました')
       expect(result.csvs).toEqual([])
     })
 
@@ -538,13 +538,10 @@ describe('externalRequestHandler', () => {
       listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toEqual([
-        {
-          kind: 'assetbalance',
-          reason: 'ファイルの URL へのアクセスが許可されていません',
-          code: 'file-access-disabled',
-        },
-      ])
+      expect(result.failures).toHaveLength(1)
+      expect(result.failures[0]?.kind).toBe('assetbalance')
+      expect(result.failures[0]?.reason).toContain('ファイルの URL へのアクセスが許可されていません')
+      expect(result.failures[0]?.code).toBe('file-access-disabled')
       expect(result.csvs).toEqual([])
     })
 
