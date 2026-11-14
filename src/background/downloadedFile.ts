@@ -211,9 +211,9 @@ export function createDownloadedFileReader(): DownloadedFileReader {
       }
     },
     read: async (path: string) => {
-      const response = await fetch(toFileUrl(path));
+      const response = await fetch(toReadUrl(path));
       if (!response.ok) {
-        throw new Error('ファイルを読み取れませんでした');
+        throw new Error(`HTTP ${response.status}`);
       }
       return new Uint8Array(await response.arrayBuffer());
     },
@@ -267,6 +267,66 @@ export function toFileUrl(path: string): string {
     return encodeURIComponent(segment);
   });
   return `file:///${segments.join('/')}`;
+}
+
+function isFilePath(value: string): boolean {
+  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function schemeOf(value: string): string | undefined {
+  const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.exec(value);
+  return match ? value.slice(0, match[0].length - 1).toLowerCase() : undefined;
+}
+
+/**
+ * 読み取りに使うURLを作る
+ *
+ * fileパスはfile URLに変換し、スキーム付き(content/blob/data/http(s))はそのまま返す
+ */
+export function toReadUrl(path: string): string {
+  if (isFilePath(path) || schemeOf(path) === undefined) {
+    return toFileUrl(path);
+  }
+  return path;
+}
+
+interface ReadCandidate {
+  readonly scheme: string;
+  readonly target: string;
+}
+
+function buildReadCandidates(item: chrome.downloads.DownloadItem): ReadCandidate[] {
+  const candidates: ReadCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (scheme: string, target: string): void => {
+    if (!target || seen.has(target)) {
+      return;
+    }
+    seen.add(target);
+    candidates.push({ scheme, target });
+  };
+  if (isFilePath(item.filename) || schemeOf(item.filename) === undefined) {
+    push('file', item.filename);
+  } else {
+    push(schemeOf(item.filename) ?? 'unknown', item.filename);
+  }
+  for (const url of [item.url, item.finalUrl]) {
+    if (typeof url === 'string' && (url.startsWith('blob:') || url.startsWith('data:'))) {
+      push(schemeOf(url) ?? 'unknown', url);
+    }
+  }
+  return candidates;
+}
+
+function describeReadError(error: unknown): string {
+  if (error instanceof Error) {
+    const status = /^HTTP (\d{3})$/.exec(error.message);
+    if (status) {
+      return `HTTP ${status[1]}`;
+    }
+    return error.name || 'Error';
+  }
+  return 'Error';
 }
 
 /**
@@ -326,7 +386,8 @@ function isHtmlMime(mime: string | undefined): boolean {
 function withDownloadDetails(reason: string, item: chrome.downloads.DownloadItem): string {
   const basename = item.filename.split(/[/\\]/).pop() ?? '';
   const dot = basename.lastIndexOf('.');
-  const extension = dot >= 0 && dot < basename.length - 1 ? basename.slice(dot).toLowerCase() : 'なし';
+  const rawExtension = dot >= 0 && dot < basename.length - 1 ? basename.slice(dot).toLowerCase() : 'なし';
+  const extension = rawExtension.length > 16 ? 'なし' : rawExtension;
   const mime = item.mime || '不明';
   return `${reason}（拡張子: ${extension} / MIME: ${mime} / サイズ: ${String(item.fileSize)}）`;
 }
@@ -363,17 +424,47 @@ export async function readDownloadedCsv(
     return readFail(withDownloadDetails(validation.reason ?? 'CSVファイルを読み取れませんでした', item));
   }
 
-  if (!(await reader.isFileAccessAllowed())) {
+  const candidates = buildReadCandidates(item);
+  let fileAccessAllowed: boolean | undefined;
+  const attempts: string[] = [];
+  let bytes: Uint8Array | undefined;
+  for (const candidate of candidates) {
+    if (candidate.scheme === 'file') {
+      if (fileAccessAllowed === undefined) {
+        fileAccessAllowed = await reader.isFileAccessAllowed();
+      }
+      if (!fileAccessAllowed) {
+        attempts.push('file:許可なし');
+        continue;
+      }
+    }
+    try {
+      bytes = await reader.read(candidate.target);
+      break;
+    } catch (error) {
+      attempts.push(`${candidate.scheme}:${describeReadError(error)}`);
+    }
+  }
+
+  if (bytes === undefined) {
     await removeDownloadedFile(reader, item.id);
+    const onlyPermissionDenied = fileAccessAllowed === false;
+    if (onlyPermissionDenied) {
+      return readFail(
+        withDownloadDetails(
+          `ファイルの URL へのアクセスが許可されていません（試行: ${attempts.join(' / ')}）`,
+          item
+        ),
+        FILE_ACCESS_DISABLED_CODE
+      );
+    }
     return readFail(
-      withDownloadDetails('ファイルの URL へのアクセスが許可されていません', item),
-      FILE_ACCESS_DISABLED_CODE
+      withDownloadDetails(`CSVファイルの読み取りに失敗しました（試行: ${attempts.join(' / ')}）`, item)
     );
   }
 
   let content: string;
   try {
-    const bytes = await reader.read(item.filename);
     if (bytes.byteLength > MAX_CSV_FILE_SIZE) {
       await removeDownloadedFile(reader, item.id);
       return readFail(withDownloadDetails('ファイルが大きすぎます', item));

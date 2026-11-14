@@ -7,6 +7,7 @@ import {
   MAX_CSV_FILE_SIZE,
   readDownloadedCsv,
   toFileUrl,
+  toReadUrl,
   validateDownloadedCsv,
   waitForCompletedDownload,
   type DownloadedFileReader,
@@ -468,6 +469,143 @@ describe('downloadedFile', () => {
         expect(result.reason).toContain('サイズ: 42')
         expect(result.reason).not.toContain('some-user')
         expect(result.reason).not.toContain('C:\\')
+      }
+    })
+
+    it('fileの許可がなくblobも失敗したら権限エラーのコードを返す', async () => {
+      const read = vi.fn(async () => {
+        throw new TypeError('fetch failed')
+      })
+      const reader: FileReaderStub = {
+        isFileAccessAllowed: vi.fn(async () => false),
+        read,
+        removeFile: vi.fn(async () => true),
+        eraseHistory: vi.fn(async () => undefined),
+      }
+      const item = createDownloadItem({
+        filename: '/storage/emulated/0/Download/12345',
+        url: 'blob:https://www.rakuten-sec.co.jp/uuid',
+        finalUrl: 'blob:https://www.rakuten-sec.co.jp/uuid',
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('ファイルの URL へのアクセスが許可されていません')
+        expect(result.code).toBe('file-access-disabled')
+      }
+    })
+
+    it('fileパスはfile URL経路で読み、既存の変換を変えない', () => {
+      expect(toReadUrl('/home/user/Downloads/a.csv')).toBe('file:///home/user/Downloads/a.csv')
+      expect(toReadUrl('C:\\Users\\user\\Downloads\\a.csv')).toBe(
+        'file:///C:/Users/user/Downloads/a.csv'
+      )
+    })
+
+    it('スキーム付きのfilenameはそのまま読む', () => {
+      expect(toReadUrl('content://media/external/downloads/123')).toBe(
+        'content://media/external/downloads/123'
+      )
+      expect(toReadUrl('blob:https://www.rakuten-sec.co.jp/uuid')).toBe(
+        'blob:https://www.rakuten-sec.co.jp/uuid'
+      )
+      expect(toReadUrl('https://www.rakuten-sec.co.jp/csv/a.csv')).toBe(
+        'https://www.rakuten-sec.co.jp/csv/a.csv'
+      )
+    })
+
+    it('contentのfilenameはファイルアクセス許可がなくても試す', async () => {
+      const reader = createFileReader({ fileAccessAllowed: false })
+      const item = createDownloadItem({ filename: 'content://media/external/downloads/123' })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result).toEqual({ success: true, content: '銘柄コード,数量\n', fileRemoved: true })
+      expect(reader.read).toHaveBeenCalledWith('content://media/external/downloads/123')
+      expect(reader.isFileAccessAllowed).not.toHaveBeenCalled()
+    })
+
+    it('fileパスの読み取りに失敗したらitem.urlのblobを読む', async () => {
+      const content = new TextEncoder().encode('銘柄コード,数量\n')
+      const read = vi.fn(async (target: string) => {
+        if (target.startsWith('blob:')) {
+          return content
+        }
+        throw new Error('file read failed')
+      })
+      const reader: FileReaderStub = {
+        isFileAccessAllowed: vi.fn(async () => true),
+        read,
+        removeFile: vi.fn(async () => true),
+        eraseHistory: vi.fn(async () => undefined),
+      }
+      const item = createDownloadItem({
+        filename: '/storage/emulated/0/Download/12345',
+        url: 'blob:https://www.rakuten-sec.co.jp/uuid',
+        finalUrl: 'blob:https://www.rakuten-sec.co.jp/uuid',
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result).toEqual({ success: true, content: '銘柄コード,数量\n', fileRemoved: true })
+      expect(read).toHaveBeenNthCalledWith(1, '/storage/emulated/0/Download/12345')
+      expect(read).toHaveBeenNthCalledWith(2, 'blob:https://www.rakuten-sec.co.jp/uuid')
+    })
+
+    it('全部失敗したら理由にスキームと結果を入れ、パスは入れない', async () => {
+      const read = vi.fn(async () => {
+        throw new TypeError('fetch failed')
+      })
+      const reader: FileReaderStub = {
+        isFileAccessAllowed: vi.fn(async () => true),
+        read,
+        removeFile: vi.fn(async () => true),
+        eraseHistory: vi.fn(async () => undefined),
+      }
+      const item = createDownloadItem({
+        filename: 'content://media/secret-user-path/123',
+        url: 'blob:https://www.rakuten-sec.co.jp/secret-uuid',
+        finalUrl: 'blob:https://www.rakuten-sec.co.jp/secret-uuid',
+        mime: 'text/csv',
+        fileSize: 128,
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('content')
+        expect(result.reason).toContain('blob')
+        expect(result.reason).toContain('TypeError')
+        expect(result.reason).not.toContain('secret-user-path')
+        expect(result.reason).not.toContain('secret-uuid')
+        expect(result.reason).toContain('MIME: text/csv')
+        expect(result.reason).toContain('サイズ: 128')
+      }
+      expect(reader.removeFile).toHaveBeenCalledWith(DOWNLOAD_ID)
+    })
+
+    it('HTTP失敗ではステータスを理由に入れる', async () => {
+      const read = vi.fn(async () => {
+        throw new Error('HTTP 404')
+      })
+      const reader: FileReaderStub = {
+        isFileAccessAllowed: vi.fn(async () => true),
+        read,
+        removeFile: vi.fn(async () => true),
+        eraseHistory: vi.fn(async () => undefined),
+      }
+      const item = createDownloadItem({ filename: 'content://media/external/downloads/123' })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('content')
+        expect(result.reason).toContain('HTTP 404')
+        expect(result.reason).not.toContain('media/external')
       }
     })
   })
