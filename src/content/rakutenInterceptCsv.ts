@@ -214,6 +214,7 @@ export function disarm(): void {
       }
     } catch {
       try { window.open = originals.windowOpen; } catch { /* ignore */ }
+    }
 
     try {
       const nav = (window as { navigation?: { removeEventListener?: (type: string, cb: unknown) => void } }).navigation;
@@ -222,7 +223,6 @@ export function disarm(): void {
       }
     } catch { /* ignore */ }
     navigationListener = undefined;
-    }
 
     try {
       if (submitListener) {

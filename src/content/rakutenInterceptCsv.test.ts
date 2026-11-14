@@ -425,6 +425,44 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     delete (window as unknown as { navigation?: unknown }).navigation
   })
 
+  it('armed 中の form.submit は元の submit を呼ばない', () => {
+    const realOriginal = HTMLFormElement.prototype.submit
+    const originalSpy = vi.fn()
+    HTMLFormElement.prototype.submit = originalSpy
+    try {
+      arm('nonce-no-original-submit')
+      const form = document.createElement('form')
+      form.method = 'GET'
+      form.action = 'https://example.com/csv'
+      document.body.appendChild(form)
+      form.submit()
+      expect(originalSpy).not.toHaveBeenCalled()
+    } finally {
+      disarm()
+      HTMLFormElement.prototype.submit = realOriginal
+    }
+  })
+
+  it('disarm 後に prototype と Navigation listener を復元する', () => {
+    const realSubmit = HTMLFormElement.prototype.submit
+    const realRequestSubmit = HTMLFormElement.prototype.requestSubmit
+    const nav = {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }
+    ;(window as unknown as { navigation: unknown }).navigation = nav
+
+    arm('nonce-restore')
+    expect(HTMLFormElement.prototype.submit).not.toBe(realSubmit)
+
+    disarm()
+    expect(HTMLFormElement.prototype.submit).toBe(realSubmit)
+    expect(HTMLFormElement.prototype.requestSubmit).toBe(realRequestSubmit)
+    expect(nav.removeEventListener).toHaveBeenCalledWith('navigate', expect.any(Function))
+
+    delete (window as unknown as { navigation?: unknown }).navigation
+  })
+
   it('disarm 後に armed が false になる', () => {
     arm('nonce-disarm')
     expect(isArmed()).toBe(true)
