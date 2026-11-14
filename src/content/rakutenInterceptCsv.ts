@@ -38,6 +38,7 @@ let originals: {
 } | undefined;
 let submitListener: ((event: Event) => void) | undefined;
 let clickListener: ((event: MouseEvent) => void) | undefined;
+let navigationListener: ((event: { destination?: { url?: string }; preventDefault?: () => void; canIntercept?: boolean }) => void) | undefined;
 let pendingRequestType: 'form-submit' | 'requestSubmit' = 'form-submit';
 let submitScheduled = false;
 
@@ -213,6 +214,14 @@ export function disarm(): void {
       }
     } catch {
       try { window.open = originals.windowOpen; } catch { /* ignore */ }
+
+    try {
+      const nav = (window as { navigation?: { removeEventListener?: (type: string, cb: unknown) => void } }).navigation;
+      if (nav?.removeEventListener && navigationListener) {
+        nav.removeEventListener('navigate', navigationListener);
+      }
+    } catch { /* ignore */ }
+    navigationListener = undefined;
     }
 
     try {
@@ -390,6 +399,37 @@ export function arm(nonce?: string): void {
     void runFetch('window.open', resolveUrl(href), 'GET', undefined, currentNonce);
     return null;
   }) as typeof window.open;
+
+  try {
+    const nav = (window as { navigation?: { addEventListener?: (type: string, cb: unknown) => void } }).navigation;
+    if (nav?.addEventListener) {
+      navigationListener = (event) => {
+        if (!armed || intercepted) {
+          return;
+        }
+        const url = (event as { destination?: { url?: string } }).destination?.url;
+        if (!url) {
+          return;
+        }
+        try {
+          if (new URL(url).origin !== window.location.origin) {
+            return;
+          }
+        } catch {
+          return;
+        }
+        try {
+          (event as { preventDefault?: () => void }).preventDefault?.();
+        } catch {
+          // ignore
+        }
+        void runFetch('location', resolveUrl(url), 'GET', undefined, currentNonce);
+      };
+      nav.addEventListener('navigate', navigationListener);
+    }
+  } catch {
+    // ignore
+  }
 
   armed = true;
   intercepted = false;

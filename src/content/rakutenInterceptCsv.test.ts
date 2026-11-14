@@ -395,6 +395,36 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     expect(options.method).toBe('POST')
   })
 
+  it('Navigation API の navigate で location を捕捉する', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const listeners: Array<(event: unknown) => void> = []
+    const nav = {
+      addEventListener: vi.fn((type: string, cb: (event: unknown) => void) => {
+        if (type === 'navigate') listeners.push(cb)
+      }),
+      removeEventListener: vi.fn(),
+    }
+    ;(window as unknown as { navigation: unknown }).navigation = nav
+
+    arm('nonce-nav')
+    const event = {
+      destination: { url: `${window.location.origin}/csv` },
+      preventDefault: vi.fn(),
+    }
+    for (const listener of listeners) listener(event)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchSpy).toHaveBeenCalled()
+    expect((fetchSpy.mock.calls[0][0] as string)).toContain('/csv')
+
+    disarm()
+    delete (window as unknown as { navigation?: unknown }).navigation
+  })
+
   it('disarm 後に armed が false になる', () => {
     arm('nonce-disarm')
     expect(isArmed()).toBe(true)
