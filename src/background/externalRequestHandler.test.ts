@@ -13,7 +13,6 @@ import {
   parseFetchLatestCsvRequest,
   readAllowedOrigins,
 } from './externalRequestHandler'
-import type { DownloadedFileReader } from './downloadedFile'
 import { DownloadStepExecutor } from './downloadStepExecutor'
 
 /**
@@ -27,8 +26,6 @@ const OTHER_ORIGIN = 'https://example.com'
 const RAKUTEN_URL = 'https://www.rakuten-sec.co.jp/web/dividend/'
 const ALLOWED_PATTERNS = ['https://shoken-webapp.pages.dev/*']
 const TARGET_TAB_ID = 42
-const OTHER_TAB_ID = 99
-const DOWNLOAD_ID = 11
 const CSV_CONTENT = '銘柄コード,数量\n'
 
 type PostedMessage = FetchLatestCsvProgress | FetchLatestCsvResult | ExternalErrorResponse
@@ -59,48 +56,11 @@ function createPort(origin: string) {
   return { port, posted, listeners }
 }
 
-/**
- * ダウンロード済みファイルの情報
- */
-const downloadedItems = new Map<number, chrome.downloads.DownloadItem>()
-
-function createDownloadItem(id: number, kind: CsvDownloadType): chrome.downloads.DownloadItem {
-  return {
-    id,
-    url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
-    finalUrl: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
-    filename: `/home/user/Downloads/rakuten_${kind}.csv`,
-    fileSize: 128,
-    state: 'complete',
-  } as chrome.downloads.DownloadItem
-}
-
-/**
- * ファイルを読み取る口
- */
-function createFileReader(
-  options: { readonly fileAccessAllowed?: boolean; readonly readError?: Error } = {}
-): DownloadedFileReader {
-  return {
-    isFileAccessAllowed: vi.fn(async () => options.fileAccessAllowed ?? true),
-    read: vi.fn(async () => {
-      if (options.readError) {
-        throw options.readError
-      }
-      return new TextEncoder().encode(CSV_CONTENT)
-    }),
-    removeFile: vi.fn(async () => true),
-    eraseHistory: vi.fn(async () => undefined),
-  }
-}
-
 import { createTestExecutor, resetTestDoubles, silenceConsole } from '../tests/fixtures'
 /**
  * ハンドラと、ダウンロード手順を実行するランナーを用意する
  *
- * ランナーは実クラス(DownloadStepExecutor)の一部だけを差し替えたものを使う。
- * 実クラスと同じく、クリック直前にバックグラウンドへ
- * 通知してからダウンロードを発生させる
+ * 横取り結果を非同期で返す実クラスを使う。
  */
 function createDownloadExecutor(): DownloadStepExecutor {
   return createTestExecutor(TARGET_TAB_ID)
@@ -108,12 +68,10 @@ function createDownloadExecutor(): DownloadStepExecutor {
 function createHandler(
   responses: Partial<Record<CsvDownloadType, DownloadResponse>> = {},
   config: {
-    readonly downloadStartTimeoutMs?: number
     readonly loginWaitTimeoutMs?: number
     readonly loginPollIntervalMs?: number
     readonly loginStateQueryTimeoutMs?: number
-    readonly androidInterceptTimeoutMs?: number
-    readonly fileReader?: DownloadedFileReader
+    readonly interceptTimeoutMs?: number
   } = {}
 ) {
   const executed: CsvDownloadType[] = []
@@ -123,23 +81,16 @@ function createHandler(
   const handler = new ExternalRequestHandler({
     downloadRunner: executor,
     allowedOrigins: ALLOWED_PATTERNS,
-    fileReader: config.fileReader ?? createFileReader(),
     ...config,
   })
 
   vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async (message) => {
     const kind = message.payload.selectedOptions[0]
     executed.push(kind)
-    handler.notifyDownloadWillStart(TARGET_TAB_ID)
-    downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, kind))
-    fireDownloadCreated({
-      id: DOWNLOAD_ID,
-      url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
-    })
-    const nonce = (message.payload as { androidInterceptNonce?: string }).androidInterceptNonce
+    const nonce = (message.payload as { interceptNonce?: string }).interceptNonce
     if (nonce) {
       setTimeout(() => {
-        handler.resolveAndroidIntercept({
+        handler.resolveIntercept({
           nonce,
           ok: true,
           content: CSV_CONTENT,
@@ -154,16 +105,6 @@ function createHandler(
   })
 
   return { handler, runner: executor, executed }
-}
-
-function fireDownloadCreated(item: { id: number; url: string }): void {
-  const addListener = chrome.downloads.onCreated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (created: chrome.downloads.DownloadItem) => void
-    listener(item as unknown as chrome.downloads.DownloadItem)
-  }
 }
 
 function setTabsSendMessageImpl(impl: SendMessageImpl): void {
@@ -185,18 +126,6 @@ function setTabsUpdateImpl(): void {
   }
   mock.mockImplementation((_tabId, _properties, callback) => {
     callback?.({ id: 42 } as chrome.tabs.Tab)
-  })
-}
-
-type DownloadsSearchImpl = (query: { id?: number }) => Promise<chrome.downloads.DownloadItem[]>
-
-function setDownloadsSearchImpl(): void {
-  const mock = chrome.downloads.search as unknown as {
-    mockImplementation: (fn: DownloadsSearchImpl) => void
-  }
-  mock.mockImplementation(async (query) => {
-    const item = query.id === undefined ? undefined : downloadedItems.get(query.id)
-    return item ? [item] : []
   })
 }
 
@@ -238,8 +167,6 @@ describe('externalRequestHandler', () => {
     vi.mocked(chrome.tabs.query).mockResolvedValue([
       { id: TARGET_TAB_ID, windowId: 3, active: true, url: RAKUTEN_URL } as chrome.tabs.Tab,
     ])
-    downloadedItems.clear()
-    setDownloadsSearchImpl()
     setTabsUpdateImpl()
     setTabsSendMessageImpl((_tabId, message, callback) => {
       if (message.action === 'check-login-state') {
@@ -467,7 +394,6 @@ describe('externalRequestHandler', () => {
       vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(
         async (_message, reportStep) => {
           reportStep?.({ step: 'download-csv', phase: 'action', durationMs: 12 })
-          reportStep?.({ step: 'download-csv', phase: 'download-start', durationMs: 34 })
           return { success: false, error: '取得失敗' }
         }
       )
@@ -486,7 +412,6 @@ describe('externalRequestHandler', () => {
         { stage: 'login-wait', durationMs: expect.any(Number) },
         { stage: 'fetch-domesticstock', durationMs: expect.any(Number) },
         { stage: 'fetch-domesticstock:download-csv', durationMs: 12 },
-        { stage: 'fetch-domesticstock:download-start', durationMs: 34 },
         { stage: 'total', durationMs: expect.any(Number) },
       ])
     })
@@ -510,7 +435,7 @@ describe('externalRequestHandler', () => {
 
     it('取得に失敗した種類は理由を記録して次へ進む', async () => {
       const { handler, executed } = createHandler({
-        dividend: { success: false, error: '表示ステップで失敗: 要素が見つかりませんでした' },
+        dividend: { success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' },
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -519,45 +444,11 @@ describe('externalRequestHandler', () => {
 
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(executed).toEqual(['dividend', 'assetbalance'])
-      expect(result.failures).toEqual([
-        { kind: 'dividend', reason: '表示ステップで失敗: 要素が見つかりませんでした' },
-      ])
+      expect(result.failures[0]).toMatchObject({
+        kind: 'dividend',
+        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
+      })
       expect(result.csvs.map((csv) => csv.kind)).toEqual(['assetbalance'])
-    })
-
-    it('ファイルを読み取れなかった場合は理由を記録する', async () => {
-      const { handler } = createHandler(
-        {},
-        { fileReader: createFileReader({ readError: new Error('read failed') }) }
-      )
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      handler.handleConnection(port)
-      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-
-      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toHaveLength(1)
-      expect(result.failures[0]?.kind).toBe('assetbalance')
-      expect(result.failures[0]?.reason).toContain('CSVファイルの読み取りに失敗しました')
-      expect(result.csvs).toEqual([])
-    })
-
-    it('ファイルのURLへのアクセスが許可されていない場合は理由とコードを返す', async () => {
-      const { handler } = createHandler(
-        {},
-        { fileReader: createFileReader({ fileAccessAllowed: false }) }
-      )
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      handler.handleConnection(port)
-      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-
-      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toHaveLength(1)
-      expect(result.failures[0]?.kind).toBe('assetbalance')
-      expect(result.failures[0]?.reason).toContain('ファイルの URL へのアクセスが許可されていません')
-      expect(result.failures[0]?.code).toBe('file-access-disabled')
-      expect(result.csvs).toEqual([])
     })
 
     it('取得中は別の依頼を受け付けない', async () => {
@@ -572,7 +463,6 @@ describe('externalRequestHandler', () => {
       const handler = new ExternalRequestHandler({
         downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
-        downloadStartTimeoutMs: 50,
       })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -588,87 +478,6 @@ describe('externalRequestHandler', () => {
       expect(error).toEqual({ type: 'error', error: '別の取得が実行中のため受け付けません' })
 
       release?.()
-    })
-  })
-
-  describe('ダウンロード開始の待ち受け', () => {
-    it('クリック直前の通知より前のダウンロードは捕捉しない', async () => {
-      const executor = createDownloadExecutor()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: executor,
-        allowedOrigins: ALLOWED_PATTERNS,
-        downloadStartTimeoutMs: 50,
-        fileReader: createFileReader(),
-      })
-      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
-        fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
-        handler.notifyDownloadWillStart(TARGET_TAB_ID)
-        downloadedItems.set(DOWNLOAD_ID, createDownloadItem(DOWNLOAD_ID, 'assetbalance'))
-        fireDownloadCreated({
-          id: DOWNLOAD_ID,
-          url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
-        })
-        return { success: true, message: '取得完了' }
-      })
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      handler.handleConnection(port)
-      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-
-      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toEqual([])
-      expect(result.csvs[0].content).toBe(CSV_CONTENT)
-    })
-
-    it('対象タブ以外からの通知では待ち受けを開始しない', async () => {
-      const executor = createDownloadExecutor()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: executor,
-        allowedOrigins: ALLOWED_PATTERNS,
-        downloadStartTimeoutMs: 30,
-        fileReader: createFileReader(),
-      })
-      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
-        handler.notifyDownloadWillStart(OTHER_TAB_ID)
-        fireDownloadCreated({ id: 1, url: 'https://www.rakuten-sec.co.jp/csv/other.csv' })
-        return { success: true, message: '取得完了' }
-      })
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      handler.handleConnection(port)
-      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-
-      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVのダウンロードを開始できませんでした' },
-      ])
-      expect(result.csvs).toEqual([])
-    })
-
-    it('通知が無い場合はダウンロードを取り逃がす', async () => {
-      const executor = createDownloadExecutor()
-      const handler = new ExternalRequestHandler({
-        downloadRunner: executor,
-        allowedOrigins: ALLOWED_PATTERNS,
-        downloadStartTimeoutMs: 30,
-        fileReader: createFileReader(),
-      })
-      vi.spyOn(executor, 'executeDownloadRequest').mockImplementation(async () => {
-        fireDownloadCreated({
-          id: DOWNLOAD_ID,
-          url: 'https://www.rakuten-sec.co.jp/csv/assetbalance.csv',
-        })
-        return { success: true, message: '取得完了' }
-      })
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      handler.handleConnection(port)
-      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
-
-      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
-      expect(result.failures).toEqual([
-        { kind: 'assetbalance', reason: 'CSVのダウンロードを開始できませんでした' },
-      ])
     })
   })
 
@@ -781,12 +590,9 @@ describe('externalRequestHandler', () => {
       expect(result.csvs).toHaveLength(1)
     })
 
-  describe('Android 経路', () => {
-    beforeEach(() => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
-    })
+  describe('OS によらない横取り経路', () => {
 
-    it('Android のとき新経路で CSV を取得する', async () => {
+    it('OS 判定を行わずに CSV 要求を横取りする', async () => {
       const { handler, executed } = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -794,10 +600,10 @@ describe('externalRequestHandler', () => {
       vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
         const message = args[1] as { action?: string; payload?: { nonce?: string } };
         const callback = args[2] as ((response?: unknown) => void) | undefined;
-        if (message.action === 'arm-android-csv-intercept') {
+        if (message.action === 'arm-csv-intercept') {
           const nonce = message.payload?.nonce ?? ''
           setTimeout(() => {
-            handler.resolveAndroidIntercept({
+            handler.resolveIntercept({
               nonce,
               ok: true,
               content: CSV_CONTENT,
@@ -825,13 +631,14 @@ describe('externalRequestHandler', () => {
       expect(result.csvs[0].content).toBe(CSV_CONTENT)
       expect(result.failures).toEqual([])
       expect(executed).toEqual(['assetbalance'])
+      expect(chrome.runtime.getPlatformInfo).not.toHaveBeenCalled()
 
       vi.mocked(chrome.tabs.sendMessage).mockImplementation(originalSendMessage.getMockImplementation()!)
     })
 
-    it('非 Android では既存経路を使う', async () => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'win' } as never)
-      const { handler, executed } = createHandler()
+    it('OS 情報が取得できなくても横取りする', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockRejectedValue(new Error('unsupported'))
+      const { handler, executed} = createHandler()
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       handler.handleConnection(port)
@@ -840,16 +647,17 @@ describe('externalRequestHandler', () => {
       const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
       expect(result.csvs).toHaveLength(1)
       expect(executed).toEqual(['assetbalance'])
+      expect(chrome.runtime.getPlatformInfo).not.toHaveBeenCalled()
     })
 
-    it('Android 経路で HTML が返れば失敗する', async () => {
+    it('HTML が返れば失敗理由に HTTP 情報を含める', async () => {
       const { handler, runner } = createHandler()
       vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
         const kind = message.payload.selectedOptions[0]
-        const nonce = message.payload.androidInterceptNonce
+        const nonce = message.payload.interceptNonce
         if (nonce) {
           setTimeout(() => {
-            handler.resolveAndroidIntercept({
+            handler.resolveIntercept({
               nonce,
               ok: false,
               error: 'anchor / method=GET / status=200 / contentType=text/html',
@@ -882,14 +690,13 @@ describe('externalRequestHandler', () => {
       expect(result.failures[0]?.reason).toContain('text/html')
     })
 
-    it('Android 経路は準備にタイムアウト以上かかっても横取り結果を受け取る', async () => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
-      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 20 })
+    it('横取り経路は準備にタイムアウト以上かかっても横取り結果を受け取る', async () => {
+      const { handler, runner } = createHandler({}, { interceptTimeoutMs: 20 })
       vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
-        const nonce = message.payload.androidInterceptNonce
+        const nonce = message.payload.interceptNonce
         await new Promise((resolve) => setTimeout(resolve, 40))
         if (nonce) {
-          handler.resolveAndroidIntercept({
+          handler.resolveIntercept({
             nonce,
             ok: true,
             content: CSV_CONTENT,
@@ -911,9 +718,8 @@ describe('externalRequestHandler', () => {
       expect(result.failures).toEqual([])
     })
 
-    it('Android 経路がタイムアウトしても次回取得を邪魔しない', async () => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
-      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+    it('横取り結果がタイムアウトしても次回取得を邪魔しない', async () => {
+      const { handler, runner } = createHandler({}, { interceptTimeoutMs: 50 })
       vi.spyOn(runner, 'executeDownloadRequest').mockResolvedValue({ success: true, message: 'ok' })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
@@ -944,9 +750,8 @@ describe('externalRequestHandler', () => {
     })
 
     it('ステップ失敗理由に query を含めない', async () => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
       const executor = createDownloadExecutor()
-      const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      const { handler } = createHandler({}, { interceptTimeoutMs: 50 })
       ;(handler as unknown as { downloadRunner: unknown }).downloadRunner = executor
       vi.spyOn(executor, 'executeDownloadRequest').mockResolvedValue({
         success: false,
@@ -957,7 +762,7 @@ describe('externalRequestHandler', () => {
       vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
         const message = args[1] as { action?: string }
         const callback = args[2] as ((response?: unknown) => void) | undefined
-        if (message.action === 'arm-android-csv-intercept') {
+        if (message.action === 'arm-csv-intercept') {
           callback?.({ success: true, message: 'armed' })
           return
         }
@@ -978,12 +783,11 @@ describe('externalRequestHandler', () => {
     })
 
     it('例外時も失敗理由に query を含めない', async () => {
-      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
       const executor = createDownloadExecutor()
       const handler = new ExternalRequestHandler({
         downloadRunner: executor,
         allowedOrigins: ALLOWED_PATTERNS,
-        androidInterceptTimeoutMs: 50,
+        interceptTimeoutMs: 50,
       })
       vi.spyOn(executor, 'executeDownloadRequest').mockRejectedValue(new Error('https://example.com/csv?secret=leak'))
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
@@ -991,7 +795,7 @@ describe('externalRequestHandler', () => {
       vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
         const message = args[1] as { action?: string }
         const callback = args[2] as ((response?: unknown) => void) | undefined
-        if (message.action === 'arm-android-csv-intercept') {
+        if (message.action === 'arm-csv-intercept') {
           callback?.({ success: true, message: 'armed' })
           return
         }
@@ -1015,10 +819,10 @@ describe('externalRequestHandler', () => {
       const { handler, runner } = createHandler()
       vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
         const kind = message.payload.selectedOptions[0]
-        const nonce = message.payload.androidInterceptNonce
+        const nonce = message.payload.interceptNonce
         if (nonce) {
           setTimeout(() => {
-            handler.resolveAndroidIntercept({
+            handler.resolveIntercept({
               nonce,
               ok: false,
               error: 'anchor / method=GET / status=404 / contentType=text/plain',
