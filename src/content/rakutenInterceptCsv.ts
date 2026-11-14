@@ -365,6 +365,8 @@ export function arm(nonce?: string): void {
   intercepted = false;
   currentNonce = nonce;
 
+  window.postMessage({ type: 'rakuten-csv-intercept:armed', nonce }, window.location.origin);
+
 }
 
 if (typeof window !== 'undefined') {

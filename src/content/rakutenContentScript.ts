@@ -212,66 +212,98 @@ class RakutenCsvExtension {
     this.clickElementSafely(button, 'パスキーログイン', selector);
   }
 
-  private armAndroidCsvIntercept(nonce?: string): DownloadResponse {
+  private async armAndroidCsvIntercept(nonce?: string): Promise<DownloadResponse> {
     const n = nonce ?? '';
-    const listener = (event: MessageEvent): void => {
-      if (event.origin !== '' && event.origin !== window.location.origin) {
-        return;
-      }
-      if (event.source !== null && event.source !== window) {
-        return;
-      }
-      const data = event.data as {
-        type?: string;
-        nonce?: string;
-        ok?: boolean;
-        buffer?: ArrayBuffer;
-        contentType?: string;
-        status?: number;
-        requestType?: string;
-        method?: string;
-        error?: string;
-      } | null;
-      if (!data || data.type !== 'rakuten-csv-intercept:result' || data.nonce !== n) {
-        return;
-      }
-      window.removeEventListener('message', listener);
-      this.androidInterceptListeners.delete(n);
-      let content: string | undefined;
-      if (data.ok && data.buffer) {
-        try {
-          content = decodeCsvBytes(new Uint8Array(data.buffer));
-        } catch {
-          content = undefined;
+    if (!this.androidInterceptListeners.has(n)) {
+      const resultListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
         }
-      }
-      try {
-        chrome.runtime.sendMessage(
-          {
-            action: 'android-csv-intercept-result',
-            payload: {
-              nonce: n,
-              ok: data.ok === true && typeof content === 'string',
-              content,
-              contentType: data.contentType,
-              status: data.status,
-              requestType: data.requestType,
-              method: data.method,
-              error: data.error,
-            },
-          },
-          () => {
-            void chrome.runtime.lastError;
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as {
+          type?: string;
+          nonce?: string;
+          ok?: boolean;
+          buffer?: ArrayBuffer;
+          contentType?: string;
+          status?: number;
+          requestType?: string;
+          method?: string;
+          error?: string;
+        } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:result' || data.nonce !== n) {
+          return;
+        }
+        window.removeEventListener('message', resultListener);
+        this.androidInterceptListeners.delete(n);
+        let content: string | undefined;
+        if (data.ok && data.buffer) {
+          try {
+            content = decodeCsvBytes(new Uint8Array(data.buffer));
+          } catch {
+            content = undefined;
           }
-        );
-      } catch {
-        // ignore
-      }
-    };
-    this.androidInterceptListeners.set(n, listener);
-    window.addEventListener('message', listener);
+        }
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: 'android-csv-intercept-result',
+              payload: {
+                nonce: n,
+                ok: data.ok === true && typeof content === 'string',
+                content,
+                contentType: data.contentType,
+                status: data.status,
+                requestType: data.requestType,
+                method: data.method,
+                error: data.error,
+              },
+            },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {
+          // ignore
+        }
+      };
+      this.androidInterceptListeners.set(n, resultListener);
+      window.addEventListener('message', resultListener);
+    }
+
     window.postMessage({ type: 'rakuten-csv-intercept:arm', nonce: n }, '*');
-    return { success: true, message: 'armed' };
+
+    return new Promise<DownloadResponse>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', ackListener);
+        const resultListener = this.androidInterceptListeners.get(n);
+        if (resultListener) {
+          window.removeEventListener('message', resultListener);
+          this.androidInterceptListeners.delete(n);
+        }
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: n }, '*');
+        resolve({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
+      }, 5000);
+
+      const ackListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
+        }
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as { type?: string; nonce?: string } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:armed' || data.nonce !== n) {
+          return;
+        }
+        window.clearTimeout(timeout);
+        window.removeEventListener('message', ackListener);
+        resolve({ success: true, message: 'armed' });
+      };
+      window.addEventListener('message', ackListener);
+    });
   }
 
   private isLoginScreen(): boolean {
@@ -368,7 +400,10 @@ class RakutenCsvExtension {
     }
 
     if (step === 'download-csv' && androidInterceptNonce) {
-      this.armAndroidCsvIntercept(androidInterceptNonce);
+      const armResult = await this.armAndroidCsvIntercept(androidInterceptNonce);
+      if (!armResult.success) {
+        return armResult;
+      }
     }
 
     if (step === 'download-csv') {
