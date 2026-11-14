@@ -185,7 +185,6 @@ e2e/
 | 権限 | 理由 |
 |-----|------|
 | `tabs` | 楽天証券ページの操作と新しいタブでの処理 |
-| `downloads` | ポップアップの手動ダウンロード開始を確認してから次の取得へ進む |
 | `host_permissions` | 楽天証券ドメインでのみ動作 |
 | `externally_connectable` | 指定したWebページ(shoken-webapp・localhost)からの取得依頼にのみ応答 |
 
