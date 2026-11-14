@@ -396,6 +396,7 @@ export class ExternalRequestHandler {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const armed = await this.armAndroidIntercept(tabId, nonce);
     if (!armed) {
+      this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
         reason: '横取りなし / method=不明 / status=なし / contentType=不明',
@@ -417,7 +418,7 @@ export class ExternalRequestHandler {
       this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
-        reason: 'CSVの取得に失敗しました',
+        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
         stepTimings,
       };
     }
@@ -426,21 +427,21 @@ export class ExternalRequestHandler {
       this.cancelAndroidIntercept(tabId, nonce);
       return {
         success: false,
-        reason: 'CSVの取得に失敗しました',
+        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
         stepTimings,
       };
     }
 
     const intercepted = await resultPromise;
     if (!intercepted || !intercepted.success || !intercepted.content) {
+      this.cancelAndroidIntercept(tabId, nonce);
       const reason =
         intercepted?.error ??
-        `横取りなし / method=${intercepted?.method ?? '不明'} / status=${intercepted?.status ?? 'なし'} / contentType=${intercepted?.contentType ?? '不明'}`;
+        '横取りなし / method=不明 / status=なし / contentType=不明';
       return { success: false, reason, stepTimings };
     }
 
     const content = intercepted.content;
-    // isHtmlContent imported? use local check
     if (content.trimStart().startsWith('<')) {
       return {
         success: false,
@@ -461,7 +462,10 @@ export class ExternalRequestHandler {
     };
   }
 
-  private androidInterceptResolvers = new Map<string, (result: DownloadResponse) => void>();
+  private androidInterceptResolvers = new Map<
+    string,
+    { readonly resolver: (result: DownloadResponse) => void; readonly timer: ReturnType<typeof setTimeout> }
+  >();
 
   private armAndroidIntercept(tabId: number, nonce: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
@@ -481,20 +485,27 @@ export class ExternalRequestHandler {
 
   private waitForAndroidInterceptResult(nonce: string, timeoutMs: number): Promise<DownloadResponse> {
     return new Promise<DownloadResponse>((resolve) => {
-      const timeout = setTimeout(() => {
+      const timer = setTimeout(() => {
         this.androidInterceptResolvers.delete(nonce);
         resolve({ success: false, error: '横取りなし' });
       }, timeoutMs);
-      this.androidInterceptResolvers.set(nonce, (result) => {
-        clearTimeout(timeout);
-        this.androidInterceptResolvers.delete(nonce);
-        resolve(result);
+      this.androidInterceptResolvers.set(nonce, {
+        resolver: (result) => {
+          clearTimeout(timer);
+          this.androidInterceptResolvers.delete(nonce);
+          resolve(result);
+        },
+        timer,
       });
     });
   }
 
   private cancelAndroidIntercept(tabId: number, nonce: string): void {
-    this.androidInterceptResolvers.delete(nonce);
+    const entry = this.androidInterceptResolvers.get(nonce);
+    if (entry) {
+      clearTimeout(entry.timer);
+      this.androidInterceptResolvers.delete(nonce);
+    }
     try {
       chrome.tabs.sendMessage(
         tabId,
@@ -509,11 +520,13 @@ export class ExternalRequestHandler {
   }
 
   public resolveAndroidIntercept(payload: AndroidCsvInterceptResultMessage['payload']): void {
-    const resolver = this.androidInterceptResolvers.get(payload.nonce);
-    if (!resolver) {
+    const entry = this.androidInterceptResolvers.get(payload.nonce);
+    if (!entry) {
       return;
     }
-    resolver({
+    clearTimeout(entry.timer);
+    this.androidInterceptResolvers.delete(payload.nonce);
+    entry.resolver({
       success: payload.ok === true && typeof payload.content === 'string',
       content: payload.content,
       contentType: payload.contentType,

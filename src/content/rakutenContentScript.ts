@@ -33,6 +33,7 @@ class RakutenCsvExtension {
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
   private static readonly passkeyLoginButtonSelector = 'button#login-passkey';
+  private readonly androidInterceptListeners = new Map<string, (event: MessageEvent) => void>();
 
   private constructor() {
     this.initialize();
@@ -115,6 +116,21 @@ class RakutenCsvExtension {
         return this.armAndroidCsvIntercept(message.payload?.nonce);
 
       case 'disarm-android-csv-intercept':
+        {
+          const disarmNonce = message.payload?.nonce;
+          if (disarmNonce) {
+            const listener = this.androidInterceptListeners.get(disarmNonce);
+            if (listener) {
+              window.removeEventListener('message', listener);
+              this.androidInterceptListeners.delete(disarmNonce);
+            }
+          } else {
+            for (const listener of this.androidInterceptListeners.values()) {
+              window.removeEventListener('message', listener);
+            }
+            this.androidInterceptListeners.clear();
+          }
+        }
         window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: message.payload?.nonce }, '*');
         return { success: true, message: 'disarmed' };
 
@@ -220,6 +236,7 @@ class RakutenCsvExtension {
         return;
       }
       window.removeEventListener('message', listener);
+      this.androidInterceptListeners.delete(n);
       let content: string | undefined;
       if (data.ok && data.buffer) {
         try {
@@ -251,6 +268,7 @@ class RakutenCsvExtension {
         // ignore
       }
     };
+    this.androidInterceptListeners.set(n, listener);
     window.addEventListener('message', listener);
     window.postMessage({ type: 'rakuten-csv-intercept:arm', nonce: n }, '*');
     return { success: true, message: 'armed' };

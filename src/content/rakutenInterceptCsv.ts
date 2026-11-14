@@ -366,10 +366,8 @@ export function arm(nonce?: string): void {
   intercepted = false;
   currentNonce = nonce;
 
-  // store cleanup listeners? We'll remove on disarm by reassigning; listeners remain but check armed.
 }
 
-// signal listener
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (event: MessageEvent) => {
     if (event.origin !== '' && event.origin !== window.location.origin) {
