@@ -448,7 +448,7 @@ export async function readDownloadedCsv(
 
   if (bytes === undefined) {
     await removeDownloadedFile(reader, item.id);
-    const onlyPermissionDenied = attempts.length > 0 && attempts.every((a) => a === 'file:許可なし');
+    const onlyPermissionDenied = fileAccessAllowed === false;
     if (onlyPermissionDenied) {
       return readFail(
         withDownloadDetails(

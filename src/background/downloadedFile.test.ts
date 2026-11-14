@@ -472,6 +472,31 @@ describe('downloadedFile', () => {
       }
     })
 
+    it('fileの許可がなくblobも失敗したら権限エラーのコードを返す', async () => {
+      const read = vi.fn(async () => {
+        throw new TypeError('fetch failed')
+      })
+      const reader: FileReaderStub = {
+        isFileAccessAllowed: vi.fn(async () => false),
+        read,
+        removeFile: vi.fn(async () => true),
+        eraseHistory: vi.fn(async () => undefined),
+      }
+      const item = createDownloadItem({
+        filename: '/storage/emulated/0/Download/12345',
+        url: 'blob:https://www.rakuten-sec.co.jp/uuid',
+        finalUrl: 'blob:https://www.rakuten-sec.co.jp/uuid',
+      })
+
+      const result = await readDownloadedCsv(reader, item)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.reason).toContain('ファイルの URL へのアクセスが許可されていません')
+        expect(result.code).toBe('file-access-disabled')
+      }
+    })
+
     it('fileパスはfile URL経路で読み、既存の変換を変えない', () => {
       expect(toReadUrl('/home/user/Downloads/a.csv')).toBe('file:///home/user/Downloads/a.csv')
       expect(toReadUrl('C:\\Users\\user\\Downloads\\a.csv')).toBe(
