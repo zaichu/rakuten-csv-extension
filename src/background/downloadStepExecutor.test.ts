@@ -36,6 +36,13 @@ function domesticStockRequest(): CsvDownloadMessage {
   }
 }
 
+function androidDownloadRequest(): CsvDownloadMessage {
+  return {
+    action: 'download-csv-request',
+    payload: { selectedOptions: ['assetbalance'], tabId: TAB_ID, androidInterceptNonce: 'nonce-android' },
+  }
+}
+
 describe('遷移直後の古いページの応答', () => {
   beforeEach(() => {
     silenceConsole()
@@ -1230,4 +1237,29 @@ describe('groupSteps のグルーピングロジック', () => {
     expect(isPageTransitionStep('select-period')).toBe(false)
     expect(isPageTransitionStep('download-csv')).toBe(false)
   })
+
+describe('Android nonce では download start を待たない', () => {
+  beforeEach(() => {
+    silenceConsole()
+  })
+
+  afterEach(() => {
+    resetTestDoubles()
+  })
+
+  it('download created がなくても成功する', async () => {
+    const executor = createExecutor()
+    setTabsSendMessageImpl((_tabId, message, callback) => {
+      if (message.action === 'check-csv-download-step') {
+        callback?.({ success: true, documentId: 'doc' })
+        return
+      }
+      callback?.({ success: true, documentId: 'doc' })
+    })
+
+    const result = await executor.executeDownloadRequest(androidDownloadRequest())
+    expect(result.success).toBe(true)
+  })
+})
+
 })

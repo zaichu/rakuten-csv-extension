@@ -265,7 +265,7 @@ export class DownloadStepExecutor {
         steps,
         selectors,
         captureDownloadStart,
-        group.kind === 'batch' && group.steps.includes('download-csv'),
+        group.kind === 'batch' && group.steps.includes('download-csv') && !_androidInterceptNonce,
         previousDocumentId,
         _androidInterceptNonce
       );
