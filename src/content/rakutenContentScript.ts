@@ -453,7 +453,6 @@ class RakutenCsvExtension {
     if (options?.clickAfterResponse) {
       const buttonFoundDurationMs = Math.max(0, buttonFoundAt - receivedAt);
       // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
-      // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする
       window.setTimeout(() => {
         const result = this.clickElementSafely(element, actionName, selector);
         if (!result.success) {

@@ -272,8 +272,8 @@ export class DownloadStepExecutor {
     const deadline = startedAt + this.stepTimeout;
     let undeliveredResult: StepExecutionResponse | undefined;
     while (true) {
-        const waited = await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId);
-        if (!waited.found) {
+      const waited = await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId);
+      if (!waited.found) {
           return {
             response: undeliveredResult ?? {
               success: false,
@@ -282,26 +282,26 @@ export class DownloadStepExecutor {
             }
           };
         }
-        const queriedDocumentId = waited.documentId;
+      const queriedDocumentId = waited.documentId;
 
       try {
-          const sendStartedAt = Date.now();
-          const result = await this.executeSteps(
-            tabId, steps, selectors, deadline - sendStartedAt, interceptNonce
+        const sendStartedAt = Date.now();
+        const result = await this.executeSteps(
+          tabId, steps, selectors, deadline - sendStartedAt, interceptNonce
+        );
+        const actionCompletedAt = Date.now();
+        if (result.success) {
+          const completed = await this.completeSuccessfulResult(
+            result,
+            startedAt, sendStartedAt, actionCompletedAt
           );
-          const actionCompletedAt = Date.now();
-          if (result.success) {
-            const completed = await this.completeSuccessfulResult(
-              result,
-              startedAt, sendStartedAt, actionCompletedAt
-            );
-            return { ...completed, queriedDocumentId };
-          }
+          return { ...completed, queriedDocumentId };
+        }
 
-          if (result.code === 'content-script-missing') {
-            undeliveredResult = result;
-            continue;
-          }
+        if (result.code === 'content-script-missing') {
+          undeliveredResult = result;
+          continue;
+        }
 
         return { response: result };
       } catch (error) {

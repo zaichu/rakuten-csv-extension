@@ -66,6 +66,12 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
   },
+  downloads: {
+    onCreated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+  },
   windows: {
     update: vi.fn(async () => undefined),
   },

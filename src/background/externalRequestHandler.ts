@@ -439,7 +439,6 @@ export class ExternalRequestHandler {
   }
 
   /**
-  /**
    * ログイン完了を待つ
    *
    * コンテンツスクリプトが応答しない場合は判断できないものとして扱い、

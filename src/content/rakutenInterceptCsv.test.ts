@@ -54,8 +54,7 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
 
     form.submit()
 
-    await flush()
-    await flush()
+    for (let attempt = 0; attempt < 8; attempt++) await flush()
 
     window.removeEventListener('message', listener)
 
@@ -170,6 +169,27 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     await flush()
     await flush()
     expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it('楽天ページの blob URL anchor を fetch して本文を返す', async () => {
+    const blobUrl = 'blob:https://www.rakuten-sec.co.jp/csv-id'
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response('csv,data', { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    arm('nonce-blob-anchor')
+    const messages: unknown[] = []
+    const listener = (event: MessageEvent): void => { messages.push(event.data) }
+    window.addEventListener('message', listener)
+    const anchor = document.createElement('a')
+    anchor.href = blobUrl
+    document.body.appendChild(anchor)
+    anchor.click()
+    for (let attempt = 0; attempt < 8; attempt++) await flush()
+    window.removeEventListener('message', listener)
+
+    expect(fetchSpy).toHaveBeenCalledWith(blobUrl, { method: 'GET', body: undefined, credentials: 'include' })
+    expect(messages.some((message) => (message as { ok?: boolean }).ok)).toBe(true)
   })
 
   it('fetch rejection の本文を結果に含めない', async () => {

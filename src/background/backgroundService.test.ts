@@ -193,7 +193,7 @@ describe('backgroundService characterization', () => {
 
     it('各ステップ成功時は完了メッセージを返しグルーピング通りに content script を呼ぶ', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(112))
-      const response = await downloadRequest(112, ['dividend'])
+      const response = (await downloadRequest(112, ['dividend'])) as DownloadResponse
       expect(response).toEqual({ success: true, message: 'すべてのCSVダウンロードが完了しました' })
 
       const calls = vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => (call[1] as ChromeMessage).action !== 'check-csv-download-step')
@@ -306,7 +306,6 @@ describe('backgroundService characterization', () => {
       setTabsSendMessageImpl((_tabId, _message, callback) => callback?.({ success: true }))
 
       const response = (await downloadRequest(401, ['dividend'])) as DownloadResponse
-
       expect(response.success).toBe(true)
     })
   })

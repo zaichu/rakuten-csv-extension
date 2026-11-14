@@ -35,6 +35,7 @@ describe('useCsvDownload', () => {
     const call = mockSendMessage.mock.calls[0][0]
     expect(Array.isArray(call.payload.selectedOptions)).toBe(true)
     expect(call.payload.selectedOptions).toEqual(expect.arrayContaining(['dividend', 'domesticstock']))
+    expect(call.payload.interceptNonce).toBeUndefined()
   })
 
   it('background response が不正形状の場合、失敗レスポンスになる', async () => {
