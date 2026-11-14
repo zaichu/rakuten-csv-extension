@@ -64,13 +64,7 @@ export interface CsvDownloadMessage extends ChromeMessage {
   readonly payload: {
     readonly selectedOptions: ReadonlyArray<CsvDownloadType>;
     readonly tabId?: number;
-    /**
-     * CSVダウンロードのクリック直前にバックグラウンドへ通知するか
-     *
-     * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
-     */
-    readonly captureDownloadStart?: boolean;
-   readonly androidInterceptNonce?: string;
+    readonly interceptNonce?: string;
   };
 }
 
@@ -84,8 +78,7 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
   readonly payload: {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
-    readonly captureDownloadStart?: boolean;
-   readonly androidInterceptNonce?: string;
+    readonly interceptNonce?: string;
   };
 }
 
@@ -120,14 +113,14 @@ export type ContentScriptMessage =
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
   | { readonly action: 'check-connection' }
-  | { readonly action: 'arm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } }
-  | { readonly action: 'disarm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } };
+  | { readonly action: 'arm-csv-intercept'; readonly payload?: { readonly nonce?: string } }
+  | { readonly action: 'disarm-csv-intercept'; readonly payload?: { readonly nonce?: string } };
 
 /**
  * コンテンツスクリプト側で計測したステップの内訳
  */
 export interface DownloadStepTiming {
-  readonly phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action';
+  readonly phase: 'receive' | 'button-found' | 'action';
   readonly durationMs: number;
 }
 
@@ -224,7 +217,6 @@ export interface FetchedCsv extends WithKind {
   readonly content: string;
   readonly fetchedAt: string;
   /** ダウンロードされたファイルを削除できたか */
-  readonly fileRemoved?: boolean;
 }
 
 /**
@@ -305,20 +297,11 @@ export interface PageReadyMessage extends ChromeMessage {
 /**
  * CSVダウンロードのクリック直前 知らせるメッセージ
  */
-export interface CsvDownloadWillStartMessage extends ChromeMessage {
-  readonly action: 'csv-download-will-start';
-}
-
 /**
  * CSVダウンロードの実クリック直前を知らせるメッセージ
  */
-export interface CsvDownloadClickedMessage extends ChromeMessage {
-  readonly action: 'csv-download-clicked';
-  readonly clickDurationMs?: number;
-}
-
-export interface AndroidCsvInterceptResultMessage extends ChromeMessage {
-  readonly action: 'android-csv-intercept-result';
+export interface CsvInterceptResultMessage extends ChromeMessage {
+  readonly action: 'csv-intercept-result';
   readonly payload: {
     readonly nonce: string;
     readonly ok?: boolean;
@@ -337,6 +320,4 @@ export interface AndroidCsvInterceptResultMessage extends ChromeMessage {
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | CsvDownloadWillStartMessage
-  | CsvDownloadClickedMessage
-  | AndroidCsvInterceptResultMessage;
+  | CsvInterceptResultMessage;

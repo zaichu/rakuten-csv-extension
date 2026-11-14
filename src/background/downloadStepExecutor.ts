@@ -9,8 +9,7 @@ import type {
   CsvDownloadStep
 } from '../types';
 import { isPageTransitionStep } from '../types';
-import { RakutenUtils, withTimeout, sleep, createOneShotWait, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
-import { isRakutenDownloadSource, DOWNLOAD_START_TIMEOUT_MS } from './downloadedFile';
+import { RakutenUtils, withTimeout, sleep, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
 
 /** コンテンツスクリプト不在エラーの判定用 */
 const CONTENT_SCRIPT_MISSING_ERRORS = [
@@ -59,15 +58,11 @@ interface StepExecutionTiming {
   readonly actionCompletedAt: number;
   readonly receivedAt?: number;
   readonly contentTimings?: readonly DownloadStepTiming[];
-  readonly clickStartedAt?: number;
-  readonly clickDurationMs?: number;
-  readonly downloadStartedAt?: number;
 }
 
-/** ステップ群の実行結果と、クリック前に待ち受けたダウンロード開始の待ち受け */
+/** ステップ群の実行結果と計測値 */
 interface StepExecutionOutcome {
   readonly response: DownloadResponse;
-  readonly downloadStart?: Promise<boolean>;
   readonly timing?: StepExecutionTiming;
   /**
    * 実行指示を送る直前の要素問い合わせで見つけたページのID
@@ -76,12 +71,6 @@ interface StepExecutionOutcome {
    * 直後の問い合わせで古いページを見分けるために使う
    */
   readonly queriedDocumentId?: string;
-}
-
-interface DownloadStartWait {
-  readonly promise: Promise<boolean>;
-  readonly resetTimeout: (timeoutMs: number) => void;
-  readonly cancel: () => void;
 }
 
 export class DownloadStepExecutor {
@@ -100,24 +89,6 @@ export class DownloadStepExecutor {
   // 表示更新中も旧CSVボタンが残るため、更新前の結果を保存しないよう表示直後に待つ
   private readonly displayUpdateSettleTime = 300;
 
-  /**
-   * download-csvクリック後、chrome.downloads.onCreatedを取りこぼした場合や
-   * downloads APIが使えない場合のハング防止タイムアウト
-   */
-  private readonly downloadStartTimeout = DOWNLOAD_START_TIMEOUT_MS;
-
-  /** 実クリック直前通知を待っているtabIdごとのコールバック集合 */
-  private readonly downloadClickWaiters: Map<
-    number,
-    Set<(clickDurationMs: number | undefined, clickedAt: number) => void>
-  > = new Map();
-
-  /** 待ち登録前に届いた実クリック通知を一時保持する */
-  private readonly pendingDownloadClicks: Map<
-    number,
-    { readonly clickedAt: number; readonly durationMs?: number }
-  > = new Map();
-
   constructor(
     private readonly tabState: {
       hasRakutenTab(tabId: number): boolean;
@@ -134,8 +105,7 @@ export class DownloadStepExecutor {
     message: CsvDownloadMessage,
     reportStep?: StepTimingReporter
   ): Promise<DownloadResponse> {
-    const { selectedOptions, tabId, captureDownloadStart, androidInterceptNonce } = message.payload;
-    const _androidInterceptNonce = androidInterceptNonce;
+    const { selectedOptions, tabId, interceptNonce } = message.payload;
 
     try {
       // タブIDの決定
@@ -166,9 +136,8 @@ export class DownloadStepExecutor {
         const result = await this.processCsvDownload(
           targetTabId,
           downloadType,
-          captureDownloadStart,
           reportStep,
-          _androidInterceptNonce
+          interceptNonce
         );
 
         if (!result.success) {
@@ -196,9 +165,8 @@ export class DownloadStepExecutor {
   private async processCsvDownload(
     tabId: number,
     downloadType: CsvDownloadType,
-    captureDownloadStart?: boolean,
     reportStep?: StepTimingReporter,
-    _androidInterceptNonce?: string
+    interceptNonce?: string
   ): Promise<DownloadResponse> {
     const config = RakutenUtils.getCsvDownloadConfig(downloadType);
 
@@ -209,7 +177,7 @@ export class DownloadStepExecutor {
       };
     }
 
-    return this.executeDownloadSequence(tabId, config, captureDownloadStart, reportStep, _androidInterceptNonce);
+    return this.executeDownloadSequence(tabId, config, reportStep, interceptNonce);
   }
 
   /**
@@ -248,9 +216,8 @@ export class DownloadStepExecutor {
   private async executeDownloadSequence(
     tabId: number,
     config: CsvDownloadConfig,
-    captureDownloadStart?: boolean,
     reportStep?: StepTimingReporter,
-    _androidInterceptNonce?: string
+    interceptNonce?: string
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
     const groups = this.groupSteps(steps);
@@ -264,10 +231,8 @@ export class DownloadStepExecutor {
         tabId,
         steps,
         selectors,
-        captureDownloadStart,
-        group.kind === 'batch' && group.steps.includes('download-csv') && !_androidInterceptNonce,
         previousDocumentId,
-        _androidInterceptNonce
+        interceptNonce
       );
       const result = outcome.response;
 
@@ -285,8 +250,6 @@ export class DownloadStepExecutor {
         : undefined;
 
       this.reportStepTiming(reportStep, steps, outcome);
-      await outcome.downloadStart;
-
       if (group.kind === 'page-transition' && group.step === 'display-data') {
         await sleep(this.displayUpdateSettleTime);
       }
@@ -302,17 +265,13 @@ export class DownloadStepExecutor {
     tabId: number,
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
-    captureDownloadStart: boolean | undefined,
-    waitForDownloadStart: boolean,
     previousDocumentId?: string,
-    _androidInterceptNonce?: string
+    interceptNonce?: string
   ): Promise<StepExecutionOutcome> {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
     let undeliveredResult: StepExecutionResponse | undefined;
-    let downloadStartWait: DownloadStartWait | undefined;
-    try {
-      while (true) {
+    while (true) {
         const waited = await this.waitForStepElement(tabId, steps[0], selectors, deadline, previousDocumentId);
         if (!waited.found) {
           return {
@@ -325,20 +284,15 @@ export class DownloadStepExecutor {
         }
         const queriedDocumentId = waited.documentId;
 
-        downloadStartWait?.resetTimeout(this.downloadStartTimeout);
-        downloadStartWait ??= waitForDownloadStart
-          ? this.waitForDownloadStart(this.downloadStartTimeout)
-          : undefined;
-        const downloadStart = downloadStartWait?.promise;
-        try {
+      try {
           const sendStartedAt = Date.now();
           const result = await this.executeSteps(
-            tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart, _androidInterceptNonce
+            tabId, steps, selectors, deadline - sendStartedAt, interceptNonce
           );
           const actionCompletedAt = Date.now();
           if (result.success) {
             const completed = await this.completeSuccessfulResult(
-              tabId, steps, waitForDownloadStart, downloadStart, result,
+              result,
               startedAt, sendStartedAt, actionCompletedAt
             );
             return { ...completed, queriedDocumentId };
@@ -346,74 +300,37 @@ export class DownloadStepExecutor {
 
           if (result.code === 'content-script-missing') {
             undeliveredResult = result;
-            downloadStartWait?.resetTimeout(Math.max(0, deadline - Date.now()));
             continue;
           }
 
-          if (result.communicationFailed) {
-            const started = await this.resolveStartedFallback(downloadStart);
-            if (started) {
-              return { ...started, queriedDocumentId };
-            }
+        return { response: result };
+      } catch (error) {
+        return {
+          response: {
+            success: false,
+            error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
           }
-          return { response: result };
-        } catch (error) {
-          const started = await this.resolveStartedFallback(downloadStart);
-          if (started) {
-            return { ...started, queriedDocumentId };
-          }
-          return {
-            response: {
-              success: false,
-              error: error instanceof Error ? error.message : 'ステップ実行中にエラーが発生しました'
-            }
-          };
-        }
+        };
       }
-    } finally {
-      downloadStartWait?.cancel();
     }
-  }
-
-  private async resolveStartedFallback(
-    downloadStart: Promise<boolean> | undefined
-  ): Promise<StepExecutionOutcome | undefined> {
-    if (await this.isDownloadStarted(downloadStart)) {
-      return { response: { success: true, message: 'ダウンロードの開始を確認しました' }, downloadStart };
-    }
-    return undefined;
   }
 
   private async completeSuccessfulResult(
-    tabId: number,
-    steps: readonly CsvDownloadStep[],
-    waitForDownloadStart: boolean,
-    downloadStart: Promise<boolean> | undefined,
     result: StepExecutionResponse,
     startedAt: number,
     sendStartedAt: number,
     actionCompletedAt: number
   ): Promise<StepExecutionOutcome> {
-    const clickResult = waitForDownloadStart && steps.includes('download-csv')
-      ? await this.waitForDownloadClick(tabId, this.downloadStartTimeout)
-      : undefined;
-    if (!downloadStart || await this.isDownloadStarted(downloadStart)) {
-      return {
-        response: result,
-        downloadStart,
-        timing: {
-          startedAt,
-          sendStartedAt,
-          actionCompletedAt,
-          receivedAt: result.receivedAt,
-          contentTimings: result.contentTimings,
-          clickStartedAt: clickResult?.clickedAt,
-          clickDurationMs: clickResult?.durationMs,
-          downloadStartedAt: downloadStart ? Date.now() : undefined
-        }
-      };
-    }
-    return { response: { success: false, error: 'ダウンロード開始を確認できませんでした', step: 'download-csv' } };
+    return {
+      response: result,
+      timing: {
+        startedAt,
+        sendStartedAt,
+        actionCompletedAt,
+        receivedAt: result.receivedAt,
+        contentTimings: result.contentTimings,
+      }
+    };
   }
 
   /**
@@ -519,8 +436,7 @@ export class DownloadStepExecutor {
   /**
    * ステップごとの所要時間を報告する
    *
-   * ダウンロードのステップは押下までと
-   * 押下からダウンロード開始までを分けて報告する。
+   * ステップごとの所要時間を報告する。
    */
   private reportStepTiming(
     reportStep: StepTimingReporter | undefined,
@@ -552,43 +468,11 @@ export class DownloadStepExecutor {
         });
       }
 
-      // ボタン発見後、実際にクリックするまで（通知待ちと setTimeout を含む）
-      reportStep({
-        step,
-        phase: 'click',
-        durationMs: Math.max(0, timing.clickDurationMs ?? 0)
-      });
-
-      // click からダウンロード開始まで
-      if (timing.downloadStartedAt !== undefined) {
-        const clickStart = timing.clickStartedAt ?? timing.actionCompletedAt;
-        reportStep({
-          step,
-          phase: 'download-start',
-          durationMs: Math.max(0, timing.downloadStartedAt - clickStart)
-        });
-      }
       return;
     }
 
     reportStep({ step, phase: 'action', durationMs: Math.max(0, timing.actionCompletedAt - timing.startedAt) });
 
-    if (timing.downloadStartedAt !== undefined) {
-      reportStep({
-        step,
-        phase: 'download-start',
-        durationMs: Math.max(0, timing.downloadStartedAt - timing.actionCompletedAt)
-      });
-    }
-  }
-
-  /**
-   * ダウンロード開始を観測できたか
-   *
-   * 待ち受けが無い場合や、観測できなかった場合（タイムアウト）は false
-   */
-  private async isDownloadStarted(downloadStart: Promise<boolean> | undefined): Promise<boolean> {
-    return downloadStart ? await downloadStart : false;
   }
 
   private executeSteps(
@@ -596,12 +480,11 @@ export class DownloadStepExecutor {
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
     timeoutMs: number,
-    captureDownloadStart?: boolean,
-    _androidInterceptNonce?: string
+    interceptNonce?: string
   ): Promise<StepExecutionResponse> {
     const instruction: CsvDownloadStepsInstruction = {
       action: 'execute-csv-download-steps',
-      payload: { downloadSteps: steps, selectors, captureDownloadStart, androidInterceptNonce: _androidInterceptNonce }
+      payload: { downloadSteps: steps, selectors, interceptNonce }
     };
     const sendMessagePromise = new Promise<StepExecutionResponse>((resolve) => {
       chrome.tabs.sendMessage(tabId, instruction, (response) => {
@@ -689,120 +572,6 @@ export class DownloadStepExecutor {
     }
 
     return activeTab.id;
-  }
-
-  /**
-   * ダウンロード開始を待つ
-   *
-   * download-csvのクリックを送る前に呼び出すことで、クリック直後に発火する
-   * chrome.downloads.onCreated を取りこぼさずに捕捉する。これにより、
-   * ブラウザ側でダウンロードが開始として確定する前に次のdownloadTypeの
-   * navigate-to-pageへ進んでページ遷移し、直前のダウンロードがキャンセルされる
-   * 事象を防ぐ。開始を観測できたら true、downloads APIが使えない場合や
-   * イベントを取りこぼした場合は timeoutMs 経過後に false を返す（ハング防止）。
-   */
-  private waitForDownloadStart(timeoutMs: number): DownloadStartWait {
-    let resetTimeout: DownloadStartWait['resetTimeout'] = () => {};
-    let cancel: DownloadStartWait['cancel'] = () => {};
-    const promise = new Promise<boolean>((resolve) => {
-      if (!chrome.downloads?.onCreated) {
-        resolve(false);
-        return;
-      }
-
-      let settled = false;
-      let cleanup: () => void = () => {};
-      let wait = createOneShotWait(timeoutMs, () => finish(false));
-      const finish = (started: boolean): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        wait.cancel();
-        cleanup();
-        resolve(started);
-      };
-      resetTimeout = (timeoutMs) => {
-        if (settled) {
-          return;
-        }
-        wait.cancel();
-        wait = createOneShotWait(timeoutMs, () => finish(false));
-      };
-      cancel = () => finish(false);
-      const listener = (item: chrome.downloads.DownloadItem): void => {
-        // blob: は内側のオリジンまで見る判定を使い、別タブの無関係な
-        // blob/data ダウンロードを開始済みと誤認しない
-        if (!isRakutenDownloadSource(item.url) && !isRakutenDownloadSource(item.finalUrl)) {
-          return;
-        }
-        finish(true);
-      };
-      cleanup = () => {
-        chrome.downloads.onCreated.removeListener(listener);
-      };
-
-      chrome.downloads.onCreated.addListener(listener);
-    });
-    return { promise, resetTimeout, cancel };
-  }
-
-  /**
-   * 実クリック直前通知を待つ
-   */
-  waitForDownloadClick(
-    tabId: number,
-    timeoutMs: number
-  ): Promise<{ readonly clickedAt: number; readonly durationMs?: number } | undefined> {
-    const pending = this.pendingDownloadClicks.get(tabId);
-    if (pending) {
-      this.pendingDownloadClicks.delete(tabId);
-      return Promise.resolve(pending);
-    }
-
-    return new Promise((resolve) => {
-      let callback: (durationMs: number | undefined, clickedAt: number) => void = () => {};
-      const removeWaiter = (): void => {
-        const waiters = this.downloadClickWaiters.get(tabId);
-        if (!waiters) {
-          return;
-        }
-        waiters.delete(callback);
-        if (waiters.size === 0) {
-          this.downloadClickWaiters.delete(tabId);
-        }
-      };
-      const wait = createOneShotWait(timeoutMs, () => {
-        removeWaiter();
-        resolve(undefined);
-      });
-      callback = (durationMs: number | undefined, clickedAt: number): void => {
-        wait.finish(() => {
-          removeWaiter();
-          resolve({ clickedAt, durationMs });
-        });
-      };
-
-      const waiters = this.downloadClickWaiters.get(tabId) ?? new Set();
-      waiters.add(callback);
-      this.downloadClickWaiters.set(tabId, waiters);
-    });
-  }
-
-  /**
-   * 実クリック直前通知を受け取る
-   */
-  notifyDownloadClicked(tabId: number | undefined, clickDurationMs?: number): void {
-    if (tabId === undefined) {
-      return;
-    }
-    const waiters = this.downloadClickWaiters.get(tabId);
-    const clickedAt = Date.now();
-    if (!waiters || waiters.size === 0) {
-      this.pendingDownloadClicks.set(tabId, { clickedAt, durationMs: clickDurationMs });
-      return;
-    }
-    Array.from(waiters).forEach((callback) => callback(clickDurationMs, clickedAt));
   }
 
   /**

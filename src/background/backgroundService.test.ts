@@ -8,7 +8,6 @@ import type {
 } from '../types'
 import './backgroundService'
 import {
-  fireDownloadCreatedByUrl as fireDownloadCreated,
   resetTestDoubles,
   sentSteps,
   silenceConsole,
@@ -25,12 +24,7 @@ import {
  * 経由の振る舞いを検証する（private メソッドは直接触らない）。
  */
 
-type BackgroundServiceApi = {
-  getState(): ExtensionState
-  getExternalRequestHandler(): {
-    notifyDownloadWillStart(tabId: number | undefined): void
-  }
-}
+type BackgroundServiceApi = { getState(): ExtensionState }
 
 function getService(): BackgroundServiceApi {
   const service = (globalThis as unknown as { rakutenCsvService?: BackgroundServiceApi })
@@ -93,13 +87,6 @@ describe('backgroundService characterization', () => {
     return sendRuntimeMessage(message, {})
   }
 
-  function stubContentScriptSuccess(tabId: number, steps: readonly string[]): void {
-    if (steps.includes('download-csv')) {
-      fireDownloadCreated()
-      runtimeListener({ action: 'csv-download-clicked' }, senderWithTab(tabId), () => {})
-    }
-  }
-
   function cleanupRegisteredTabs(): void {
     const { rakutenTabs } = getService().getState()
     for (const tabId of Array.from(rakutenTabs)) {
@@ -137,8 +124,7 @@ describe('backgroundService characterization', () => {
 
   beforeEach(() => {
     silenceConsole()
-    setTabsSendMessageImpl((tabId, message, callback) => {
-      stubContentScriptSuccess(tabId, sentSteps(message))
+    setTabsSendMessageImpl((_tabId, _message, callback) => {
       callback?.({ success: true })
     })
   })
@@ -181,32 +167,6 @@ describe('backgroundService characterization', () => {
       expect(response).toEqual({ success: false, error: '未対応のアクション' })
     })
 
-    it('csv-download-will-start は送信元タブのIDで通知する', async () => {
-      const notifySpy = vi.spyOn(
-        getService().getExternalRequestHandler(),
-        'notifyDownloadWillStart'
-      )
-
-      const response = await sendRuntimeMessage(
-        { action: 'csv-download-will-start' },
-        senderWithTab(321)
-      )
-
-      expect(response).toEqual({ success: true })
-      expect(notifySpy).toHaveBeenCalledWith(321)
-    })
-
-    it('csv-download-will-start は送信元タブが無くても通知する', async () => {
-      const notifySpy = vi.spyOn(
-        getService().getExternalRequestHandler(),
-        'notifyDownloadWillStart'
-      )
-
-      const response = await sendRuntimeMessage({ action: 'csv-download-will-start' }, {})
-
-      expect(response).toEqual({ success: true })
-      expect(notifySpy).toHaveBeenCalledWith(undefined)
-    })
   })
 
   describe('download-csv-request の一連の流れ', () => {
@@ -260,13 +220,12 @@ describe('backgroundService characterization', () => {
 
     it('途中の単一ステップが失敗した場合はそのステップ名とエラーを含めて返す', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(113))
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
         if (steps.includes('display-data')) {
           callback?.({ success: false, error: '表示ステップ失敗(stub)', step: 'display-data' })
           return
         }
-        stubContentScriptSuccess(tabId, steps)
         callback?.({ success: true })
       })
 
@@ -278,13 +237,12 @@ describe('backgroundService characterization', () => {
 
     it('途中のステップ群が失敗した場合は失敗ステップ名を引き継いで返す', async () => {
       await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(114))
-      setTabsSendMessageImpl((tabId, message, callback) => {
+      setTabsSendMessageImpl((_tabId, message, callback) => {
         const steps = sentSteps(message)
         if (steps.includes('select-period')) {
           callback?.({ success: false, error: '期間選択失敗(stub)', step: 'select-period' })
           return
         }
-        stubContentScriptSuccess(tabId, steps)
         callback?.({ success: true })
       })
 
@@ -342,26 +300,14 @@ describe('backgroundService characterization', () => {
     })
   })
 
-  describe('タイムアウトフォールバック', () => {
-    it('ページ遷移・ダウンロード開始イベントが来なければタイムアウト後に失敗する', async () => {
-      vi.useFakeTimers()
-      try {
-        await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(401))
-        // イベントを一切発火させない content script スタブ（成功応答のみ）
-        setTabsSendMessageImpl((_tabId, _message, callback) => {
-          callback?.({ success: true })
-        })
+  describe('popup の手動ダウンロード', () => {
+    it('CSV保存ボタンの実行応答で完了する', async () => {
+      await sendRuntimeMessage({ action: 'page-ready' }, senderWithTab(401))
+      setTabsSendMessageImpl((_tabId, _message, callback) => callback?.({ success: true }))
 
-        const pending = downloadRequest(401, ['dividend'])
-        await vi.advanceTimersByTimeAsync(30000)
-        const response = (await pending) as DownloadResponse
-        expect(response.success).toBe(false)
-        expect(response.error).toContain('ダウンロード開始を確認できませんでした')
-        // 成功応答なのに開始を観測できない確定結果は送り直さない
-        expect(vi.mocked(chrome.tabs.sendMessage).mock.calls.filter(call => sentSteps(call[1] as { payload?: Record<string, unknown> }).includes('download-csv'))).toHaveLength(1)
-      } finally {
-        vi.useRealTimers()
-      }
+      const response = (await downloadRequest(401, ['dividend'])) as DownloadResponse
+
+      expect(response.success).toBe(true)
     })
   })
 })

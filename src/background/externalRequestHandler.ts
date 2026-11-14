@@ -14,21 +14,12 @@ import type {
   FetchLatestCsvRequest,
   FetchLatestCsvResult,
   FetchLatestCsvTiming,
-  AndroidCsvInterceptResultMessage,
+  CsvInterceptResultMessage,
   FetchedCsv,
   LoginStateResponse,
 } from '../types';
 import { CSV_DOWNLOAD_CONFIGS } from '../config/csvDownloadConfigs';
 import { RakutenUtils, sleep, waitForTabComplete, sendTabMessageWithTimeout } from '../utils';
-import {
-  createDownloadCapture,
-  createDownloadedFileReader,
-  DOWNLOAD_START_TIMEOUT_MS,
-  readDownloadedCsv,
-  waitForCompletedDownload,
-  type DownloadCapture,
-  type DownloadedFileReader,
-} from './downloadedFile';
 import type { DownloadStepExecutor, StepTimingReporter } from './downloadStepExecutor';
 
 export interface ExternalRequestHandlerConfig {
@@ -42,15 +33,9 @@ export interface ExternalRequestHandlerConfig {
   readonly loginPollIntervalMs?: number;
   /** ログイン状態の問い合わせ1件の応答期限(ms) */
   readonly loginStateQueryTimeoutMs?: number;
-  /** ダウンロード開始を待つ最大時間(ms) */
-  readonly downloadStartTimeoutMs?: number;
-  /** ダウンロードの完了を待つ最大時間(ms) */
-  readonly downloadCompleteTimeoutMs?: number;
   /** タブの読み込み完了を待つ最大時間(ms) */
   readonly tabLoadTimeoutMs?: number;
-  readonly androidInterceptTimeoutMs?: number;
-  /** ダウンロードされたファイルの読み取り */
-  readonly fileReader?: DownloadedFileReader;
+  readonly interceptTimeoutMs?: number;
 }
 
 const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
@@ -58,8 +43,6 @@ const DEFAULT_LOGIN_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_LOGIN_POLL_INTERVAL_MS = 500;
 /** content script の入れ替わり中は応答もエラーも届かないことがあるため、要素の問い合わせと同じ上限で区切る */
 const DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS = 2_000;
-const DEFAULT_DOWNLOAD_START_TIMEOUT_MS = DOWNLOAD_START_TIMEOUT_MS;
-const DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS = 60_000;
 const DEFAULT_TAB_LOAD_TIMEOUT_MS = 30_000;
 
 /**
@@ -136,17 +119,11 @@ export class ExternalRequestHandler {
   private readonly loginWaitTimeoutMs: number;
   private readonly loginPollIntervalMs: number;
   private readonly loginStateQueryTimeoutMs: number;
-  private readonly downloadStartTimeoutMs: number;
-  private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
-  private readonly androidInterceptTimeoutMs: number;
-  private readonly fileReader: DownloadedFileReader;
+  private readonly interceptTimeoutMs: number;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
   private running = false;
-
-  /** ダウンロード開始を待っている取得処理 */
-  private pendingCapture?: DownloadCapture;
 
   constructor(config: ExternalRequestHandlerConfig) {
     this.downloadRunner = config.downloadRunner;
@@ -154,11 +131,8 @@ export class ExternalRequestHandler {
     this.loginWaitTimeoutMs = config.loginWaitTimeoutMs ?? DEFAULT_LOGIN_WAIT_TIMEOUT_MS;
     this.loginPollIntervalMs = config.loginPollIntervalMs ?? DEFAULT_LOGIN_POLL_INTERVAL_MS;
     this.loginStateQueryTimeoutMs = config.loginStateQueryTimeoutMs ?? DEFAULT_LOGIN_STATE_QUERY_TIMEOUT_MS;
-    this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
-    this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
-    this.androidInterceptTimeoutMs = config.androidInterceptTimeoutMs ?? 30_000;
-    this.fileReader = config.fileReader ?? createDownloadedFileReader();
+    this.interceptTimeoutMs = config.interceptTimeoutMs ?? 30_000;
   }
 
   /**
@@ -306,81 +280,10 @@ export class ExternalRequestHandler {
       stepTimings.push({ stage: `fetch-${kind}:${stage}`, durationMs });
     };
 
-    if (await this.isAndroid()) {
-      return this.fetchKindAndroid(tabId, kind, stepTimings, reportStep);
-    }
-
-    const capture = createDownloadCapture(tabId, this.downloadStartTimeoutMs);
-    this.pendingCapture = capture;
-
-    let stepResult: DownloadResponse;
-    try {
-      stepResult = await this.downloadRunner.executeDownloadRequest(
-        {
-          action: 'download-csv-request',
-          payload: { selectedOptions: [kind], tabId, captureDownloadStart: true },
-        },
-        reportStep
-      );
-    } finally {
-      this.pendingCapture = undefined;
-    }
-
-    if (!stepResult.success) {
-      capture.cancel();
-      return {
-        success: false,
-        reason: stepResult.error ?? 'CSVの取得に失敗しました',
-        stepTimings,
-      };
-    }
-
-    // クリック直前の通知が届かなかった場合に備えて、待ちを開始する
-    capture.arm();
-    const downloadId = await capture.downloadId;
-    if (downloadId === undefined) {
-      return {
-        success: false,
-        reason: 'CSVのダウンロードを開始できませんでした',
-        stepTimings,
-      };
-    }
-
-    const item = await waitForCompletedDownload(downloadId, this.downloadCompleteTimeoutMs);
-    if (!item) {
-      return { success: false, reason: 'CSVのダウンロードが完了しませんでした', stepTimings };
-    }
-
-    const result = await readDownloadedCsv(this.fileReader, item);
-    if (!result.success) {
-      return { success: false, reason: result.reason, code: result.code, stepTimings };
-    }
-
-    return {
-      success: true,
-      csv: {
-        kind,
-        content: result.content,
-        fetchedAt: new Date().toISOString(),
-        fileRemoved: result.fileRemoved,
-      },
-      stepTimings,
-    };
+    return this.fetchKindIntercept(tabId, kind, stepTimings, reportStep);
   }
 
-  /**
-   * Android かどうか
-   */
-  private async isAndroid(): Promise<boolean> {
-    try {
-      const info = await chrome.runtime.getPlatformInfo();
-      return info?.os === 'android';
-    } catch {
-      return false;
-    }
-  }
-
-  private async fetchKindAndroid(
+  private async fetchKindIntercept(
     tabId: number,
     kind: CsvDownloadType,
     stepTimings: FetchLatestCsvTiming[],
@@ -390,7 +293,7 @@ export class ExternalRequestHandler {
     | { success: false; reason: string; code?: string; stepTimings: FetchLatestCsvTiming[] }
   > {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const resultPromise = this.waitForAndroidInterceptResult(nonce);
+    const resultPromise = this.waitForInterceptResult(nonce);
 
     let stepResult: DownloadResponse;
     try {
@@ -400,14 +303,13 @@ export class ExternalRequestHandler {
           payload: {
             selectedOptions: [kind],
             tabId,
-            captureDownloadStart: false,
-            androidInterceptNonce: nonce,
+            interceptNonce: nonce,
           },
         },
         reportStep
       );
     } catch {
-      this.cancelAndroidIntercept(tabId, nonce);
+      this.cancelIntercept(tabId, nonce);
       return {
         success: false,
         reason: '横取りなし / method=不明 / status=なし / contentType=不明',
@@ -416,19 +318,19 @@ export class ExternalRequestHandler {
     }
 
     if (!stepResult.success) {
-      this.cancelAndroidIntercept(tabId, nonce);
+      this.cancelIntercept(tabId, nonce);
       return {
         success: false,
-        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
+        reason: this.getSafeInterceptReason(stepResult),
         stepTimings,
       };
     }
 
-    this.startAndroidInterceptTimeout(nonce, this.androidInterceptTimeoutMs);
+    this.startInterceptTimeout(nonce, this.interceptTimeoutMs);
 
     const intercepted = await resultPromise;
     if (!intercepted || !intercepted.success || !intercepted.content) {
-      this.cancelAndroidIntercept(tabId, nonce);
+      this.cancelIntercept(tabId, nonce);
       const reason =
         intercepted?.error ??
         '横取りなし / method=不明 / status=なし / contentType=不明';
@@ -437,6 +339,7 @@ export class ExternalRequestHandler {
 
     const content = intercepted.content;
     if (content.trimStart().startsWith('<')) {
+      this.cancelIntercept(tabId, nonce);
       return {
         success: false,
         reason: `${intercepted.requestType ?? '横取りなし'} / method=${intercepted.method ?? '不明'} / status=${intercepted.status ?? 'なし'} / contentType=${intercepted.contentType ?? '不明'}`,
@@ -444,6 +347,7 @@ export class ExternalRequestHandler {
       };
     }
 
+    this.cancelIntercept(tabId, nonce);
     return {
       success: true,
       csv: {
@@ -455,49 +359,56 @@ export class ExternalRequestHandler {
     };
   }
 
-  private androidInterceptResolvers = new Map<
+  private getSafeInterceptReason(result: DownloadResponse): string {
+    const reason = result.error ?? '';
+    return reason.includes(' / method=') && reason.includes(' / status=')
+      ? reason
+      : '横取りなし / method=不明 / status=なし / contentType=不明';
+  }
+
+  private interceptResolvers = new Map<
     string,
     { readonly resolver: (result: DownloadResponse) => void; timer?: ReturnType<typeof setTimeout> }
   >();
 
-  private waitForAndroidInterceptResult(nonce: string): Promise<DownloadResponse> {
+  private waitForInterceptResult(nonce: string): Promise<DownloadResponse> {
     return new Promise<DownloadResponse>((resolve) => {
-      this.androidInterceptResolvers.set(nonce, {
+      this.interceptResolvers.set(nonce, {
         resolver: (result) => {
-          const entry = this.androidInterceptResolvers.get(nonce);
+          const entry = this.interceptResolvers.get(nonce);
           if (entry?.timer) {
             clearTimeout(entry.timer);
           }
-          this.androidInterceptResolvers.delete(nonce);
+          this.interceptResolvers.delete(nonce);
           resolve(result);
         },
       });
     });
   }
 
-  private startAndroidInterceptTimeout(nonce: string, timeoutMs: number): void {
-    const entry = this.androidInterceptResolvers.get(nonce);
+  private startInterceptTimeout(nonce: string, timeoutMs: number): void {
+    const entry = this.interceptResolvers.get(nonce);
     if (!entry || entry.timer) {
       return;
     }
     entry.timer = setTimeout(() => {
-      this.androidInterceptResolvers.delete(nonce);
+      this.interceptResolvers.delete(nonce);
       entry.resolver({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
     }, timeoutMs);
   }
 
-  private cancelAndroidIntercept(tabId: number, nonce: string): void {
-    const entry = this.androidInterceptResolvers.get(nonce);
+  private cancelIntercept(tabId: number, nonce: string): void {
+    const entry = this.interceptResolvers.get(nonce);
     if (entry) {
       if (entry.timer) {
         clearTimeout(entry.timer);
       }
-      this.androidInterceptResolvers.delete(nonce);
+      this.interceptResolvers.delete(nonce);
     }
     try {
       chrome.tabs.sendMessage(
         tabId,
-        { action: 'disarm-android-csv-intercept', payload: { nonce } },
+        { action: 'disarm-csv-intercept', payload: { nonce } },
         () => {
           void chrome.runtime.lastError;
         }
@@ -507,15 +418,15 @@ export class ExternalRequestHandler {
     }
   }
 
-  public resolveAndroidIntercept(payload: AndroidCsvInterceptResultMessage['payload']): void {
-    const entry = this.androidInterceptResolvers.get(payload.nonce);
+  public resolveIntercept(payload: CsvInterceptResultMessage['payload']): void {
+    const entry = this.interceptResolvers.get(payload.nonce);
     if (!entry) {
       return;
     }
     if (entry.timer) {
       clearTimeout(entry.timer);
     }
-    this.androidInterceptResolvers.delete(payload.nonce);
+    this.interceptResolvers.delete(payload.nonce);
     entry.resolver({
       success: payload.ok === true && typeof payload.content === 'string',
       content: payload.content,
@@ -528,21 +439,6 @@ export class ExternalRequestHandler {
   }
 
   /**
-   * コンテンツスクリプトがCSVダウンロードのクリック直前に知らせる
-   *
-   * クリックの直前まで待ち受けを開始しないことで、同時に別のダウンロードが
-   * 始まっても取り違えないようにする。対象タブ以外からの通知は受け付けない
-   */
-  notifyDownloadWillStart(tabId: number | undefined): void {
-    if (!this.pendingCapture || tabId === undefined) {
-      return;
-    }
-    if (tabId !== this.pendingCapture.tabId) {
-      return;
-    }
-    this.pendingCapture.arm();
-  }
-
   /**
    * ログイン完了を待つ
    *

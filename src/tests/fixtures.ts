@@ -66,17 +66,6 @@ export function fireTabReload(tabId: number): void {
   }
 }
 
-/** ダウンロード開始イベントを発火させ、開始待ちを解消する */
-export function fireDownloadCreatedByUrl(url = 'https://www.rakuten-sec.co.jp/download.csv'): void {
-  const addListener = chrome.downloads.onCreated.addListener as unknown as {
-    mock: { calls: unknown[][] }
-  }
-  for (const call of addListener.mock.calls) {
-    const listener = call[0] as (item: Pick<chrome.downloads.DownloadItem, 'url'>) => void
-    listener({ url })
-  }
-}
-
 /** 応答なしでチャネルが閉じた状況を再現する */
 export function failWithChannelClosed(callback?: (response: DownloadResponse) => void): void {
   const runtime = chrome.runtime as unknown as { lastError?: { message: string } }

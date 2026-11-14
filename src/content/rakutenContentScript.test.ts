@@ -410,49 +410,6 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
-  describe('ダウンロード開始の通知', () => {
-    function stubRuntimeSendMessage() {
-      const sendMessageMock = chrome.runtime.sendMessage as unknown as {
-        mockImplementation: (fn: (message: unknown) => unknown) => void
-        mock: { calls: unknown[][] }
-      }
-      sendMessageMock.mockImplementation(() => Promise.resolve({ success: true }))
-      return sendMessageMock
-    }
-
-    async function clickCsvButton(captureDownloadStart?: boolean) {
-      const el = document.createElement('button')
-      el.id = 'csv'
-      document.body.appendChild(el)
-      makeInteractable(el)
-
-      return sendMessage({
-        action: 'execute-csv-download-steps',
-        payload: {
-          downloadSteps: ['download-csv'],
-          selectors: { csvButton: '#csv' },
-          captureDownloadStart,
-        },
-      } as unknown as ChromeMessage)
-    }
-
-    it('取得待ちの依頼ではクリック前にバックグラウンドへ通知する', async () => {
-      const sendMessageMock = stubRuntimeSendMessage()
-
-      const res = await clickCsvButton(true)
-      expect(res.success).toBe(true)
-      expect(sendMessageMock.mock.calls[0][0]).toEqual({ action: 'csv-download-will-start' })
-    })
-
-    it('通常のダウンロードでは通知しない', async () => {
-      const sendMessageMock = stubRuntimeSendMessage()
-
-      const res = await clickCsvButton()
-      expect(res.success).toBe(true)
-      expect(sendMessageMock.mock.calls).toHaveLength(0)
-    })
-  })
-
   describe('応答とクリックの順序', () => {
     it('download-csv は応答を返してからクリックする', async () => {
       // 前のテストが予約した応答後のクリックを先に処理しておく
@@ -548,7 +505,7 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
-  describe('Android 横取りの arm タイミング', () => {
+  describe('CSV 横取りの arm タイミング', () => {
     it('download-csv の直前だけ arm し navigate では arm しない', async () => {
       const armed: string[] = []
       const armListener = (event: MessageEvent): void => {
@@ -575,7 +532,7 @@ describe('rakutenContentScript ステップ実行', () => {
         payload: {
           downloadSteps: ['navigate-to-page', 'download-csv'],
           selectors: { menuLink: '#menu', csvButton: '#csv' },
-          androidInterceptNonce: 'nonce-timing',
+          interceptNonce: 'nonce-timing',
         },
       } as unknown as ChromeMessage)
 
@@ -603,7 +560,7 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(calls.some((args) => args.some((arg) => typeof arg === 'string' && arg.includes('#menu-link')))).toBe(true)
     })
   })
-  describe('Android CSV横取りのデコード', () => {
+  describe('CSV横取りのデコード', () => {
     it('Shift_JIS の本文をデコードして転送する', async () => {
       const sendMessageMock = vi.fn((_message: unknown, callback?: (response: unknown) => void) => {
         callback?.({ success: true })
@@ -620,7 +577,7 @@ describe('rakutenContentScript ステップ実行', () => {
       window.addEventListener('message', ackListener)
 
       const res = await sendMessage({
-        action: 'arm-android-csv-intercept',
+        action: 'arm-csv-intercept',
         payload: { nonce: 'n-decode' },
       } as unknown as ChromeMessage)
       expect(res.success).toBe(true)
@@ -643,7 +600,7 @@ describe('rakutenContentScript ステップ実行', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
 
       const call = sendMessageMock.mock.calls.find(
-        (entry) => (entry[0] as { action?: string })?.action === 'android-csv-intercept-result'
+        (entry) => (entry[0] as { action?: string })?.action === 'csv-intercept-result'
       )
       expect(call).toBeTruthy()
       expect((call?.[0] as { payload?: { content?: string } })?.payload?.content).toBe('あ')
