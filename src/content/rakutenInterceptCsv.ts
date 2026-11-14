@@ -38,6 +38,7 @@ let originals: {
 } | undefined;
 let submitListener: ((event: Event) => void) | undefined;
 let clickListener: ((event: MouseEvent) => void) | undefined;
+let pendingRequestType: 'form-submit' | 'requestSubmit' = 'form-submit';
 
 function isArmed(): boolean {
   return armed;
@@ -71,34 +72,40 @@ function resolveUrl(value: string | null | undefined): string {
   }
 }
 
-function serializeTextPlain(form: HTMLFormElement): string {
-  const formData = new FormData(form);
-  const pairs: string[] = [];
-  formData.forEach((value, key) => {
-    pairs.push(`${key}=${typeof value === 'string' ? value : ''}`);
-  });
-  return pairs.join('\r\n');
-}
-
-function buildRequest(form: HTMLFormElement, method: string, enctype: string): { url: string; body: BodyInit | undefined } {
-  const base = resolveUrl(form.getAttribute('action'));
+function buildRequest(form: HTMLFormElement, submitter?: HTMLElement | null): { url: string; method: string; body: BodyInit | undefined } {
+  const method = ((submitter as HTMLButtonElement | null)?.getAttribute('formmethod') || form.getAttribute('method') || 'GET').toUpperCase();
+  const enctype = (submitter as HTMLButtonElement | null)?.getAttribute('formenctype') || form.getAttribute('enctype') || 'application/x-www-form-urlencoded';
+  const base = resolveUrl((submitter as HTMLButtonElement | null)?.getAttribute('formaction') || form.getAttribute('action'));
   if (method === 'GET' || method === 'HEAD') {
-    const params = new URLSearchParams(new FormData(form) as unknown as ConstructorParameters<typeof URLSearchParams>[0]);
+    const formData = new FormData(form);
+    const submitterButton = submitter as HTMLButtonElement | null;
+    if (submitterButton?.name) {
+      formData.append(submitterButton.name, submitterButton.value);
+    }
+    const params = new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]);
     const url = new URL(base);
     params.forEach((value, key) => {
       url.searchParams.append(key, value);
     });
-    return { url: url.href, body: undefined };
+    return { url: url.href, method, body: undefined };
   }
   const formData = new FormData(form);
+  const submitterButton = submitter as HTMLButtonElement | null;
+  if (submitterButton?.name) {
+    formData.append(submitterButton.name, submitterButton.value);
+  }
   const lower = enctype.toLowerCase();
   if (lower.includes('urlencoded')) {
-    return { url: base, body: new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]) };
+    return { url: base, method, body: new URLSearchParams(formData as unknown as ConstructorParameters<typeof URLSearchParams>[0]) };
   }
   if (lower.includes('text/plain')) {
-    return { url: base, body: serializeTextPlain(form) };
+    const pairs: string[] = [];
+    formData.forEach((value, key) => {
+      pairs.push(`${key}=${typeof value === 'string' ? value : ''}`);
+    });
+    return { url: base, method, body: pairs.join('\r\n') };
   }
-  return { url: base, body: formData };
+  return { url: base, method, body: formData };
 }
 
 async function runFetch(
@@ -251,10 +258,9 @@ export function arm(nonce?: string): void {
     if (!armed) {
       return originals!.formSubmit.call(this);
     }
-    const method = (this.getAttribute('method') || 'GET').toUpperCase();
-    const enctype = this.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    const request = buildRequest(this, method, enctype);
-    void runFetch('form-submit', request.url, method, request.body, currentNonce);
+    pendingRequestType = 'form-submit';
+    const request = buildRequest(this);
+    void runFetch('form-submit', request.url, request.method, request.body, currentNonce);
     return;
   };
 
@@ -262,11 +268,8 @@ export function arm(nonce?: string): void {
     if (!armed) {
       return originals!.formRequestSubmit.call(this, submitter);
     }
-    const method = (this.getAttribute('method') || 'GET').toUpperCase();
-    const enctype = this.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    const request = buildRequest(this, method, enctype);
-    void runFetch('requestSubmit', request.url, method, request.body, currentNonce);
-    return;
+    pendingRequestType = 'requestSubmit';
+    return originals!.formRequestSubmit.call(this, submitter);
   };
 
   // form submit event (capture)
@@ -279,11 +282,16 @@ export function arm(nonce?: string): void {
       return;
     }
     event.preventDefault();
-    event.stopImmediatePropagation();
-    const method = (form.getAttribute('method') || 'GET').toUpperCase();
-    const enctype = form.getAttribute('enctype') || 'application/x-www-form-urlencoded';
-    const request = buildRequest(form, method, enctype);
-    void runFetch('form-submit', request.url, method, request.body, currentNonce);
+    const submitter = (event as SubmitEvent).submitter as HTMLElement | null;
+    const requestType = pendingRequestType;
+    pendingRequestType = 'form-submit';
+    queueMicrotask(() => {
+      if (intercepted) {
+        return;
+      }
+      const request = buildRequest(form, submitter);
+      void runFetch(requestType, request.url, request.method, request.body, currentNonce);
+    });
   };
   document.addEventListener('submit', submitListener, true);
 
@@ -297,8 +305,13 @@ export function arm(nonce?: string): void {
       return;
     }
     event.preventDefault();
-    event.stopImmediatePropagation();
-    void runFetch('anchor', target.href, 'GET', undefined, currentNonce);
+    const href = target.href;
+    queueMicrotask(() => {
+      if (intercepted) {
+        return;
+      }
+      void runFetch('anchor', href, 'GET', undefined, currentNonce);
+    });
   };
   document.addEventListener('click', clickListener, true);
 

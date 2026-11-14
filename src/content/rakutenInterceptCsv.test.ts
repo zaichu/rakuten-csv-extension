@@ -333,6 +333,36 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('requestSubmit submitter の form* 属性と name/value を反映する', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(new ArrayBuffer(2), { status: 200, headers: { 'content-type': 'text/csv' } })
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    arm('nonce-submitter')
+    const form = document.createElement('form')
+    form.method = 'GET'
+    form.action = 'https://example.com/csv'
+    const button = document.createElement('button')
+    button.type = 'submit'
+    button.name = 'btn'
+    button.value = 'go'
+    button.setAttribute('formaction', 'https://example.com/other')
+    button.setAttribute('formmethod', 'POST')
+    button.setAttribute('formenctype', 'text/plain')
+    form.appendChild(button)
+    document.body.appendChild(form)
+
+    form.requestSubmit(button)
+    await flush()
+    await flush()
+
+    const [url, options] = fetchSpy.mock.calls[0]
+    expect(String(url)).toBe('https://example.com/other')
+    expect(options.method).toBe('POST')
+    expect(options.body).toBe('btn=go')
+  })
+
   it('disarm 後に armed が false になる', () => {
     arm('nonce-disarm')
     expect(isArmed()).toBe(true)
