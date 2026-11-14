@@ -38,6 +38,7 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
     sendMessage: vi.fn(),
+    getPlatformInfo: vi.fn(async () => ({ os: 'win' })),
     getManifest: vi.fn(() => ({
       externally_connectable: {
         matches: ['https://shoken-webapp.pages.dev/*', 'http://localhost/*'],
@@ -67,22 +68,6 @@ const mockChrome = {
   },
   windows: {
     update: vi.fn(async () => undefined),
-  },
-  extension: {
-    isAllowedFileSchemeAccess: vi.fn(async () => true),
-  },
-  downloads: {
-    onCreated: {
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-    },
-    onChanged: {
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-    },
-    search: vi.fn(async () => []),
-    removeFile: vi.fn(async () => undefined),
-    erase: vi.fn(async () => []),
   },
 } as unknown as typeof chrome
 

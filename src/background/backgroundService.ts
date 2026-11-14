@@ -9,7 +9,7 @@
 import type {
   ExtensionState,
   CsvDownloadMessage,
-  CsvDownloadClickedMessage,
+  CsvInterceptResultMessage,
   DownloadResponse,
   BackgroundMessage,
   ExtensionUpdatedMessage
@@ -170,15 +170,9 @@ class RakutenCsvBackgroundService {
           response = await this.handleCsvDownloadRequest(message);
           break;
 
-        case 'csv-download-will-start':
-          this.externalRequestHandler.notifyDownloadWillStart(sender.tab?.id);
-          response = { success: true };
-          break;
-
-        case 'csv-download-clicked':
-          this.downloadStepExecutor.notifyDownloadClicked(
-            sender.tab?.id,
-            (message as CsvDownloadClickedMessage).clickDurationMs
+        case 'csv-intercept-result':
+          this.externalRequestHandler.resolveIntercept(
+            (message as CsvInterceptResultMessage).payload
           );
           response = { success: true };
           break;

@@ -8,7 +8,7 @@ import { join, resolve } from 'path';
  *
  * 楽天証券はモックの疑似ページ(http ではなく https://www.rakuten-sec.co.jp で配信)を
  * 使い、拡張機能に読み込んだ dist を使う。
- * 拡張機能はブラウザが保存したCSVファイルを直接読み取る。
+ * 拡張機能はCSV保存要求を横取りして本文を返す。
  */
 
 const distPath = resolve(process.cwd(), 'dist');
@@ -29,7 +29,7 @@ type AppMessage = {
   state?: string;
   kind?: string;
   reason?: string;
-  csvs?: { kind: string; content: string; fetchedAt: string; fileRemoved?: boolean }[];
+  csvs?: { kind: string; content: string; fetchedAt: string }[];
   failures?: { kind: string; reason: string; code?: string }[];
   error?: string;
 };
@@ -50,17 +50,7 @@ async function launchExtension(): Promise<{ context: BrowserContext; extensionId
 }
 
 async function newMockPage(context: BrowserContext): Promise<Page> {
-  const page = await context.newPage();
-
-  // Playwright 既定のダウンロード保存ではファイル名が UUID になるため、
-  // 実際のChromeと同じ「元のファイル名のまま保存する」動作に揃える
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('Browser.setDownloadBehavior', {
-    behavior: 'allow',
-    downloadPath: mkdtempSync(join(tmpdir(), 'rakuten-csv-extension-download-')),
-    eventsEnabled: true,
-  });
-  return page;
+  return context.newPage();
 }
 
 async function openRakutenMock(context: BrowserContext): Promise<Page> {
@@ -127,13 +117,47 @@ test('画面から依頼するとCSV本文と取得時刻が返る', async () =>
     expect(result?.csvs?.[0].kind).toBe('assetbalance');
     expect(result?.csvs?.[0].content).toBe(EXPECTED_CSV);
     expect(result?.csvs?.[0].fetchedAt).toBeTruthy();
-    // 読み終えたCSVファイルは削除される
-    expect(result?.csvs?.[0].fileRemoved).toBe(true);
 
     expect(messages.filter((message) => message.type === 'progress')).toEqual([
       { type: 'progress', state: 'fetching', kind: 'assetbalance' },
       { type: 'progress', state: 'completed', kind: 'assetbalance' },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('PC を含む全 OS で CSV 本文が返る', async () => {
+  const { context, extensionId } = await launchExtension();
+  try {
+    await openRakutenMock(context);
+
+    const appPage = await context.newPage();
+    await appPage.route('http://localhost:4173/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<html></html>' });
+    });
+    await requestFromApp(appPage, extensionId, ['assetbalance']);
+
+    await appPage.waitForFunction(
+      () => {
+        const messages = (window as unknown as { __messages?: AppMessage[] }).__messages ?? [];
+        return messages.some((message) => message.type === 'result' || message.type === 'error');
+      },
+      undefined,
+      { timeout: 45_000 }
+    );
+
+    const messages = await appPage.evaluate(
+      () => (window as unknown as { __messages: AppMessage[] }).__messages
+    );
+
+    const error = messages.find((message) => message.type === 'error');
+    expect(error, error?.error).toBeUndefined();
+
+    const result = messages.find((message) => message.type === 'result');
+    expect(result?.failures).toEqual([]);
+    expect(result?.csvs?.[0].kind).toBe('assetbalance');
+    expect(result?.csvs?.[0].content).toBe(EXPECTED_CSV);
   } finally {
     await context.close();
   }

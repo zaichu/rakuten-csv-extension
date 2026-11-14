@@ -13,7 +13,7 @@ import type {
   CsvSelectors
 } from '../types';
 import { CSV_DOWNLOAD_STEP_DEFINITIONS } from '../types';
-import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
+import { RakutenUtils, DomUtils, sleep, decodeCsvBytes } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -24,7 +24,6 @@ class RakutenCsvExtension {
   // 送り直しをしない分、1回の試行で従来の合計（約15秒）まで待つ
   private readonly elementTimeout = 15000;
   private readonly elementPollInterval = 50;
-  private readonly notifyTimeout = 2000;
   // documentの読み込みごとに作り直す識別子。backgroundが遷移前後の応答を見分けるために使う
   private readonly documentId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -33,6 +32,7 @@ class RakutenCsvExtension {
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
   private static readonly passkeyLoginButtonSelector = 'button#login-passkey';
+  private readonly interceptListeners = new Map<string, (event: MessageEvent) => void>();
 
   private constructor() {
     this.initialize();
@@ -110,6 +110,28 @@ class RakutenCsvExtension {
 
       case 'check-login-state':
         return this.handleCheckLoginState();
+
+      case 'arm-csv-intercept':
+        return this.armCsvIntercept(message.payload?.nonce);
+
+      case 'disarm-csv-intercept':
+        {
+          const disarmNonce = message.payload?.nonce;
+          if (disarmNonce) {
+            const listener = this.interceptListeners.get(disarmNonce);
+            if (listener) {
+              window.removeEventListener('message', listener);
+              this.interceptListeners.delete(disarmNonce);
+            }
+          } else {
+            for (const listener of this.interceptListeners.values()) {
+              window.removeEventListener('message', listener);
+            }
+            this.interceptListeners.clear();
+          }
+        }
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: message.payload?.nonce }, '*');
+        return { success: true, message: 'disarmed' };
 
       case 'extension-updated':
         this.handleExtensionUpdate();
@@ -189,6 +211,100 @@ class RakutenCsvExtension {
     this.clickElementSafely(button, 'パスキーログイン', selector);
   }
 
+  private async armCsvIntercept(nonce?: string): Promise<DownloadResponse> {
+    const n = nonce ?? '';
+    if (!this.interceptListeners.has(n)) {
+      const resultListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
+        }
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as {
+          type?: string;
+          nonce?: string;
+          ok?: boolean;
+          buffer?: ArrayBuffer;
+          contentType?: string;
+          status?: number;
+          requestType?: string;
+          method?: string;
+          error?: string;
+        } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:result' || data.nonce !== n) {
+          return;
+        }
+        window.removeEventListener('message', resultListener);
+        this.interceptListeners.delete(n);
+        let content: string | undefined;
+        if (data.ok && data.buffer) {
+          try {
+            content = decodeCsvBytes(new Uint8Array(data.buffer));
+          } catch {
+            content = undefined;
+          }
+        }
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: 'csv-intercept-result',
+              payload: {
+                nonce: n,
+                ok: data.ok === true && typeof content === 'string',
+                content,
+                contentType: data.contentType,
+                status: data.status,
+                requestType: data.requestType,
+                method: data.method,
+                error: data.error,
+              },
+            },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {
+          // ignore
+        }
+      };
+      this.interceptListeners.set(n, resultListener);
+      window.addEventListener('message', resultListener);
+    }
+
+    window.postMessage({ type: 'rakuten-csv-intercept:arm', nonce: n }, '*');
+
+    return new Promise<DownloadResponse>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', ackListener);
+        const resultListener = this.interceptListeners.get(n);
+        if (resultListener) {
+          window.removeEventListener('message', resultListener);
+          this.interceptListeners.delete(n);
+        }
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: n }, '*');
+        resolve({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
+      }, 5000);
+
+      const ackListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
+        }
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as { type?: string; nonce?: string } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:armed' || data.nonce !== n) {
+          return;
+        }
+        window.clearTimeout(timeout);
+        window.removeEventListener('message', ackListener);
+        resolve({ success: true, message: 'armed' });
+      };
+      window.addEventListener('message', ackListener);
+    });
+  }
+
   private isLoginScreen(): boolean {
     if (document.querySelector('input[type="password"]')) {
       return true;
@@ -218,7 +334,7 @@ class RakutenCsvExtension {
     message: CsvDownloadStepsInstruction,
     receivedAt: number = Date.now()
   ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors, captureDownloadStart } = message.payload;
+    const { downloadSteps, selectors, interceptNonce } = message.payload;
 
     console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
 
@@ -235,7 +351,7 @@ class RakutenCsvExtension {
 
     for (const step of downloadSteps) {
       try {
-        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
+        const result = await this.executeDownloadStep(step, selectors, interceptNonce);
         console.log(`ステップ ${step} 完了:`, result);
 
         if (result.contentTimings) {
@@ -270,7 +386,7 @@ class RakutenCsvExtension {
   private async executeDownloadStep(
     step: CsvDownloadStep,
     selectors: CsvSelectors,
-    captureDownloadStart?: boolean
+    interceptNonce?: string
   ): Promise<DownloadResponse> {
     const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
     if (!definition) {
@@ -281,10 +397,16 @@ class RakutenCsvExtension {
       };
     }
 
+    if (step === 'download-csv' && interceptNonce) {
+      const armResult = await this.armCsvIntercept(interceptNonce);
+      if (!armResult.success) {
+        return armResult;
+      }
+    }
+
     if (step === 'download-csv') {
       return this.runClickStep(selectors[definition.selectorKey], definition.actionName, {
         requireInteractable: definition.requireInteractable,
-        beforeClick: captureDownloadStart ? () => this.notifyDownloadWillStart() : undefined,
         clickAfterResponse: true
       });
     }
@@ -331,20 +453,7 @@ class RakutenCsvExtension {
     if (options?.clickAfterResponse) {
       const buttonFoundDurationMs = Math.max(0, buttonFoundAt - receivedAt);
       // クリックでページが破棄されると sendResponse が届かなくなるため、応答の後にクリックする。
-      // クリックできたかはバックグラウンドが chrome.downloads.onCreated で判定する
       window.setTimeout(() => {
-        const clickDurationMs = Math.max(0, Date.now() - buttonFoundAt);
-        // 実クリック直前の時点を service worker へ伝え、click→download-start の起点にする
-        try {
-          chrome.runtime.sendMessage(
-            { action: 'csv-download-clicked', clickDurationMs },
-            () => {
-              void chrome.runtime.lastError;
-            }
-          );
-        } catch {
-          // 通知できなくてもクリックは続行する
-        }
         const result = this.clickElementSafely(element, actionName, selector);
         if (!result.success) {
           console.warn(result.error);
@@ -360,24 +469,6 @@ class RakutenCsvExtension {
     }
 
     return this.clickElementSafely(element, actionName, selector);
-  }
-
-  /**
-   * CSVダウンロードのクリック直前にバックグラウンドへ知らせる
-   *
-   * バックグラウンドが待ち受けを準備してからクリックすることで、
-   * 同時に別のダウンロードが始まっても取り違えないようにする
-   */
-  private async notifyDownloadWillStart(): Promise<void> {
-    try {
-      await withTimeout(
-        Promise.resolve(chrome.runtime.sendMessage({ action: 'csv-download-will-start' })),
-        this.notifyTimeout,
-        'ダウンロード開始の通知がタイムアウトしました'
-      );
-    } catch {
-      // 通知できなくてもクリックは続行する（取得は失敗する）
-    }
   }
 
   /**

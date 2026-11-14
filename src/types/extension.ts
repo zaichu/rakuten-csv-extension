@@ -14,7 +14,7 @@ export interface CsvSelectors {
 /**
  * CSVダウンロードのステップ定義
  */
-export type CsvDownloadStep = 
+export type CsvDownloadStep =
   | 'navigate-to-page'       // ページに遷移
   | 'select-tab'            // タブ選択（実現損益用）
   | 'select-period'         // 期間選択
@@ -64,12 +64,7 @@ export interface CsvDownloadMessage extends ChromeMessage {
   readonly payload: {
     readonly selectedOptions: ReadonlyArray<CsvDownloadType>;
     readonly tabId?: number;
-    /**
-     * CSVダウンロードのクリック直前にバックグラウンドへ通知するか
-     *
-     * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
-     */
-    readonly captureDownloadStart?: boolean;
+    readonly interceptNonce?: string;
   };
 }
 
@@ -83,7 +78,7 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
   readonly payload: {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
-    readonly captureDownloadStart?: boolean;
+    readonly interceptNonce?: string;
   };
 }
 
@@ -117,13 +112,15 @@ export type ContentScriptMessage =
   | CheckCsvDownloadStepInstruction
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
-  | { readonly action: 'check-connection' };
+  | { readonly action: 'check-connection' }
+  | { readonly action: 'arm-csv-intercept'; readonly payload?: { readonly nonce?: string } }
+  | { readonly action: 'disarm-csv-intercept'; readonly payload?: { readonly nonce?: string } };
 
 /**
  * コンテンツスクリプト側で計測したステップの内訳
  */
 export interface DownloadStepTiming {
-  readonly phase: 'receive' | 'button-found' | 'click' | 'download-start' | 'action';
+  readonly phase: 'receive' | 'button-found' | 'action';
   readonly durationMs: number;
 }
 
@@ -158,6 +155,11 @@ export interface DownloadResponse extends BaseResponse {
   readonly message?: string;
   readonly step?: CsvDownloadStep;
   readonly code?: string;
+  readonly content?: string;
+  readonly contentType?: string;
+  readonly status?: number;
+  readonly requestType?: string;
+  readonly method?: string;
   /**
    * 応答したページ(document)の識別子
    *
@@ -215,7 +217,6 @@ export interface FetchedCsv extends WithKind {
   readonly content: string;
   readonly fetchedAt: string;
   /** ダウンロードされたファイルを削除できたか */
-  readonly fileRemoved?: boolean;
 }
 
 /**
@@ -296,16 +297,21 @@ export interface PageReadyMessage extends ChromeMessage {
 /**
  * CSVダウンロードのクリック直前 知らせるメッセージ
  */
-export interface CsvDownloadWillStartMessage extends ChromeMessage {
-  readonly action: 'csv-download-will-start';
-}
-
 /**
  * CSVダウンロードの実クリック直前を知らせるメッセージ
  */
-export interface CsvDownloadClickedMessage extends ChromeMessage {
-  readonly action: 'csv-download-clicked';
-  readonly clickDurationMs?: number;
+export interface CsvInterceptResultMessage extends ChromeMessage {
+  readonly action: 'csv-intercept-result';
+  readonly payload: {
+    readonly nonce: string;
+    readonly ok?: boolean;
+    readonly content?: string;
+    readonly contentType?: string;
+    readonly status?: number;
+    readonly requestType?: string;
+    readonly method?: string;
+    readonly error?: string;
+  };
 }
 
 /**
@@ -314,5 +320,4 @@ export interface CsvDownloadClickedMessage extends ChromeMessage {
 export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
-  | CsvDownloadWillStartMessage
-  | CsvDownloadClickedMessage;
+  | CsvInterceptResultMessage;
