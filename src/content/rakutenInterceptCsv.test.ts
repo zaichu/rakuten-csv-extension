@@ -428,11 +428,16 @@ describe('rakutenInterceptCsv (MAIN world)', () => {
     anchor.href = 'javascript:csvOutput()'
     anchor.onclick = () => form.requestSubmit()
     document.body.appendChild(anchor)
+    anchor.addEventListener('click', (event) => event.preventDefault(), { once: true })
+    const clickSpy = vi.spyOn(anchor, 'click')
 
     anchor.click()
     await flush()
     await flush()
+    await flush()
 
+    expect(clickSpy).toHaveBeenCalledOnce()
+    expect(anchor.getAttribute('href')).toBe('javascript:csvOutput()')
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(String(fetchSpy.mock.calls[0][0])).toBe('https://example.com/form')
   })
