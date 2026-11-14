@@ -70,6 +70,10 @@ export interface CsvDownloadMessage extends ChromeMessage {
      * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
      */
     readonly captureDownloadStart?: boolean;
+   /**
+    * Android 経路で Main world の横取り結果を突き合わせる nonce
+    */
+   readonly androidInterceptNonce?: string;
   };
 }
 
@@ -84,6 +88,10 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
     readonly captureDownloadStart?: boolean;
+   /**
+    * Android 経路で Main world の横取り結果を突き合わせる nonce
+    */
+   readonly androidInterceptNonce?: string;
   };
 }
 

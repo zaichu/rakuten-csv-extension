@@ -394,15 +394,6 @@ export class ExternalRequestHandler {
     | { success: false; reason: string; code?: string; stepTimings: FetchLatestCsvTiming[] }
   > {
     const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const armed = await this.armAndroidIntercept(tabId, nonce);
-    if (!armed) {
-      this.cancelAndroidIntercept(tabId, nonce);
-      return {
-        success: false,
-        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
-        stepTimings,
-      };
-    }
     const resultPromise = this.waitForAndroidInterceptResult(nonce, this.androidInterceptTimeoutMs);
 
     let stepResult: DownloadResponse;
@@ -410,7 +401,12 @@ export class ExternalRequestHandler {
       stepResult = await this.downloadRunner.executeDownloadRequest(
         {
           action: 'download-csv-request',
-          payload: { selectedOptions: [kind], tabId, captureDownloadStart: false },
+          payload: {
+            selectedOptions: [kind],
+            tabId,
+            captureDownloadStart: false,
+            androidInterceptNonce: nonce,
+          },
         },
         reportStep
       );

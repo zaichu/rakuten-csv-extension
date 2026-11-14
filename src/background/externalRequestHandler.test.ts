@@ -136,6 +136,20 @@ function createHandler(
       id: DOWNLOAD_ID,
       url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
     })
+    const nonce = (message.payload as { androidInterceptNonce?: string }).androidInterceptNonce
+    if (nonce) {
+      setTimeout(() => {
+        handler.resolveAndroidIntercept({
+          nonce,
+          ok: true,
+          content: CSV_CONTENT,
+          contentType: 'text/csv',
+          status: 200,
+          requestType: 'anchor',
+          method: 'GET',
+        })
+      }, 0)
+    }
     return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
   })
 
@@ -829,14 +843,11 @@ describe('externalRequestHandler', () => {
     })
 
     it('Android 経路で HTML が返れば失敗する', async () => {
-      const { handler } = createHandler()
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
-        const message = args[1] as { action?: string; payload?: { nonce?: string } };
-        const callback = args[2] as ((response?: unknown) => void) | undefined;
-        if (message.action === 'arm-android-csv-intercept') {
-          const nonce = message.payload?.nonce ?? ''
+      const { handler, runner } = createHandler()
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const kind = (message as { payload: { selectedOptions: CsvDownloadType[] } }).payload.selectedOptions[0]
+        const nonce = (message as { payload: { androidInterceptNonce?: string } }).payload.androidInterceptNonce
+        if (nonce) {
           setTimeout(() => {
             handler.resolveAndroidIntercept({
               nonce,
@@ -848,9 +859,14 @@ describe('externalRequestHandler', () => {
               method: 'GET',
             })
           }, 0)
-          callback?.({ success: true, message: 'armed' })
-          return
         }
+        return { success: true, message: `${kind} を取得しました` }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
         if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return
@@ -868,16 +884,13 @@ describe('externalRequestHandler', () => {
 
     it('Android 経路がタイムアウトしても次回取得を邪魔しない', async () => {
       vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
-      const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      vi.spyOn(runner, 'executeDownloadRequest').mockResolvedValue({ success: true, message: 'ok' })
       const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
 
       vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
         const message = args[1] as { action?: string }
         const callback = args[2] as ((response?: unknown) => void) | undefined
-        if (message.action === 'arm-android-csv-intercept') {
-          callback?.({ success: true, message: 'armed' })
-          return
-        }
         if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return
@@ -973,14 +986,11 @@ describe('externalRequestHandler', () => {
     })
 
     it('失敗メッセージに秘密を含めない', async () => {
-      const { handler } = createHandler()
-      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
-
-      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
-        const message = args[1] as { action?: string; payload?: { nonce?: string } };
-        const callback = args[2] as ((response?: unknown) => void) | undefined;
-        if (message.action === 'arm-android-csv-intercept') {
-          const nonce = message.payload?.nonce ?? ''
+      const { handler, runner } = createHandler()
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const kind = (message as { payload: { selectedOptions: CsvDownloadType[] } }).payload.selectedOptions[0]
+        const nonce = (message as { payload: { androidInterceptNonce?: string } }).payload.androidInterceptNonce
+        if (nonce) {
           setTimeout(() => {
             handler.resolveAndroidIntercept({
               nonce,
@@ -992,9 +1002,14 @@ describe('externalRequestHandler', () => {
               method: 'GET',
             })
           }, 0)
-          callback?.({ success: true, message: 'armed' })
-          return
         }
+        return { success: true, message: `${kind} を取得しました` }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
         if (message.action === 'check-login-state') {
           callback?.({ success: true, loggedIn: true })
           return

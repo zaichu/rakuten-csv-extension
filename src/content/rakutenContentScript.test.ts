@@ -548,6 +548,42 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
+  describe('Android 横取りの arm タイミング', () => {
+    it('download-csv の直前だけ arm し navigate では arm しない', async () => {
+      const armed: string[] = []
+      const armListener = (event: MessageEvent): void => {
+        if (event.data?.type === 'rakuten-csv-intercept:arm') {
+          armed.push('arm')
+        }
+      }
+      window.addEventListener('message', armListener)
+
+      const menu = document.createElement('a')
+      menu.id = 'menu'
+      document.body.appendChild(menu)
+      const csv = document.createElement('button')
+      csv.id = 'csv'
+      document.body.appendChild(csv)
+      // make interactable
+      vi.spyOn(csv, 'getBoundingClientRect').mockReturnValue({
+        width: 10, height: 10, top: 0, left: 0, bottom: 10, right: 10, x: 0, y: 0, toJSON: () => ({})
+      } as DOMRect)
+
+      await sendMessage({
+        action: 'execute-csv-download-steps',
+        payload: {
+          downloadSteps: ['navigate-to-page', 'download-csv'],
+          selectors: { menuLink: '#menu', csvButton: '#csv' },
+          androidInterceptNonce: 'nonce-timing',
+        },
+      } as unknown as ChromeMessage)
+
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      window.removeEventListener('message', armListener)
+      expect(armed).toHaveLength(1)
+    })
+  })
+
   describe('ログの衛生', () => {
     it('クリック時のログは要素参照ではなくセレクター名だけを出す', async () => {
       const el = document.createElement('a')

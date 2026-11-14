@@ -303,7 +303,7 @@ class RakutenCsvExtension {
     message: CsvDownloadStepsInstruction,
     receivedAt: number = Date.now()
   ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors, captureDownloadStart } = message.payload;
+    const { downloadSteps, selectors, captureDownloadStart, androidInterceptNonce } = message.payload;
 
     console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
 
@@ -320,7 +320,7 @@ class RakutenCsvExtension {
 
     for (const step of downloadSteps) {
       try {
-        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
+        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart, androidInterceptNonce);
         console.log(`ステップ ${step} 完了:`, result);
 
         if (result.contentTimings) {
@@ -355,7 +355,8 @@ class RakutenCsvExtension {
   private async executeDownloadStep(
     step: CsvDownloadStep,
     selectors: CsvSelectors,
-    captureDownloadStart?: boolean
+    captureDownloadStart?: boolean,
+    androidInterceptNonce?: string
   ): Promise<DownloadResponse> {
     const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
     if (!definition) {
@@ -364,6 +365,10 @@ class RakutenCsvExtension {
         error: `未対応のダウンロードステップです: ${step}`,
         step
       };
+    }
+
+    if (step === 'download-csv' && androidInterceptNonce) {
+      this.armAndroidCsvIntercept(androidInterceptNonce);
     }
 
     if (step === 'download-csv') {
