@@ -134,7 +134,8 @@ export class DownloadStepExecutor {
     message: CsvDownloadMessage,
     reportStep?: StepTimingReporter
   ): Promise<DownloadResponse> {
-    const { selectedOptions, tabId, captureDownloadStart } = message.payload;
+    const { selectedOptions, tabId, captureDownloadStart, androidInterceptNonce } = message.payload;
+    const _androidInterceptNonce = androidInterceptNonce;
 
     try {
       // タブIDの決定
@@ -166,7 +167,8 @@ export class DownloadStepExecutor {
           targetTabId,
           downloadType,
           captureDownloadStart,
-          reportStep
+          reportStep,
+          _androidInterceptNonce
         );
 
         if (!result.success) {
@@ -195,7 +197,8 @@ export class DownloadStepExecutor {
     tabId: number,
     downloadType: CsvDownloadType,
     captureDownloadStart?: boolean,
-    reportStep?: StepTimingReporter
+    reportStep?: StepTimingReporter,
+    _androidInterceptNonce?: string
   ): Promise<DownloadResponse> {
     const config = RakutenUtils.getCsvDownloadConfig(downloadType);
 
@@ -206,7 +209,7 @@ export class DownloadStepExecutor {
       };
     }
 
-    return this.executeDownloadSequence(tabId, config, captureDownloadStart, reportStep);
+    return this.executeDownloadSequence(tabId, config, captureDownloadStart, reportStep, _androidInterceptNonce);
   }
 
   /**
@@ -246,7 +249,8 @@ export class DownloadStepExecutor {
     tabId: number,
     config: CsvDownloadConfig,
     captureDownloadStart?: boolean,
-    reportStep?: StepTimingReporter
+    reportStep?: StepTimingReporter,
+    _androidInterceptNonce?: string
   ): Promise<DownloadResponse> {
     const { steps, selectors, description } = config;
     const groups = this.groupSteps(steps);
@@ -261,8 +265,9 @@ export class DownloadStepExecutor {
         steps,
         selectors,
         captureDownloadStart,
-        group.kind === 'batch' && group.steps.includes('download-csv'),
-        previousDocumentId
+        group.kind === 'batch' && group.steps.includes('download-csv') && !_androidInterceptNonce,
+        previousDocumentId,
+        _androidInterceptNonce
       );
       const result = outcome.response;
 
@@ -299,7 +304,8 @@ export class DownloadStepExecutor {
     selectors: CsvDownloadConfig['selectors'],
     captureDownloadStart: boolean | undefined,
     waitForDownloadStart: boolean,
-    previousDocumentId?: string
+    previousDocumentId?: string,
+    _androidInterceptNonce?: string
   ): Promise<StepExecutionOutcome> {
     const startedAt = Date.now();
     const deadline = startedAt + this.stepTimeout;
@@ -327,7 +333,7 @@ export class DownloadStepExecutor {
         try {
           const sendStartedAt = Date.now();
           const result = await this.executeSteps(
-            tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart
+            tabId, steps, selectors, deadline - sendStartedAt, captureDownloadStart, _androidInterceptNonce
           );
           const actionCompletedAt = Date.now();
           if (result.success) {
@@ -590,11 +596,12 @@ export class DownloadStepExecutor {
     steps: readonly CsvDownloadStep[],
     selectors: CsvDownloadConfig['selectors'],
     timeoutMs: number,
-    captureDownloadStart?: boolean
+    captureDownloadStart?: boolean,
+    _androidInterceptNonce?: string
   ): Promise<StepExecutionResponse> {
     const instruction: CsvDownloadStepsInstruction = {
       action: 'execute-csv-download-steps',
-      payload: { downloadSteps: steps, selectors, captureDownloadStart }
+      payload: { downloadSteps: steps, selectors, captureDownloadStart, androidInterceptNonce: _androidInterceptNonce }
     };
     const sendMessagePromise = new Promise<StepExecutionResponse>((resolve) => {
       chrome.tabs.sendMessage(tabId, instruction, (response) => {

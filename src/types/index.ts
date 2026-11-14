@@ -43,7 +43,8 @@ export type {
   ExtensionState,
   PageReadyMessage,
   CsvDownloadWillStartMessage,
-  CsvDownloadClickedMessage
+  CsvDownloadClickedMessage,
+  AndroidCsvInterceptResultMessage
 } from './extension';
 export { PAGE_TRANSITION_STEPS, isPageTransitionStep, CSV_DOWNLOAD_STEP_DEFINITIONS } from './extension';
 

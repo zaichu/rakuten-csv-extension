@@ -14,7 +14,7 @@ export interface CsvSelectors {
 /**
  * CSVダウンロードのステップ定義
  */
-export type CsvDownloadStep = 
+export type CsvDownloadStep =
   | 'navigate-to-page'       // ページに遷移
   | 'select-tab'            // タブ選択（実現損益用）
   | 'select-period'         // 期間選択
@@ -70,6 +70,7 @@ export interface CsvDownloadMessage extends ChromeMessage {
      * 外部ページからの取得で、ダウンロード開始を待ち受ける場合だけtrueにする
      */
     readonly captureDownloadStart?: boolean;
+   readonly androidInterceptNonce?: string;
   };
 }
 
@@ -84,6 +85,7 @@ export interface CsvDownloadStepsInstruction extends ChromeMessage {
     readonly downloadSteps: readonly CsvDownloadStep[];
     readonly selectors: CsvSelectors;
     readonly captureDownloadStart?: boolean;
+   readonly androidInterceptNonce?: string;
   };
 }
 
@@ -117,7 +119,9 @@ export type ContentScriptMessage =
   | CheckCsvDownloadStepInstruction
   | ExtensionUpdatedMessage
   | CheckLoginStateInstruction
-  | { readonly action: 'check-connection' };
+  | { readonly action: 'check-connection' }
+  | { readonly action: 'arm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } }
+  | { readonly action: 'disarm-android-csv-intercept'; readonly payload?: { readonly nonce?: string } };
 
 /**
  * コンテンツスクリプト側で計測したステップの内訳
@@ -158,6 +162,11 @@ export interface DownloadResponse extends BaseResponse {
   readonly message?: string;
   readonly step?: CsvDownloadStep;
   readonly code?: string;
+  readonly content?: string;
+  readonly contentType?: string;
+  readonly status?: number;
+  readonly requestType?: string;
+  readonly method?: string;
   /**
    * 応答したページ(document)の識別子
    *
@@ -308,6 +317,20 @@ export interface CsvDownloadClickedMessage extends ChromeMessage {
   readonly clickDurationMs?: number;
 }
 
+export interface AndroidCsvInterceptResultMessage extends ChromeMessage {
+  readonly action: 'android-csv-intercept-result';
+  readonly payload: {
+    readonly nonce: string;
+    readonly ok?: boolean;
+    readonly content?: string;
+    readonly contentType?: string;
+    readonly status?: number;
+    readonly requestType?: string;
+    readonly method?: string;
+    readonly error?: string;
+  };
+}
+
 /**
  * バックグラウンドが受け取るメッセージ
  */
@@ -315,4 +338,5 @@ export type BackgroundMessage =
   | PageReadyMessage
   | CsvDownloadMessage
   | CsvDownloadWillStartMessage
-  | CsvDownloadClickedMessage;
+  | CsvDownloadClickedMessage
+  | AndroidCsvInterceptResultMessage;

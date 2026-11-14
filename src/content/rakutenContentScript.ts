@@ -13,7 +13,7 @@ import type {
   CsvSelectors
 } from '../types';
 import { CSV_DOWNLOAD_STEP_DEFINITIONS } from '../types';
-import { RakutenUtils, DomUtils, sleep, withTimeout } from '../utils';
+import { RakutenUtils, DomUtils, sleep, withTimeout, decodeCsvBytes } from '../utils';
 
 /**
  * 楽天証券 CSV拡張機能のコンテンツスクリプト
@@ -33,6 +33,7 @@ class RakutenCsvExtension {
   /** パスキーボタンを押下済みか */
   private passkeyLoginClicked = false;
   private static readonly passkeyLoginButtonSelector = 'button#login-passkey';
+  private readonly androidInterceptListeners = new Map<string, (event: MessageEvent) => void>();
 
   private constructor() {
     this.initialize();
@@ -110,6 +111,28 @@ class RakutenCsvExtension {
 
       case 'check-login-state':
         return this.handleCheckLoginState();
+
+      case 'arm-android-csv-intercept':
+        return this.armAndroidCsvIntercept(message.payload?.nonce);
+
+      case 'disarm-android-csv-intercept':
+        {
+          const disarmNonce = message.payload?.nonce;
+          if (disarmNonce) {
+            const listener = this.androidInterceptListeners.get(disarmNonce);
+            if (listener) {
+              window.removeEventListener('message', listener);
+              this.androidInterceptListeners.delete(disarmNonce);
+            }
+          } else {
+            for (const listener of this.androidInterceptListeners.values()) {
+              window.removeEventListener('message', listener);
+            }
+            this.androidInterceptListeners.clear();
+          }
+        }
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: message.payload?.nonce }, '*');
+        return { success: true, message: 'disarmed' };
 
       case 'extension-updated':
         this.handleExtensionUpdate();
@@ -189,6 +212,100 @@ class RakutenCsvExtension {
     this.clickElementSafely(button, 'パスキーログイン', selector);
   }
 
+  private async armAndroidCsvIntercept(nonce?: string): Promise<DownloadResponse> {
+    const n = nonce ?? '';
+    if (!this.androidInterceptListeners.has(n)) {
+      const resultListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
+        }
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as {
+          type?: string;
+          nonce?: string;
+          ok?: boolean;
+          buffer?: ArrayBuffer;
+          contentType?: string;
+          status?: number;
+          requestType?: string;
+          method?: string;
+          error?: string;
+        } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:result' || data.nonce !== n) {
+          return;
+        }
+        window.removeEventListener('message', resultListener);
+        this.androidInterceptListeners.delete(n);
+        let content: string | undefined;
+        if (data.ok && data.buffer) {
+          try {
+            content = decodeCsvBytes(new Uint8Array(data.buffer));
+          } catch {
+            content = undefined;
+          }
+        }
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: 'android-csv-intercept-result',
+              payload: {
+                nonce: n,
+                ok: data.ok === true && typeof content === 'string',
+                content,
+                contentType: data.contentType,
+                status: data.status,
+                requestType: data.requestType,
+                method: data.method,
+                error: data.error,
+              },
+            },
+            () => {
+              void chrome.runtime.lastError;
+            }
+          );
+        } catch {
+          // ignore
+        }
+      };
+      this.androidInterceptListeners.set(n, resultListener);
+      window.addEventListener('message', resultListener);
+    }
+
+    window.postMessage({ type: 'rakuten-csv-intercept:arm', nonce: n }, '*');
+
+    return new Promise<DownloadResponse>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener('message', ackListener);
+        const resultListener = this.androidInterceptListeners.get(n);
+        if (resultListener) {
+          window.removeEventListener('message', resultListener);
+          this.androidInterceptListeners.delete(n);
+        }
+        window.postMessage({ type: 'rakuten-csv-intercept:disarm', nonce: n }, '*');
+        resolve({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
+      }, 5000);
+
+      const ackListener = (event: MessageEvent): void => {
+        if (event.origin !== '' && event.origin !== window.location.origin) {
+          return;
+        }
+        if (event.source !== null && event.source !== window) {
+          return;
+        }
+        const data = event.data as { type?: string; nonce?: string } | null;
+        if (!data || data.type !== 'rakuten-csv-intercept:armed' || data.nonce !== n) {
+          return;
+        }
+        window.clearTimeout(timeout);
+        window.removeEventListener('message', ackListener);
+        resolve({ success: true, message: 'armed' });
+      };
+      window.addEventListener('message', ackListener);
+    });
+  }
+
   private isLoginScreen(): boolean {
     if (document.querySelector('input[type="password"]')) {
       return true;
@@ -218,7 +335,7 @@ class RakutenCsvExtension {
     message: CsvDownloadStepsInstruction,
     receivedAt: number = Date.now()
   ): Promise<DownloadResponse> {
-    const { downloadSteps, selectors, captureDownloadStart } = message.payload;
+    const { downloadSteps, selectors, captureDownloadStart, androidInterceptNonce } = message.payload;
 
     console.log(`CSVダウンロードステップ群実行: ${downloadSteps.join(', ')}`);
 
@@ -235,7 +352,7 @@ class RakutenCsvExtension {
 
     for (const step of downloadSteps) {
       try {
-        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart);
+        const result = await this.executeDownloadStep(step, selectors, captureDownloadStart, androidInterceptNonce);
         console.log(`ステップ ${step} 完了:`, result);
 
         if (result.contentTimings) {
@@ -270,7 +387,8 @@ class RakutenCsvExtension {
   private async executeDownloadStep(
     step: CsvDownloadStep,
     selectors: CsvSelectors,
-    captureDownloadStart?: boolean
+    captureDownloadStart?: boolean,
+    androidInterceptNonce?: string
   ): Promise<DownloadResponse> {
     const definition: CsvDownloadStepDefinition | undefined = CSV_DOWNLOAD_STEP_DEFINITIONS[step];
     if (!definition) {
@@ -279,6 +397,13 @@ class RakutenCsvExtension {
         error: `未対応のダウンロードステップです: ${step}`,
         step
       };
+    }
+
+    if (step === 'download-csv' && androidInterceptNonce) {
+      const armResult = await this.armAndroidCsvIntercept(androidInterceptNonce);
+      if (!armResult.success) {
+        return armResult;
+      }
     }
 
     if (step === 'download-csv') {

@@ -10,6 +10,7 @@ import type {
   ExtensionState,
   CsvDownloadMessage,
   CsvDownloadClickedMessage,
+  AndroidCsvInterceptResultMessage,
   DownloadResponse,
   BackgroundMessage,
   ExtensionUpdatedMessage
@@ -179,6 +180,13 @@ class RakutenCsvBackgroundService {
           this.downloadStepExecutor.notifyDownloadClicked(
             sender.tab?.id,
             (message as CsvDownloadClickedMessage).clickDurationMs
+          );
+          response = { success: true };
+          break;
+
+        case 'android-csv-intercept-result':
+          this.externalRequestHandler.resolveAndroidIntercept(
+            (message as AndroidCsvInterceptResultMessage).payload
           );
           response = { success: true };
           break;

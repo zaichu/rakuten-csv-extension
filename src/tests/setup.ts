@@ -38,6 +38,7 @@ const mockChrome = {
       removeListener: vi.fn(),
     },
     sendMessage: vi.fn(),
+    getPlatformInfo: vi.fn(async () => ({ os: 'win' })),
     getManifest: vi.fn(() => ({
       externally_connectable: {
         matches: ['https://shoken-webapp.pages.dev/*', 'http://localhost/*'],

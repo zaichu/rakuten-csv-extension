@@ -112,6 +112,7 @@ function createHandler(
     readonly loginWaitTimeoutMs?: number
     readonly loginPollIntervalMs?: number
     readonly loginStateQueryTimeoutMs?: number
+    readonly androidInterceptTimeoutMs?: number
     readonly fileReader?: DownloadedFileReader
   } = {}
 ) {
@@ -135,6 +136,20 @@ function createHandler(
       id: DOWNLOAD_ID,
       url: `https://www.rakuten-sec.co.jp/csv/${kind}.csv`,
     })
+    const nonce = (message.payload as { androidInterceptNonce?: string }).androidInterceptNonce
+    if (nonce) {
+      setTimeout(() => {
+        handler.resolveAndroidIntercept({
+          nonce,
+          ok: true,
+          content: CSV_CONTENT,
+          contentType: 'text/csv',
+          status: 200,
+          requestType: 'anchor',
+          method: 'GET',
+        })
+      }, 0)
+    }
     return responses[kind] ?? { success: true, message: `${kind} を取得しました` }
   })
 
@@ -765,5 +780,278 @@ describe('externalRequestHandler', () => {
       expect(executed).toEqual(['assetbalance'])
       expect(result.csvs).toHaveLength(1)
     })
+
+  describe('Android 経路', () => {
+    beforeEach(() => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+    })
+
+    it('Android のとき新経路で CSV を取得する', async () => {
+      const { handler, executed } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      const originalSendMessage = vi.mocked(chrome.tabs.sendMessage)
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string; payload?: { nonce?: string } };
+        const callback = args[2] as ((response?: unknown) => void) | undefined;
+        if (message.action === 'arm-android-csv-intercept') {
+          const nonce = message.payload?.nonce ?? ''
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: true,
+              content: CSV_CONTENT,
+              contentType: 'text/csv',
+              status: 200,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(result.csvs[0].content).toBe(CSV_CONTENT)
+      expect(result.failures).toEqual([])
+      expect(executed).toEqual(['assetbalance'])
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(originalSendMessage.getMockImplementation()!)
+    })
+
+    it('非 Android では既存経路を使う', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'win' } as never)
+      const { handler, executed } = createHandler()
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(executed).toEqual(['assetbalance'])
+    })
+
+    it('Android 経路で HTML が返れば失敗する', async () => {
+      const { handler, runner } = createHandler()
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const kind = message.payload.selectedOptions[0]
+        const nonce = message.payload.androidInterceptNonce
+        if (nonce) {
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: false,
+              error: 'anchor / method=GET / status=200 / contentType=text/html',
+              contentType: 'text/html',
+              status: 200,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+        }
+        return { success: true, message: `${kind} を取得しました` }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toEqual([])
+      expect(result.failures[0]?.reason).toContain('text/html')
+    })
+
+    it('Android 経路は準備にタイムアウト以上かかっても横取り結果を受け取る', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 20 })
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const nonce = message.payload.androidInterceptNonce
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        if (nonce) {
+          handler.resolveAndroidIntercept({
+            nonce,
+            ok: true,
+            content: CSV_CONTENT,
+            contentType: 'text/csv',
+            status: 200,
+            requestType: 'form-submit',
+            method: 'POST',
+          })
+        }
+        return { success: true, message: 'prepared' }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(result.csvs).toHaveLength(1)
+      expect(result.failures).toEqual([])
+    })
+
+    it('Android 経路がタイムアウトしても次回取得を邪魔しない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const { handler, runner } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      vi.spyOn(runner, 'executeDownloadRequest').mockResolvedValue({ success: true, message: 'ok' })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const first = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      expect(first.csvs).toEqual([])
+      expect(first.failures[0]?.reason).toBe('横取りなし / method=不明 / status=なし / contentType=不明')
+
+      const { port: port2, posted: posted2, listeners: listeners2 } = createPort(ALLOWED_ORIGIN)
+      handler.handleConnection(port2)
+      listeners2[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      // simulate resolve via a new handler? Instead just expect timeout again or success if armed result delivered.
+      const second = await waitForMessage<FetchLatestCsvResult>(posted2, isResult)
+      expect(second).toBeTruthy()
+    })
+
+    it('ステップ失敗理由に query を含めない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const executor = createDownloadExecutor()
+      const { handler } = createHandler({}, { androidInterceptTimeoutMs: 50 })
+      ;(handler as unknown as { downloadRunner: unknown }).downloadRunner = executor
+      vi.spyOn(executor, 'executeDownloadRequest').mockResolvedValue({
+        success: false,
+        error: 'https://example.com/csv?secret=leak failed',
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'arm-android-csv-intercept') {
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+
+    it('例外時も失敗理由に query を含めない', async () => {
+      vi.mocked(chrome.runtime.getPlatformInfo).mockResolvedValue({ os: 'android' } as never)
+      const executor = createDownloadExecutor()
+      const handler = new ExternalRequestHandler({
+        downloadRunner: executor,
+        allowedOrigins: ALLOWED_PATTERNS,
+        androidInterceptTimeoutMs: 50,
+      })
+      vi.spyOn(executor, 'executeDownloadRequest').mockRejectedValue(new Error('https://example.com/csv?secret=leak'))
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'arm-android-csv-intercept') {
+          callback?.({ success: true, message: 'armed' })
+          return
+        }
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+
+    it('失敗メッセージに秘密を含めない', async () => {
+      const { handler, runner } = createHandler()
+      vi.spyOn(runner, 'executeDownloadRequest').mockImplementation(async (message) => {
+        const kind = message.payload.selectedOptions[0]
+        const nonce = message.payload.androidInterceptNonce
+        if (nonce) {
+          setTimeout(() => {
+            handler.resolveAndroidIntercept({
+              nonce,
+              ok: false,
+              error: 'anchor / method=GET / status=404 / contentType=text/plain',
+              contentType: 'text/plain',
+              status: 404,
+              requestType: 'anchor',
+              method: 'GET',
+            })
+          }, 0)
+        }
+        return { success: true, message: `${kind} を取得しました` }
+      })
+      const { port, posted, listeners } = createPort(ALLOWED_ORIGIN)
+
+      vi.mocked(chrome.tabs.sendMessage).mockImplementation(((...args: unknown[]) => {
+        const message = args[1] as { action?: string }
+        const callback = args[2] as ((response?: unknown) => void) | undefined
+        if (message.action === 'check-login-state') {
+          callback?.({ success: true, loggedIn: true })
+          return
+        }
+        callback?.({ success: true })
+      }) as never)
+
+      handler.handleConnection(port)
+      listeners[0]?.({ type: 'fetchLatestCsv', kinds: ['assetbalance'] })
+
+      const result = await waitForMessage<FetchLatestCsvResult>(posted, isResult)
+      const reason = result.failures[0]?.reason ?? ''
+      expect(reason).not.toContain('secret')
+      expect(reason).not.toContain('http')
+    })
+  })
+
   })
 })

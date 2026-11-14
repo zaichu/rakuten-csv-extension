@@ -14,6 +14,7 @@ import type {
   FetchLatestCsvRequest,
   FetchLatestCsvResult,
   FetchLatestCsvTiming,
+  AndroidCsvInterceptResultMessage,
   FetchedCsv,
   LoginStateResponse,
 } from '../types';
@@ -47,6 +48,7 @@ export interface ExternalRequestHandlerConfig {
   readonly downloadCompleteTimeoutMs?: number;
   /** タブの読み込み完了を待つ最大時間(ms) */
   readonly tabLoadTimeoutMs?: number;
+  readonly androidInterceptTimeoutMs?: number;
   /** ダウンロードされたファイルの読み取り */
   readonly fileReader?: DownloadedFileReader;
 }
@@ -137,6 +139,7 @@ export class ExternalRequestHandler {
   private readonly downloadStartTimeoutMs: number;
   private readonly downloadCompleteTimeoutMs: number;
   private readonly tabLoadTimeoutMs: number;
+  private readonly androidInterceptTimeoutMs: number;
   private readonly fileReader: DownloadedFileReader;
 
   /** 取得処理の実行中フラグ（同時に複数の取得が走るとタブの操作が混ざるため） */
@@ -154,6 +157,7 @@ export class ExternalRequestHandler {
     this.downloadStartTimeoutMs = config.downloadStartTimeoutMs ?? DEFAULT_DOWNLOAD_START_TIMEOUT_MS;
     this.downloadCompleteTimeoutMs = config.downloadCompleteTimeoutMs ?? DEFAULT_DOWNLOAD_COMPLETE_TIMEOUT_MS;
     this.tabLoadTimeoutMs = config.tabLoadTimeoutMs ?? DEFAULT_TAB_LOAD_TIMEOUT_MS;
+    this.androidInterceptTimeoutMs = config.androidInterceptTimeoutMs ?? 30_000;
     this.fileReader = config.fileReader ?? createDownloadedFileReader();
   }
 
@@ -302,6 +306,10 @@ export class ExternalRequestHandler {
       stepTimings.push({ stage: `fetch-${kind}:${stage}`, durationMs });
     };
 
+    if (await this.isAndroid()) {
+      return this.fetchKindAndroid(tabId, kind, stepTimings, reportStep);
+    }
+
     const capture = createDownloadCapture(tabId, this.downloadStartTimeoutMs);
     this.pendingCapture = capture;
 
@@ -358,6 +366,165 @@ export class ExternalRequestHandler {
       },
       stepTimings,
     };
+  }
+
+  /**
+   * Android かどうか
+   */
+  private async isAndroid(): Promise<boolean> {
+    try {
+      const info = await chrome.runtime.getPlatformInfo();
+      return info?.os === 'android';
+    } catch {
+      return false;
+    }
+  }
+
+  private async fetchKindAndroid(
+    tabId: number,
+    kind: CsvDownloadType,
+    stepTimings: FetchLatestCsvTiming[],
+    reportStep: StepTimingReporter
+  ): Promise<
+    | { success: true; csv: FetchedCsv; stepTimings: FetchLatestCsvTiming[] }
+    | { success: false; reason: string; code?: string; stepTimings: FetchLatestCsvTiming[] }
+  > {
+    const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const resultPromise = this.waitForAndroidInterceptResult(nonce);
+
+    let stepResult: DownloadResponse;
+    try {
+      stepResult = await this.downloadRunner.executeDownloadRequest(
+        {
+          action: 'download-csv-request',
+          payload: {
+            selectedOptions: [kind],
+            tabId,
+            captureDownloadStart: false,
+            androidInterceptNonce: nonce,
+          },
+        },
+        reportStep
+      );
+    } catch {
+      this.cancelAndroidIntercept(tabId, nonce);
+      return {
+        success: false,
+        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
+        stepTimings,
+      };
+    }
+
+    if (!stepResult.success) {
+      this.cancelAndroidIntercept(tabId, nonce);
+      return {
+        success: false,
+        reason: '横取りなし / method=不明 / status=なし / contentType=不明',
+        stepTimings,
+      };
+    }
+
+    this.startAndroidInterceptTimeout(nonce, this.androidInterceptTimeoutMs);
+
+    const intercepted = await resultPromise;
+    if (!intercepted || !intercepted.success || !intercepted.content) {
+      this.cancelAndroidIntercept(tabId, nonce);
+      const reason =
+        intercepted?.error ??
+        '横取りなし / method=不明 / status=なし / contentType=不明';
+      return { success: false, reason, stepTimings };
+    }
+
+    const content = intercepted.content;
+    if (content.trimStart().startsWith('<')) {
+      return {
+        success: false,
+        reason: `${intercepted.requestType ?? '横取りなし'} / method=${intercepted.method ?? '不明'} / status=${intercepted.status ?? 'なし'} / contentType=${intercepted.contentType ?? '不明'}`,
+        stepTimings,
+      };
+    }
+
+    return {
+      success: true,
+      csv: {
+        kind,
+        content,
+        fetchedAt: new Date().toISOString(),
+      },
+      stepTimings,
+    };
+  }
+
+  private androidInterceptResolvers = new Map<
+    string,
+    { readonly resolver: (result: DownloadResponse) => void; timer?: ReturnType<typeof setTimeout> }
+  >();
+
+  private waitForAndroidInterceptResult(nonce: string): Promise<DownloadResponse> {
+    return new Promise<DownloadResponse>((resolve) => {
+      this.androidInterceptResolvers.set(nonce, {
+        resolver: (result) => {
+          const entry = this.androidInterceptResolvers.get(nonce);
+          if (entry?.timer) {
+            clearTimeout(entry.timer);
+          }
+          this.androidInterceptResolvers.delete(nonce);
+          resolve(result);
+        },
+      });
+    });
+  }
+
+  private startAndroidInterceptTimeout(nonce: string, timeoutMs: number): void {
+    const entry = this.androidInterceptResolvers.get(nonce);
+    if (!entry || entry.timer) {
+      return;
+    }
+    entry.timer = setTimeout(() => {
+      this.androidInterceptResolvers.delete(nonce);
+      entry.resolver({ success: false, error: '横取りなし / method=不明 / status=なし / contentType=不明' });
+    }, timeoutMs);
+  }
+
+  private cancelAndroidIntercept(tabId: number, nonce: string): void {
+    const entry = this.androidInterceptResolvers.get(nonce);
+    if (entry) {
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+      }
+      this.androidInterceptResolvers.delete(nonce);
+    }
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        { action: 'disarm-android-csv-intercept', payload: { nonce } },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  public resolveAndroidIntercept(payload: AndroidCsvInterceptResultMessage['payload']): void {
+    const entry = this.androidInterceptResolvers.get(payload.nonce);
+    if (!entry) {
+      return;
+    }
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+    }
+    this.androidInterceptResolvers.delete(payload.nonce);
+    entry.resolver({
+      success: payload.ok === true && typeof payload.content === 'string',
+      content: payload.content,
+      contentType: payload.contentType,
+      status: payload.status,
+      requestType: payload.requestType,
+      method: payload.method,
+      error: payload.error,
+    });
   }
 
   /**

@@ -548,6 +548,43 @@ describe('rakutenContentScript ステップ実行', () => {
     })
   })
 
+  describe('Android 横取りの arm タイミング', () => {
+    it('download-csv の直前だけ arm し navigate では arm しない', async () => {
+      const armed: string[] = []
+      const armListener = (event: MessageEvent): void => {
+        if (event.data?.type === 'rakuten-csv-intercept:arm') {
+          armed.push('arm')
+          window.postMessage({ type: 'rakuten-csv-intercept:armed', nonce: event.data?.nonce }, '*')
+        }
+      }
+      window.addEventListener('message', armListener)
+
+      const menu = document.createElement('a')
+      menu.id = 'menu'
+      document.body.appendChild(menu)
+      const csv = document.createElement('button')
+      csv.id = 'csv'
+      document.body.appendChild(csv)
+      // make interactable
+      vi.spyOn(csv, 'getBoundingClientRect').mockReturnValue({
+        width: 10, height: 10, top: 0, left: 0, bottom: 10, right: 10, x: 0, y: 0, toJSON: () => ({})
+      } as DOMRect)
+
+      await sendMessage({
+        action: 'execute-csv-download-steps',
+        payload: {
+          downloadSteps: ['navigate-to-page', 'download-csv'],
+          selectors: { menuLink: '#menu', csvButton: '#csv' },
+          androidInterceptNonce: 'nonce-timing',
+        },
+      } as unknown as ChromeMessage)
+
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      window.removeEventListener('message', armListener)
+      expect(armed).toHaveLength(1)
+    })
+  })
+
   describe('ログの衛生', () => {
     it('クリック時のログは要素参照ではなくセレクター名だけを出す', async () => {
       const el = document.createElement('a')
@@ -566,4 +603,51 @@ describe('rakutenContentScript ステップ実行', () => {
       expect(calls.some((args) => args.some((arg) => typeof arg === 'string' && arg.includes('#menu-link')))).toBe(true)
     })
   })
+  describe('Android CSV横取りのデコード', () => {
+    it('Shift_JIS の本文をデコードして転送する', async () => {
+      const sendMessageMock = vi.fn((_message: unknown, callback?: (response: unknown) => void) => {
+        callback?.({ success: true })
+        return Promise.resolve({ success: true })
+      })
+      chrome.runtime.sendMessage = sendMessageMock as never
+
+      // MAIN の ack を返すため、arm signal を受けたら ack を返す
+      const ackListener = (event: MessageEvent): void => {
+        if (event.data?.type === 'rakuten-csv-intercept:arm' && event.data?.nonce === 'n-decode') {
+          window.postMessage({ type: 'rakuten-csv-intercept:armed', nonce: 'n-decode' }, '*')
+        }
+      }
+      window.addEventListener('message', ackListener)
+
+      const res = await sendMessage({
+        action: 'arm-android-csv-intercept',
+        payload: { nonce: 'n-decode' },
+      } as unknown as ChromeMessage)
+      expect(res.success).toBe(true)
+
+      window.removeEventListener('message', ackListener)
+
+      const bytes = new Uint8Array([0x82, 0xa0])
+      window.postMessage(
+        {
+          type: 'rakuten-csv-intercept:result',
+          nonce: 'n-decode',
+          ok: true,
+          buffer: bytes.buffer,
+          contentType: 'text/csv',
+          status: 200,
+        },
+        '*'
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const call = sendMessageMock.mock.calls.find(
+        (entry) => (entry[0] as { action?: string })?.action === 'android-csv-intercept-result'
+      )
+      expect(call).toBeTruthy()
+      expect((call?.[0] as { payload?: { content?: string } })?.payload?.content).toBe('あ')
+    })
+  })
+
 })
